@@ -1,0 +1,49 @@
+{
+  "pretraining": {
+    "pgn_path": "data/lichess_elite_2020-08.pgn",
+    "output_path": "models/pretrained.pt",
+    "chunks_dir": "data/chunks",
+    "epochs": 5,
+    "batch_size": 640,
+    "learning_rate": 0.0001,
+    "validation_split": 0.1,
+    "patience": 5,
+    "min_elo": 2200,
+    "max_games": 296000,
+    "max_positions": null,
+    "skip_first_n_moves": 12,
+    "value_loss_weight": 2.0,
+    "entropy_coefficient": 0.01,
+    "prefetch_workers": 2,
+    "gradient_accumulation_steps": 1
+  },
+  "training": {
+    "checkpoint_path": "checkpoints",
+    "iterations": 100,
+    "games_per_iteration": 100,
+    "num_simulations": 100,
+    "mcts_batch_size": 32,
+    "batch_size": 640,
+    "learning_rate": 0.01,
+    "lr_decay": 0.95,
+    "min_learning_rate": 1e-5,
+    "weight_decay": 1e-4,
+    "epochs_per_iteration": 3,
+    "patience": 10,
+    "buffer_size": 500000,
+    "min_buffer_size": 5000,
+    "recent_weight": 0.8,
+    "arena_interval": 5,
+    "arena_games": 20,
+    "arena_simulations": 100,
+    "max_moves": 200,
+    "temperature_moves": 30,
+    "dirichlet_alpha": 0.3,
+    "dirichlet_epsilon": 0.25
+  },
+  "network": {
+    "num_filters": 192,
+    "num_residual_blocks": 12,
+    "history_length": 3
+  }
+}

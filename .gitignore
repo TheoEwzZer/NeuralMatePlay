@@ -1,0 +1,84 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.conda/
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# Claude
+.claude/settings.local.json
+Claude.md
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# Continuous Claude cache (local only)
+.claude/cache/
+
+# Training data (large files)
+data/*.pgn
+data/*.csv
+data/*.zst
+
+# Chunked data
+data/chunks/
+
+# Models
+models/
+models_save/
+
+# Checkpoints
+checkpoints/
