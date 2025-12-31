@@ -313,7 +313,7 @@ def run_match(
         if network1_path.lower() == "random":
             player1 = RandomPlayer(name="Random")
             name1 = "Random"
-            printf"Player 1: Random")
+            printf("Player 1: Random")
         elif network1_path.lower() == "mcts":
             player1 = PureMCTSPlayer(num_simulations=num_simulations, name="PureMCTS")
             name1 = "PureMCTS"
