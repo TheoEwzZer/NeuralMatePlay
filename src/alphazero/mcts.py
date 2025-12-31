@@ -748,7 +748,7 @@ class MCTS:
         self,
         board: chess.Board,
         top_n: int = 5,
-        max_depth: int = 3,
+        max_depth: int = 10,
     ) -> str:
         """
         Get a string representation of the search tree for verbose output.
