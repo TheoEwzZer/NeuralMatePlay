@@ -101,7 +101,7 @@ class MCTS:
         self.fpu_reduction = fpu_reduction
 
         # Temperature for move selection
-        self.temperature: float = 1.0
+        self.temperature: float = 0.1
 
         # Random number generator
         self._rng = np.random.default_rng(42)
@@ -480,7 +480,7 @@ class MCTS:
             if new_leaves:
                 # Separate cached and uncached positions
                 cached_evals = []  # (index, policy, value)
-                to_evaluate = []   # (index, state, leaf_board)
+                to_evaluate = []  # (index, state, leaf_board)
 
                 for i, (path, leaf_board, leaf_node) in enumerate(new_leaves):
                     cached = self._get_cached_eval(leaf_board)
@@ -743,3 +743,150 @@ class MCTS:
         """
         node = self._get_or_create_node(board)
         return {move: child.visit_count for move, child in node.children.items()}
+
+    def get_search_tree_string(
+        self,
+        board: chess.Board,
+        top_n: int = 5,
+        max_depth: int = 3,
+    ) -> str:
+        """
+        Get a string representation of the search tree for verbose output.
+
+        Args:
+            board: Current position.
+            top_n: Number of top moves to show at each level.
+            max_depth: Maximum depth to display.
+
+        Returns:
+            Formatted string showing the search tree.
+        """
+        lines = []
+        lines.append("=" * 60)
+        lines.append("MCTS Search Tree")
+        lines.append("=" * 60)
+
+        root = self._get_or_create_node(board)
+        total_visits = sum(child.visit_count for child in root.children.values())
+
+        lines.append(f"Total simulations: {total_visits}")
+        lines.append(f"Root value: {root.q_value:+.3f}")
+        lines.append("")
+
+        # Sort children by visit count
+        sorted_children = sorted(
+            root.children.items(),
+            key=lambda x: x[1].visit_count,
+            reverse=True,
+        )
+
+        # Show top moves
+        lines.append(f"Top {min(top_n, len(sorted_children))} moves:")
+        lines.append("-" * 60)
+        lines.append(f"{'Move':<8} {'Visits':>8} {'%':>7} {'Q-value':>9} {'Prior':>7}")
+        lines.append("-" * 60)
+
+        for move, child in sorted_children[:top_n]:
+            pct = (child.visit_count / max(total_visits, 1)) * 100
+            lines.append(
+                f"{board.san(move):<8} {child.visit_count:>8} {pct:>6.1f}% "
+                f"{child.q_value:>+8.3f} {child.prior:>6.1%}"
+            )
+
+        lines.append("")
+
+        # Show principal variation
+        pv = self.get_pv(board, depth=10)
+        if pv:
+            pv_san = []
+            temp_board = board.copy()
+            for move in pv:
+                pv_san.append(temp_board.san(move))
+                temp_board.push(move)
+            lines.append(f"Principal Variation: {' '.join(pv_san)}")
+            lines.append("")
+
+        # Show tree structure for top moves
+        lines.append("Search Tree (depth limited):")
+        lines.append("-" * 60)
+
+        for move, child in sorted_children[: min(3, len(sorted_children))]:
+            self._format_tree_node(
+                lines, board, move, child, depth=0, max_depth=max_depth, top_n=2
+            )
+
+        lines.append("=" * 60)
+        return "\n".join(lines)
+
+    def _format_tree_node(
+        self,
+        lines: list[str],
+        board: chess.Board,
+        move: chess.Move,
+        node: MCTSNode,
+        depth: int,
+        max_depth: int,
+        top_n: int,
+    ) -> None:
+        """
+        Recursively format a tree node for display.
+
+        Args:
+            lines: List to append formatted lines to.
+            board: Board state before this move.
+            move: Move leading to this node.
+            node: The node to format.
+            depth: Current depth in the tree.
+            max_depth: Maximum depth to display.
+            top_n: Number of top children to show.
+        """
+        indent = "  " * depth
+        prefix = "├─" if depth > 0 else ""
+
+        san_move = board.san(move)
+        lines.append(
+            f"{indent}{prefix}{san_move} "
+            f"(N={node.visit_count}, Q={node.q_value:+.3f}, P={node.prior:.1%})"
+        )
+
+        if depth >= max_depth or not node.children:
+            return
+
+        # Apply move to get next board state
+        next_board = board.copy()
+        next_board.push(move)
+
+        # Sort and show top children
+        sorted_children = sorted(
+            node.children.items(),
+            key=lambda x: x[1].visit_count,
+            reverse=True,
+        )
+
+        for child_move, child_node in sorted_children[:top_n]:
+            if child_node.visit_count > 0:
+                self._format_tree_node(
+                    lines,
+                    next_board,
+                    child_move,
+                    child_node,
+                    depth + 1,
+                    max_depth,
+                    top_n,
+                )
+
+    def print_search_tree(
+        self,
+        board: chess.Board,
+        top_n: int = 10,
+        max_depth: int = 10,
+    ) -> None:
+        """
+        Print the search tree to stdout.
+
+        Args:
+            board: Current position.
+            top_n: Number of top moves to show at each level.
+            max_depth: Maximum depth to display.
+        """
+        print(self.get_search_tree_string(board, top_n, max_depth))

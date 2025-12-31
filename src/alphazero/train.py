@@ -197,8 +197,8 @@ Examples:
         network = DualHeadNetwork()
 
     # Sync history_length with network architecture
-    # Formula: num_input_planes = (history_length + 1) * 12 + 6
-    network_history_length = (network.num_input_planes - 6) // 12 - 1
+    # Formula: num_input_planes = (history_length + 1) * 12 + 12 metadata (includes attack maps)
+    network_history_length = (network.num_input_planes - 12) // 12 - 1
     if network_history_length != cfg.history_length:
         print(f"  Adjusting history_length: {cfg.history_length} -> {network_history_length} (from network)")
         cfg.history_length = network_history_length

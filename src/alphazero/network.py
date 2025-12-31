@@ -209,9 +209,31 @@ class ValueHead(nn.Module):
         return x.squeeze(-1)
 
 
+class PhaseHead(nn.Module):
+    """
+    Auxiliary phase prediction head: opening/middlegame/endgame.
+
+    This is an auxiliary task that helps the network learn phase-specific features.
+    The phase prediction is not used during inference, only for training.
+    """
+
+    def __init__(self, in_channels: int):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, 4, 1, bias=False)
+        self.gn = nn.GroupNorm(2, 4)
+        self.fc = nn.Linear(4 * 8 * 8, 3)  # 3 phases: opening, middlegame, endgame
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv(x)
+        x = self.gn(x)
+        x = F.gelu(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)  # logits for 3 classes
+
+
 class DualHeadNetwork(nn.Module):
     """
-    AlphaZero-style dual-head network with SE-ResNet and attention.
+    AlphaZero-style network with SE-ResNet, attention, and auxiliary phase head.
 
     Architecture:
     - Input conv: planes -> filters
@@ -219,16 +241,18 @@ class DualHeadNetwork(nn.Module):
     - 2 SE-ResBlocks with spatial attention
     - Policy head (move probabilities)
     - Value head (position evaluation)
+    - Phase head (auxiliary task: opening/middlegame/endgame)
     """
 
     def __init__(
         self,
-        num_input_planes: int = 54,
+        num_input_planes: int = 60,
         num_filters: int = 192,
         num_residual_blocks: int = 12,
         policy_size: int = MOVE_ENCODING_SIZE,
         se_reduction: int = 8,
         attention_heads: int = 4,
+        use_phase_head: bool = True,
     ):
         super().__init__()
 
@@ -238,6 +262,7 @@ class DualHeadNetwork(nn.Module):
         self._policy_size = policy_size
         self._se_reduction = se_reduction
         self._attention_heads = attention_heads
+        self._use_phase_head = use_phase_head
 
         # Input convolution
         self.input_conv = nn.Conv2d(
@@ -263,6 +288,12 @@ class DualHeadNetwork(nn.Module):
         # Output heads
         self.policy_head = PolicyHead(num_filters, policy_size)
         self.value_head = ValueHead(num_filters)
+
+        # Auxiliary phase head (for multi-task learning during training)
+        if use_phase_head:
+            self.phase_head = PhaseHead(num_filters)
+        else:
+            self.phase_head = None
 
         # Move to device
         self.to(get_device())
@@ -291,9 +322,12 @@ class DualHeadNetwork(nn.Module):
             "policy_size": self._policy_size,
             "se_reduction": self._se_reduction,
             "attention_heads": self._attention_heads,
+            "use_phase_head": self._use_phase_head,
         }
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass.
 
@@ -301,9 +335,10 @@ class DualHeadNetwork(nn.Module):
             x: Input tensor of shape (batch, planes, 8, 8).
 
         Returns:
-            Tuple of (policy_logits, values):
+            Tuple of (policy_logits, values, phase_logits):
             - policy_logits: (batch, policy_size)
             - values: (batch,)
+            - phase_logits: (batch, 3) or None if no phase head
         """
         # Input processing
         x = self.input_conv(x)
@@ -318,7 +353,13 @@ class DualHeadNetwork(nn.Module):
         policy = self.policy_head(x)
         value = self.value_head(x)
 
-        return policy, value
+        # Auxiliary phase head (only during training)
+        if self.phase_head is not None:
+            phase = self.phase_head(x)
+        else:
+            phase = None
+
+        return policy, value, phase
 
     def predict_single(self, state: np.ndarray) -> tuple[np.ndarray, float]:
         """
@@ -333,12 +374,14 @@ class DualHeadNetwork(nn.Module):
             - value: float in [-1, +1]
         """
         self.eval()
-        with torch.no_grad():
-            # Add batch dimension
-            x = torch.from_numpy(state).float().unsqueeze(0)
-            x = x.to(get_device())
+        with torch.inference_mode():
+            # Add batch dimension, use non_blocking for async transfer
+            x = torch.from_numpy(state).unsqueeze(0)
+            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
 
-            policy_logits, value = self(x)
+            # FP16 inference for speed
+            with torch.amp.autocast(device_type="cuda"):
+                policy_logits, value, _ = self(x)
 
             # Clamp logits for numerical stability and apply softmax
             policy_logits = torch.clamp(policy_logits, min=-50, max=50)
@@ -359,11 +402,14 @@ class DualHeadNetwork(nn.Module):
             - values: numpy array of shape (batch,)
         """
         self.eval()
-        with torch.no_grad():
-            x = torch.from_numpy(states).float()
-            x = x.to(get_device())
+        with torch.inference_mode():
+            # Use non_blocking for async transfer, FP16 for speed
+            x = torch.from_numpy(states)
+            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
 
-            policy_logits, values = self(x)
+            # FP16 inference for speed
+            with torch.amp.autocast(device_type="cuda"):
+                policy_logits, values, _ = self(x)
 
             # Clamp logits for numerical stability and apply softmax
             policy_logits = torch.clamp(policy_logits, min=-50, max=50)
@@ -431,11 +477,20 @@ class DualHeadNetwork(nn.Module):
                 "num_filters": num_filters,
                 "num_residual_blocks": 12,
                 "policy_size": MOVE_ENCODING_SIZE,
+                "use_phase_head": False,  # Legacy models don't have phase head
             }
+
+        # Handle backward compatibility for use_phase_head
+        if "use_phase_head" not in config:
+            # Check if state_dict has phase_head weights
+            has_phase_head = any(k.startswith("phase_head.") for k in state_dict.keys())
+            config["use_phase_head"] = has_phase_head
 
         # Create network with config
         network = cls(**config)
-        network.load_state_dict(state_dict)
+
+        # Load state dict with strict=False to handle missing phase_head in old models
+        network.load_state_dict(state_dict, strict=False)
         network.to(device)
         network.eval()
 

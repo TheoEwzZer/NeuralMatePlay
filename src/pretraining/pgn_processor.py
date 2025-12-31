@@ -13,6 +13,11 @@ from io import StringIO
 import chess
 import chess.pgn
 
+from src.chess_encoding.board_utils import get_game_phase
+
+# Phase string to int mapping
+PHASE_TO_INT = {"opening": 0, "middlegame": 1, "endgame": 2}
+
 
 class PGNProcessor:
     """
@@ -75,13 +80,14 @@ class PGNProcessor:
 
     def process_all(
         self,
-    ) -> Generator[Tuple[chess.Board, chess.Move, float], None, None]:
+    ) -> Generator[Tuple[chess.Board, chess.Move, float, int], None, None]:
         """
         Process entire PGN file.
 
         Yields:
-            Tuple of (board, move, outcome) for each position.
+            Tuple of (board, move, outcome, phase) for each position.
             outcome: 1.0 for white win, -1.0 for black win, 0.0 for draw.
+            phase: 0=opening, 1=middlegame, 2=endgame.
         """
         with open(self.pgn_path, "r", encoding="utf-8", errors="ignore") as f:
             while True:
@@ -122,8 +128,11 @@ class PGNProcessor:
                         board.push(move)
                         continue
 
-                    # Yield position
-                    yield board.copy(), move, outcome
+                    # Get phase (0=opening, 1=middlegame, 2=endgame)
+                    phase = PHASE_TO_INT[get_game_phase(board)]
+
+                    # Yield position with phase
+                    yield board.copy(), move, outcome, phase
                     self._positions_extracted += 1
 
                     board.push(move)
@@ -131,7 +140,7 @@ class PGNProcessor:
     def process_chunk(
         self,
         start_game: int = 0,
-    ) -> Generator[Tuple[chess.Board, chess.Move, float], None, None]:
+    ) -> Generator[Tuple[chess.Board, chess.Move, float, int], None, None]:
         """
         Process a chunk of games.
 
@@ -139,7 +148,8 @@ class PGNProcessor:
             start_game: Game index to start from.
 
         Yields:
-            Tuple of (board, move, outcome) for each position.
+            Tuple of (board, move, outcome, phase) for each position.
+            phase: 0=opening, 1=middlegame, 2=endgame.
         """
         games_in_chunk = 0
         current_game = 0
@@ -180,7 +190,10 @@ class PGNProcessor:
                         board.push(move)
                         continue
 
-                    yield board.copy(), move, outcome
+                    # Get phase (0=opening, 1=middlegame, 2=endgame)
+                    phase = PHASE_TO_INT[get_game_phase(board)]
+
+                    yield board.copy(), move, outcome, phase
                     self._positions_extracted += 1
 
                     board.push(move)

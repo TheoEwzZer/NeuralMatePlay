@@ -45,6 +45,7 @@ class ChessGameApp:
 
     Features:
     - Human vs AI gameplay
+    - Human vs Human gameplay
     - AI vs AI spectating
     - Training panel for self-play
     - Game controls (new game, undo, flip board)
@@ -60,6 +61,7 @@ class ChessGameApp:
         num_simulations: int = 200,
         mcts_batch_size: int = DEFAULT_MCTS_BATCH_SIZE,
         history_length: int = DEFAULT_HISTORY_LENGTH,
+        verbose: bool = False,
     ):
         """
         Initialize the chess game application.
@@ -69,6 +71,7 @@ class ChessGameApp:
             num_simulations: MCTS simulations for AI moves
             mcts_batch_size: Batch size for MCTS GPU inference (default: 8)
             history_length: Number of past positions for encoding (default: 3)
+            verbose: If True, print MCTS search tree after each AI move
         """
         self.root = tk.Tk()
         self.root.title("NeuralMate Chess - AlphaZero")
@@ -81,13 +84,16 @@ class ChessGameApp:
         # Network and AI
         self.network = None
         self.mcts = None
+        self.pure_mcts_player = None  # For pure MCTS mode (no neural network)
         self.network_path = network_path
         self.num_simulations = num_simulations
         self.mcts_batch_size = mcts_batch_size
         self.history_length = history_length
+        self.verbose = verbose
+        self.use_pure_mcts = network_path and network_path.lower() == "mcts"
 
         # Game state
-        self.game_mode = "human_vs_ai"  # human_vs_ai, ai_vs_ai
+        self.game_mode = "human_vs_ai"  # human_vs_ai, human_vs_human, ai_vs_ai
         self.human_color = chess.WHITE
         self.ai_thinking = False
         self.ai_thread: threading.Thread | None = None
@@ -398,6 +404,21 @@ class ChessGameApp:
         )
         mode_ai.pack(anchor="w", pady=2)
 
+        mode_human_vs_human = tk.Radiobutton(
+            mode_content,
+            text="Human vs Human",
+            variable=self.mode_var,
+            value="human_vs_human",
+            command=self._on_mode_change,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            selectcolor=COLORS["bg_tertiary"],
+            activebackground=COLORS["bg_secondary"],
+            activeforeground=COLORS["text_primary"],
+            font=FONTS["body"],
+        )
+        mode_human_vs_human.pack(anchor="w", pady=2)
+
         # Color selection (for human vs AI)
         self.color_frame = tk.Frame(mode_content, bg=COLORS["bg_secondary"])
         self.color_frame.pack(fill="x", pady=(10, 0))
@@ -532,13 +553,35 @@ class ChessGameApp:
         self.network_status.pack(side="left")
 
     def _load_network(self) -> None:
-        """Load the neural network."""
+        """Load the neural network or pure MCTS player."""
         def get_history_length(network):
             """Detect history_length from network's input planes."""
             planes = network.num_input_planes
             if planes == 18:
                 return 0
             return (planes - 6) // 12 - 1  # 54 planes = 3 history
+
+        # Check for pure MCTS mode
+        if self.use_pure_mcts:
+            try:
+                from alphazero.arena import PureMCTSPlayer
+
+                self.pure_mcts_player = PureMCTSPlayer(
+                    num_simulations=self.num_simulations,
+                    verbose=self.verbose,
+                    name="PureMCTS",
+                )
+                self.network_status.configure(
+                    text=f"Pure MCTS ({self.num_simulations} simulations, no neural network)",
+                    fg=COLORS["accent"],
+                )
+                return
+            except Exception as e:
+                self.network_status.configure(
+                    text=f"Error creating pure MCTS: {e}",
+                    fg=COLORS["error"],
+                )
+                return
 
         if self.network_path and os.path.exists(self.network_path):
             try:
@@ -603,6 +646,9 @@ class ChessGameApp:
         if self.game_mode == "ai_vs_ai":
             self.color_frame.pack_forget()
             self.board_widget.set_interactive(False)
+        elif self.game_mode == "human_vs_human":
+            self.color_frame.pack_forget()
+            self.board_widget.set_interactive(True)
         else:
             self.color_frame.pack(fill="x", pady=(10, 0))
             self.board_widget.set_interactive(True)
@@ -664,6 +710,9 @@ class ChessGameApp:
             # If AI plays white, make first move
             if self.human_color == chess.BLACK:
                 self._trigger_ai_move()
+        elif self.game_mode == "human_vs_human":
+            # Both players are human, no color restriction
+            self.board_widget.set_player_color(None)
         else:
             self.board_widget.set_player_color(None)
             self._trigger_ai_move()
@@ -689,6 +738,7 @@ class ChessGameApp:
             self.board_widget.undo_move()
             self.board_widget.undo_move()
         else:
+            # human_vs_human and ai_vs_ai: undo single move
             self.board_widget.undo_move()
 
         self._update_game_info()
@@ -698,7 +748,7 @@ class ChessGameApp:
         Go back to before your last move (for analysis/exploration).
 
         In Human vs AI: undoes your move + AI's response so you can try different moves.
-        In AI vs AI: undoes one move.
+        In AI vs AI / Human vs Human: undoes one move.
         """
         if self.ai_thinking:
             return
@@ -737,7 +787,7 @@ class ChessGameApp:
                         board.peek() if board.move_stack else None
                     )
         else:
-            # AI vs AI - just undo one move
+            # AI vs AI / Human vs Human - just undo one move
             last_move = board.peek()
             self.undone_moves.append((last_move, None))
             self.board_widget.undo_move()
@@ -814,10 +864,11 @@ class ChessGameApp:
             self._show_game_over()
         elif self.game_mode == "human_vs_ai":
             self._trigger_ai_move()
+        # In human_vs_human mode, just wait for the next player's move
 
     def _trigger_ai_move(self) -> None:
         """Start AI move calculation in background thread."""
-        if self.mcts is None:
+        if self.mcts is None and self.pure_mcts_player is None:
             return
 
         self.ai_thinking = True
@@ -838,7 +889,17 @@ class ChessGameApp:
             if board.is_game_over():
                 return
 
-            move = self.mcts.get_best_move(board, add_noise=False)
+            if self.use_pure_mcts and self.pure_mcts_player is not None:
+                # Pure MCTS mode (no neural network)
+                # Verbose output is handled inside select_move if verbose=True
+                move = self.pure_mcts_player.select_move(board)
+            else:
+                # Neural network MCTS mode
+                move = self.mcts.get_best_move(board, add_noise=False)
+
+                # Print search tree if verbose mode is enabled
+                if self.verbose and not self.ai_cancelled:
+                    self.mcts.print_search_tree(board, top_n=5, max_depth=3)
 
             if not self.ai_cancelled and move:
                 self.update_queue.put(("ai_move", move))
@@ -981,6 +1042,9 @@ class ChessGameApp:
             self.status_label.configure(text="AI thinking...", fg=COLORS["accent"])
         elif self.game_mode == "human_vs_ai" and board.turn == self.human_color:
             self.status_label.configure(text="Your turn", fg=COLORS["success"])
+        elif self.game_mode == "human_vs_human":
+            turn_text = "White" if board.turn == chess.WHITE else "Black"
+            self.status_label.configure(text=f"{turn_text} to play", fg=COLORS["success"])
         else:
             self.status_label.configure(text="Playing", fg=COLORS["text_secondary"])
 
@@ -1133,12 +1197,16 @@ def main():
     parser.add_argument(
         "--simulations", "-s", type=int, default=200, help="MCTS simulations per move"
     )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Print MCTS search tree after each AI move"
+    )
 
     args = parser.parse_args()
 
     app = ChessGameApp(
         network_path=args.network,
         num_simulations=args.simulations,
+        verbose=args.verbose,
     )
     app.run()
 

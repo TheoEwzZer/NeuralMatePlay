@@ -43,6 +43,9 @@ Examples:
     # Increase AI strength (more thinking time)
     neural_mate_play --network alphazero.pt --simulations 800
 
+    # Verbose mode: see MCTS search tree after each AI move
+    neural_mate_play --network alphazero.pt --verbose
+
     # Force CPU mode
     neural_mate_play --network alphazero.pt --device cpu
 
@@ -138,12 +141,20 @@ def resolve_resume(resume_name: str, checkpoint_dir: str = "checkpoints") -> str
     return None
 
 
-def run_gui(network_path: str = None, num_simulations: int = 200) -> int:
+def run_gui(
+    network_path: str = None,
+    num_simulations: int = 200,
+    verbose: bool = False,
+) -> int:
     """Launch the graphical user interface for playing."""
     try:
         from ui.app import ChessGameApp
 
-        app = ChessGameApp(network_path=network_path, num_simulations=num_simulations)
+        app = ChessGameApp(
+            network_path=network_path,
+            num_simulations=num_simulations,
+            verbose=verbose,
+        )
         app.run()
         return 0
 
@@ -302,7 +313,7 @@ def run_match(
         if network1_path.lower() == "random":
             player1 = RandomPlayer(name="Random")
             name1 = "Random"
-            print(f"Player 1: Random")
+            printf"Player 1: Random")
         elif network1_path.lower() == "mcts":
             player1 = PureMCTSPlayer(num_simulations=num_simulations, name="PureMCTS")
             name1 = "PureMCTS"
@@ -770,6 +781,13 @@ Examples:
         help="Resume training from checkpoint ('latest', 'pretrained', or 'iteration_N')",
     )
 
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print MCTS search tree after each AI move (for debugging/analysis)",
+    )
+
     args = parser.parse_args()
 
     # Set device
@@ -803,7 +821,7 @@ Examples:
         if args.cli:
             return run_cli(network_path, args.simulations)
         else:
-            return run_gui(network_path, args.simulations)
+            return run_gui(network_path, args.simulations, verbose=args.verbose)
 
 
 if __name__ == "__main__":

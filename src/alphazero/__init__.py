@@ -21,8 +21,6 @@ from .move_encoding import (
     encode_move_from_perspective,
     decode_move_from_perspective,
     flip_policy,
-    get_legal_move_mask,
-    policy_to_moves,
     MOVE_ENCODING_SIZE,
 )
 from .spatial_encoding import (
@@ -64,8 +62,6 @@ __all__ = [
     "encode_move_from_perspective",
     "decode_move_from_perspective",
     "flip_policy",
-    "get_legal_move_mask",
-    "policy_to_moves",
     "MOVE_ENCODING_SIZE",
     # Spatial encoding
     "encode_board_spatial",

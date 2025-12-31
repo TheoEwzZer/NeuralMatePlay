@@ -61,7 +61,7 @@ def encode_board_with_history(
     from_perspective: bool = True,
 ) -> np.ndarray:
     """
-    Encode board positions with history to 54 planes.
+    Encode board positions with history to 60 planes.
 
     Args:
         boards: List of boards [current, T-1, T-2, ...]. Length should be
@@ -70,11 +70,11 @@ def encode_board_with_history(
                           (flip board for black).
 
     Returns:
-        numpy array of shape (54, 8, 8).
+        numpy array of shape (60, 8, 8).
     """
     history_length = DEFAULT_HISTORY_LENGTH
     num_position_planes = (history_length + 1) * PLANES_PER_POSITION  # 48
-    total_planes = num_position_planes + 6  # 54 (simplified metadata)
+    total_planes = num_position_planes + 12  # 60 (metadata + attack maps)
 
     planes = np.zeros((total_planes, 8, 8), dtype=np.float32)
 
@@ -189,6 +189,54 @@ def _encode_metadata_simple(
         planes[offset + 5, 7 - rank_idx, file_idx] = 1.0
 
 
+def _encode_attack_maps(
+    board: chess.Board,
+    planes: np.ndarray,
+    offset: int,
+    flip: bool = False,
+) -> None:
+    """
+    Encode attack maps for both players.
+
+    Planes (from offset):
+        0: My attacks (squares attacked by player to move)
+        1: Opponent attacks (squares attacked by opponent)
+
+    Args:
+        board: Chess board.
+        planes: Target array.
+        offset: Starting plane index.
+        flip: Whether perspective is flipped.
+    """
+    # Determine colors from perspective
+    if flip:
+        my_color = chess.BLACK
+        opp_color = chess.WHITE
+    else:
+        my_color = chess.WHITE if board.turn == chess.WHITE else chess.BLACK
+        opp_color = chess.BLACK if board.turn == chess.WHITE else chess.WHITE
+
+    # My attacks (plane 0)
+    for square in chess.SQUARES:
+        attackers = board.attackers(my_color, square)
+        if attackers:
+            file_idx = chess.square_file(square)
+            rank_idx = chess.square_rank(square)
+            if flip:
+                rank_idx = 7 - rank_idx
+            planes[offset, 7 - rank_idx, file_idx] = 1.0
+
+    # Opponent attacks (plane 1)
+    for square in chess.SQUARES:
+        attackers = board.attackers(opp_color, square)
+        if attackers:
+            file_idx = chess.square_file(square)
+            rank_idx = chess.square_rank(square)
+            if flip:
+                rank_idx = 7 - rank_idx
+            planes[offset + 1, 7 - rank_idx, file_idx] = 1.0
+
+
 def _encode_metadata_54(
     board: chess.Board,
     planes: np.ndarray,
@@ -196,12 +244,23 @@ def _encode_metadata_54(
     flip: bool = False,
 ) -> None:
     """
-    Encode metadata for 54-plane encoding (6 metadata planes).
+    Encode metadata for 60-plane encoding.
+
+    Planes (from offset):
+        0: Side to move (always 1 from perspective)
+        1: Move count (normalized /200)
+        2-5: Castling rights (my kingside, my queenside, opp kingside, opp queenside)
+        6: En passant square
+        7: Halfmove clock (50-move rule, normalized /100)
+        8: Repetition count (0.5 if 1x, 1.0 if 2x+)
+        9: Is in check
+        10: My attacks (squares attacked by player to move)
+        11: Opponent attacks (squares attacked by opponent)
 
     Args:
         board: Chess board.
         planes: Target array.
-        offset: Starting plane index (48 for 54-plane encoding).
+        offset: Starting plane index (48 for 60-plane encoding with history_length=3).
         flip: Whether perspective is flipped.
     """
     # Plane 0: Side to move (always 1 from current player's perspective)
@@ -211,7 +270,7 @@ def _encode_metadata_54(
     move_count = min(board.fullmove_number, 200) / 200.0
     planes[offset + 1] = move_count
 
-    # Castling rights (from perspective)
+    # Planes 2-5: Castling rights (from perspective)
     if flip:
         # From black's perspective: black's rights are "my" rights
         if board.has_kingside_castling_rights(chess.BLACK):
@@ -232,6 +291,35 @@ def _encode_metadata_54(
             planes[offset + 4] = 1.0
         if board.has_queenside_castling_rights(chess.BLACK):
             planes[offset + 5] = 1.0
+
+    # Plane 6: En passant square
+    if board.ep_square is not None:
+        ep_file = chess.square_file(board.ep_square)
+        ep_rank = chess.square_rank(board.ep_square)
+        if flip:
+            ep_rank = 7 - ep_rank
+        planes[offset + 6, 7 - ep_rank, ep_file] = 1.0
+
+    # Plane 7: Halfmove clock (50-move rule, normalized)
+    halfmove_clock = min(board.halfmove_clock, 100) / 100.0
+    planes[offset + 7] = halfmove_clock
+
+    # Plane 8: Repetition count
+    # Note: is_repetition() requires move stack, may return False for standalone boards
+    try:
+        if board.is_repetition(2):
+            planes[offset + 8] = 1.0  # 2+ repetitions (draw imminent)
+        elif board.is_repetition(1):
+            planes[offset + 8] = 0.5  # 1 repetition
+    except Exception:
+        pass  # No move stack available, leave as 0
+
+    # Plane 9: Is in check
+    if board.is_check():
+        planes[offset + 9] = 1.0
+
+    # Planes 10-11: Attack maps
+    _encode_attack_maps(board, planes, offset + 10, flip)
 
 
 def encode_single_position(
@@ -264,8 +352,8 @@ def get_num_planes(history_length: int = DEFAULT_HISTORY_LENGTH) -> int:
     if history_length == 0:
         return 18  # Simple encoding
     else:
-        # (history_length + 1) positions × 12 planes + 6 metadata
-        return (history_length + 1) * PLANES_PER_POSITION + 6
+        # (history_length + 1) positions × 12 planes + 12 metadata (includes attack maps)
+        return (history_length + 1) * PLANES_PER_POSITION + 12
 
 
 def history_length_from_planes(num_planes: int) -> int:
@@ -276,15 +364,15 @@ def history_length_from_planes(num_planes: int) -> int:
         num_planes: Number of input planes.
 
     Returns:
-        History length (0 for 18 planes, 3 for 54 planes, etc.).
+        History length (0 for 18 planes, 3 for 60 planes, etc.).
     """
     if num_planes == 18:
         return 0
     else:
-        # num_planes = (history_length + 1) * 12 + 6
-        # num_planes - 6 = (history_length + 1) * 12
-        # (num_planes - 6) / 12 = history_length + 1
-        return (num_planes - 6) // 12 - 1
+        # num_planes = (history_length + 1) * 12 + 12
+        # num_planes - 12 = (history_length + 1) * 12
+        # (num_planes - 12) / 12 = history_length + 1
+        return (num_planes - 12) // 12 - 1
 
 
 class PositionHistory:

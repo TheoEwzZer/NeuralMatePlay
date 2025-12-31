@@ -17,11 +17,12 @@ class NetworkConfig:
     num_filters: int = 192
     num_residual_blocks: int = 12
     history_length: int = 3
-    num_input_planes: int = 54  # Computed from history_length
+    num_input_planes: int = 60  # Computed from history_length
 
     def __post_init__(self):
         # Compute input planes from history length
-        self.num_input_planes = (self.history_length + 1) * 12 + 6
+        # (history + 1) positions × 12 planes + 12 metadata planes (includes attack maps)
+        self.num_input_planes = (self.history_length + 1) * 12 + 12
 
 
 @dataclass
@@ -31,6 +32,7 @@ class PretrainingConfig:
     pgn_path: str = "data/lichess_elite_2020-08.pgn"
     output_path: str = "models/pretrained.pt"
     chunks_dir: str = "data/chunks"  # Directory for chunk files
+    chunk_size: int = 20000  # Number of positions per chunk file
     epochs: int = 5
     batch_size: int = 256
     learning_rate: float = 0.001

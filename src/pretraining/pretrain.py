@@ -96,6 +96,7 @@ def pretrain(
     print(f"  PGN: {cfg.pgn_path}")
     print(f"  Output: {cfg.output_path}")
     print(f"  Chunks: {cfg.chunks_dir}")
+    print(f"  Chunk size: {cfg.chunk_size}")
     print(f"  Epochs: {cfg.epochs}")
     print(f"  Batch size: {cfg.batch_size}")
     print(f"  Learning rate: {cfg.learning_rate}")
@@ -135,12 +136,12 @@ def pretrain(
         if skip_games > 0:
             print(f"Skipping first {skip_games} games (already processed)...")
 
-        chunk_manager = ChunkManager(cfg.chunks_dir, verbose=True, resume=resume_mode)
+        chunk_manager = ChunkManager(cfg.chunks_dir, chunk_size=cfg.chunk_size, verbose=True, resume=resume_mode)
         position_count = 0
         games_skipped = 0
 
         last_skip_print = 0
-        for board, move, outcome in processor.process_all():
+        for board, move, outcome, phase in processor.process_all():
             if cfg.max_positions and position_count >= cfg.max_positions:
                 break
 
@@ -174,7 +175,7 @@ def pretrain(
                 continue
 
             value = outcome if board.turn else -outcome
-            chunk_manager.add_example(state, move_idx, value)
+            chunk_manager.add_example(state, move_idx, value, phase)
             position_count += 1
 
             if position_count % 50000 == 0:
@@ -390,7 +391,7 @@ def pretrain(
 
             if use_amp:
                 with autocast(device_type='cuda'):
-                    pred_policies, pred_values = network(states)
+                    pred_policies, pred_values, _ = network(states)
                     policy_loss = nn.functional.cross_entropy(
                         pred_policies, policies, label_smoothing=0.2
                     )
@@ -407,7 +408,7 @@ def pretrain(
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                pred_policies, pred_values = network(states)
+                pred_policies, pred_values, _ = network(states)
                 policy_loss = nn.functional.cross_entropy(
                     pred_policies, policies, label_smoothing=0.2
                 )
@@ -435,7 +436,7 @@ def pretrain(
 
         total_val_batches = len(val_loader)
         last_pct = -1
-        with torch.no_grad():
+        with torch.inference_mode():
             for batch_idx, (states, policies, values) in enumerate(val_loader):
                 # Update progress only when percentage changes
                 pct = (batch_idx + 1) * 100 // total_val_batches
@@ -448,7 +449,7 @@ def pretrain(
                 policies = policies.to(device)
                 values = values.to(device)
 
-                pred_policies, pred_values = network(states)
+                pred_policies, pred_values, _ = network(states)
                 policy_loss = nn.functional.cross_entropy(
                     pred_policies, policies, label_smoothing=0.2
                 )

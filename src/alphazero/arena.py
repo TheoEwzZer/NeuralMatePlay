@@ -170,6 +170,7 @@ class PureMCTSPlayer(Player):
         max_rollout_depth: int = 50,
         c_puct: float = 1.4,
         name: str = "PureMCTS",
+        verbose: bool = False,
     ):
         """
         Initialize pure MCTS player.
@@ -179,11 +180,18 @@ class PureMCTSPlayer(Player):
             max_rollout_depth: Maximum moves in random rollout.
             c_puct: Exploration constant for UCB.
             name: Display name.
+            verbose: If True, print search tree after each move.
         """
         self._name = name
         self._num_simulations = num_simulations
         self._max_rollout_depth = max_rollout_depth
         self._c_puct = c_puct
+        self._verbose = verbose
+
+        # Store last search results for verbose output
+        self._last_visit_counts: Dict[chess.Move, int] = {}
+        self._last_total_values: Dict[chess.Move, float] = {}
+        self._last_board: Optional[chess.Board] = None
 
     @property
     def name(self) -> str:
@@ -233,8 +241,79 @@ class PureMCTSPlayer(Player):
             visit_counts[best_move] += 1
             total_values[best_move] += value
 
-        # Select move with most visits
-        return max(legal_moves, key=lambda m: visit_counts[m])
+        # Store for verbose output
+        self._last_visit_counts = visit_counts
+        self._last_total_values = total_values
+        self._last_board = board.copy()
+
+        # Print search tree if verbose
+        if self._verbose:
+            self.print_search_tree(board)
+
+        # Select move with most visits (use Q-value as tiebreaker)
+        def move_score(m):
+            visits = visit_counts[m]
+            q_value = total_values[m] / max(visits, 1)
+            return (visits, q_value)  # Tuple: visits first, then Q-value
+
+        return max(legal_moves, key=move_score)
+
+    def print_search_tree(self, board: chess.Board, top_n: int = 5) -> None:
+        """Print the search results."""
+        print(self.get_search_tree_string(board, top_n))
+
+    def get_search_tree_string(self, board: chess.Board, top_n: int = 5) -> str:
+        """Get a string representation of the search results."""
+        lines = []
+        lines.append("=" * 60)
+        lines.append("Pure MCTS Search (no neural network)")
+        lines.append("=" * 60)
+
+        visit_counts = self._last_visit_counts
+        total_values = self._last_total_values
+
+        if not visit_counts:
+            lines.append("No search data available.")
+            lines.append("=" * 60)
+            return "\n".join(lines)
+
+        total_visits = sum(visit_counts.values())
+        lines.append(f"Total simulations: {total_visits}")
+        lines.append(f"Rollout depth: {self._max_rollout_depth}")
+        lines.append("")
+
+        # Sort by visit count
+        sorted_moves = sorted(
+            visit_counts.keys(),
+            key=lambda m: visit_counts[m],
+            reverse=True,
+        )
+
+        # Show top moves
+        lines.append(f"Top {min(top_n, len(sorted_moves))} moves:")
+        lines.append("-" * 60)
+        lines.append(f"{'Move':<8} {'Visits':>8} {'%':>7} {'Q-value':>9} {'Eval':>8}")
+        lines.append("-" * 60)
+
+        for move in sorted_moves[:top_n]:
+            visits = visit_counts[move]
+            pct = (visits / max(total_visits, 1)) * 100
+            q_value = total_values[move] / max(visits, 1)
+
+            # Convert Q-value to a more readable eval
+            # Q is in [-1, 1], positive = good for current player
+            eval_str = f"{q_value:+.3f}"
+
+            lines.append(
+                f"{board.san(move):<8} {visits:>8} {pct:>6.1f}% "
+                f"{q_value:>+8.3f} {eval_str:>8}"
+            )
+
+        lines.append("")
+        lines.append("Note: Pure MCTS uses random rollouts (no neural network)")
+        lines.append("      Q-value is based on random game simulations")
+        lines.append("=" * 60)
+        return "\n".join(lines)
 
     def _rollout(self, board: chess.Board) -> float:
         """

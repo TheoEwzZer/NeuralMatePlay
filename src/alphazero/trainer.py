@@ -415,7 +415,7 @@ class AlphaZeroTrainer:
 
                 if self._use_amp:
                     with autocast(device_type='cuda'):
-                        pred_policies, pred_values = self.network(states_t)
+                        pred_policies, pred_values, _ = self.network(states_t)
                         policy_loss = self._policy_loss(pred_policies, policies_t)
                         value_loss = self._value_loss(pred_values, values_t)
                         loss = policy_loss + value_loss
@@ -424,7 +424,7 @@ class AlphaZeroTrainer:
                     self._scaler.step(self._optimizer)
                     self._scaler.update()
                 else:
-                    pred_policies, pred_values = self.network(states_t)
+                    pred_policies, pred_values, _ = self.network(states_t)
                     policy_loss = self._policy_loss(pred_policies, policies_t)
                     value_loss = self._value_loss(pred_values, values_t)
                     loss = policy_loss + value_loss

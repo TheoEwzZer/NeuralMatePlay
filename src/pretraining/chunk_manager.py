@@ -56,6 +56,7 @@ class ChunkManager:
         self._state_buffer: list[np.ndarray] = []
         self._policy_buffer: list[int] = []  # Store as indices
         self._value_buffer: list[float] = []
+        self._phase_buffer: list[int] = []  # 0=opening, 1=middlegame, 2=endgame
 
         self._chunk_count = 0
         self._total_examples = 0
@@ -82,6 +83,7 @@ class ChunkManager:
         state: np.ndarray,
         policy_idx: int,
         value: float,
+        phase: int = 1,
     ) -> None:
         """
         Add a single training example.
@@ -90,10 +92,12 @@ class ChunkManager:
             state: Board state encoding (C, H, W).
             policy_idx: Index of the move in policy vector.
             value: Game outcome from perspective of current player.
+            phase: Game phase (0=opening, 1=middlegame, 2=endgame).
         """
         self._state_buffer.append(state)
         self._policy_buffer.append(policy_idx)
         self._value_buffer.append(value)
+        self._phase_buffer.append(phase)
 
         # Flush when buffer is full
         if len(self._state_buffer) >= self.chunk_size:
@@ -109,6 +113,7 @@ class ChunkManager:
         states = np.array(self._state_buffer, dtype=np.float32)
         policy_indices = np.array(self._policy_buffer, dtype=np.uint16)
         values = np.array(self._value_buffer, dtype=np.float32)
+        phases = np.array(self._phase_buffer, dtype=np.uint8)
 
         # Validate data before writing to prevent corrupted chunks
         if np.isnan(states).any() or np.isinf(states).any():
@@ -117,6 +122,7 @@ class ChunkManager:
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
+            self._phase_buffer.clear()
             return
 
         if np.isnan(values).any() or np.isinf(values).any():
@@ -125,6 +131,7 @@ class ChunkManager:
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
+            self._phase_buffer.clear()
             return
 
         chunk_path = self.get_chunk_path(self._chunk_count)
@@ -135,6 +142,8 @@ class ChunkManager:
             f.create_dataset("policy_indices", data=policy_indices)
             # Values - small, no compression needed
             f.create_dataset("values", data=values)
+            # Phases - small, no compression needed (0=opening, 1=middlegame, 2=endgame)
+            f.create_dataset("phases", data=phases)
 
         n_examples = len(self._state_buffer)
         self._total_examples += n_examples
@@ -146,6 +155,7 @@ class ChunkManager:
         self._state_buffer.clear()
         self._policy_buffer.clear()
         self._value_buffer.clear()
+        self._phase_buffer.clear()
         self._chunk_count += 1
 
     def set_games_processed(self, count: int) -> None:
@@ -233,6 +243,12 @@ class ChunkManager:
                 "policy_indices": f["policy_indices"][:],
                 "values": f["values"][:],
             }
+            # Backward compatibility: old chunks may not have phases
+            if "phases" in f:
+                data["phases"] = f["phases"][:]
+            else:
+                # Default to middlegame (1) for old chunks
+                data["phases"] = np.ones(len(data["states"]), dtype=np.uint8)
 
         # Validate data for NaN/Inf values
         if np.isnan(data["states"]).any() or np.isinf(data["states"]).any():
