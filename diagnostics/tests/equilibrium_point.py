@@ -79,7 +79,7 @@ def test_equilibrium_point(network, results: TestResults):
     network_sims = 100
 
     # Test against different MCTS strengths
-    mcts_sim_levels = [50, 100, 200, 400]
+    mcts_sim_levels = [50, 100, 200, 400, 800]
     games_per_level = 3
 
     print(subheader(f"Network ({network_sims} sims) vs Pure MCTS (varying sims)"))
