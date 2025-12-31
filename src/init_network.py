@@ -1,0 +1,172 @@
+"""
+Initialize a new neural network with random weights.
+
+Creates a DualHeadNetwork with the specified architecture and saves it to a file.
+Useful for testing, benchmarking, or starting fresh training.
+"""
+
+import argparse
+import os
+import sys
+
+# Ensure proper imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.alphazero.network import DualHeadNetwork
+from src.config import Config
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Initialize a new neural network with random weights",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Create default network
+  ./neural_mate_init -o models/random.pt
+
+  # Create with custom architecture
+  ./neural_mate_init -o models/small.pt --filters 64 --blocks 6
+
+  # Use config file for architecture
+  ./neural_mate_init -o models/network.pt --config config/config.json
+""",
+    )
+
+    parser.add_argument(
+        "-o", "--output",
+        type=str,
+        default="models/network.pt",
+        help="Output path for the network file (default: models/network.pt)",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config.json for network architecture (optional)",
+    )
+    parser.add_argument(
+        "--filters",
+        type=int,
+        default=None,
+        help="Number of filters in residual blocks (default: 192)",
+    )
+    parser.add_argument(
+        "--blocks",
+        type=int,
+        default=None,
+        help="Number of residual blocks (default: 12)",
+    )
+    parser.add_argument(
+        "--history",
+        type=int,
+        default=None,
+        help="History length for input planes (default: 3)",
+    )
+    parser.add_argument(
+        "--no-phase-head",
+        action="store_true",
+        help="Disable auxiliary phase prediction head",
+    )
+    parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Overwrite existing file without asking",
+    )
+
+    args = parser.parse_args()
+
+    # Load config if specified
+    if args.config and os.path.exists(args.config):
+        print(f"Loading config from {args.config}...")
+        config = Config.load(args.config)
+        num_filters = config.network.num_filters
+        num_blocks = config.network.num_residual_blocks
+        history_length = config.network.history_length
+    else:
+        # Use defaults
+        num_filters = 192
+        num_blocks = 12
+        history_length = 3
+
+    # Override with CLI arguments if provided
+    if args.filters is not None:
+        num_filters = args.filters
+    if args.blocks is not None:
+        num_blocks = args.blocks
+    if args.history is not None:
+        history_length = args.history
+
+    # Compute input planes from history length
+    num_input_planes = (history_length + 1) * 12 + 12
+
+    use_phase_head = not args.no_phase_head
+
+    # Check if output file exists
+    if os.path.exists(args.output) and not args.force:
+        response = input(f"File {args.output} already exists. Overwrite? [y/N] ")
+        if response.lower() not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+
+    print()
+    print("=" * 60)
+    print("  INITIALIZING NEW NEURAL NETWORK")
+    print("=" * 60)
+    print()
+    print("Architecture:")
+    print(f"  Input planes:       {num_input_planes}")
+    print(f"  Filters:            {num_filters}")
+    print(f"  Residual blocks:    {num_blocks}")
+    print(f"  History length:     {history_length}")
+    print(f"  Phase head:         {'Yes' if use_phase_head else 'No'}")
+    print()
+
+    # Create the network
+    print("Creating network with random weights...")
+    network = DualHeadNetwork(
+        num_input_planes=num_input_planes,
+        num_filters=num_filters,
+        num_residual_blocks=num_blocks,
+        use_phase_head=use_phase_head,
+    )
+
+    # Count parameters
+    total_params = sum(p.numel() for p in network.parameters())
+    trainable_params = sum(p.numel() for p in network.parameters() if p.requires_grad)
+
+    print(f"  Total parameters:      {total_params:,}")
+    print(f"  Trainable parameters:  {trainable_params:,}")
+    print(f"  Model size (approx):   {total_params * 4 / 1024 / 1024:.1f} MB")
+    print()
+
+    # Ensure output directory exists
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    # Save the network
+    print(f"Saving to {args.output}...")
+    network.save(args.output)
+
+    # Verify file was created
+    if os.path.exists(args.output):
+        file_size = os.path.getsize(args.output) / 1024 / 1024
+        print(f"  File size: {file_size:.1f} MB")
+        print()
+        print("Done! Network initialized with random weights.")
+        print()
+        print("Next steps:")
+        print("  - Pretrain:  ./neural_mate_pretrain")
+        print(f"  - Train:     ./neural_mate_train --network {args.output}")
+        print(f"  - Play:      ./neural_mate_play --network {args.output}")
+        print(f"  - Diagnose:  ./neural_mate_diagnose --network {args.output}")
+    else:
+        print("ERROR: Failed to save network!")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
