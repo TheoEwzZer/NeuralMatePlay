@@ -111,23 +111,23 @@ def analyze_network_architecture(network, results: TestResults):
             }
             weight_stats[name] = stats
 
-    # Show key layers
+    # Show key layers (must match actual module names in DualHeadNetwork)
     key_layers = [
-        "policy_fc.weight",
-        "policy_fc.bias",
-        "value_fc1.weight",
-        "value_fc2.weight",
-        "value_fc2.bias",
+        "policy_head.fc.weight",
+        "policy_head.fc.bias",
+        "value_head.fc1.weight",
+        "value_head.fc2.weight",
+        "value_head.fc2.bias",
     ]
 
-    print(f"  {'Layer':<25} {'Mean':>10} {'Std':>10} {'Min':>10} {'Max':>10}")
-    print("  " + "-" * 65)
+    print(f"  {'Layer':<30} {'Mean':>10} {'Std':>10} {'Min':>10} {'Max':>10}")
+    print("  " + "-" * 70)
 
     for layer in key_layers:
         if layer in weight_stats:
             s = weight_stats[layer]
             print(
-                f"  {layer:<25} {s['mean']:>10.4f} {s['std']:>10.4f} {s['min']:>10.4f} {s['max']:>10.4f}"
+                f"  {layer:<30} {s['mean']:>10.4f} {s['std']:>10.4f} {s['min']:>10.4f} {s['max']:>10.4f}"
             )
             results.add_diagnostic("weights", f"{layer}_mean", s["mean"])
             results.add_diagnostic("weights", f"{layer}_std", s["std"])

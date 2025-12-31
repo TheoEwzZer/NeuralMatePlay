@@ -24,22 +24,26 @@ def test_mate_in_one(network, results: TestResults):
     test_positions = [
         {
             "name": "Back Rank Mate",
-            "fen": "6k1/5ppp/8/8/8/8/8/4K2R w K - 0 1",
-            "description": "Rh8#",
+            # Queen delivers mate on d8, king trapped by own pawns
+            "fen": "6k1/5ppp/8/8/8/8/8/3QK2R w - - 0 1",
+            "description": "Qd8#",
         },
         {
             "name": "Queen Ladder Mate",
+            # King on a8 trapped by white king on b6, Qb7# or Qh8# are mate
             "fen": "k7/8/1K6/8/8/8/8/7Q w - - 0 1",
-            "description": "Qa8#",
+            "description": "Qb7#",
         },
         {
-            "name": "Support Mate",
-            "fen": "6k1/5Npp/8/8/8/8/8/4K2Q w - - 0 1",
-            "description": "Qh8#",
+            "name": "King + Queen Mate",
+            # King and Queen coordinate to deliver mate in the corner
+            "fen": "k7/8/1K6/8/8/8/8/Q7 w - - 0 1",
+            "description": "Qa7#",
         },
         {
             "name": "Arabian Mate",
-            "fen": "7k/5N1p/8/6R1/8/8/8/4K3 w - - 0 1",
+            # Knight on f6 protects g8, Rg8# is mate
+            "fen": "7k/7p/5N2/6R1/8/8/8/4K3 w - - 0 1",
             "description": "Rg8#",
         },
     ]

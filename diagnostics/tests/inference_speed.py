@@ -57,17 +57,18 @@ def test_inference_speed(network, results: TestResults):
 
     results.add_diagnostic("inference", "single_avg_ms", single_avg * 1000)
     results.add_diagnostic("inference", "batch_avg_ms", batch_avg * 1000)
-    results.add_diagnostic("inference", "inferences_per_sec", 1 / single_avg)
+    results.add_diagnostic("inference", "per_sample_batch_ms", per_sample_batch * 1000)
+    results.add_diagnostic("inference", "batch_inferences_per_sec", 1 / per_sample_batch)
     results.add_diagnostic("inference", "batch_speedup", single_avg / per_sample_batch)
 
-    # Benchmark assessment
-    if single_avg < 0.005:
+    # Benchmark assessment based on BATCH performance (used by MCTS)
+    if per_sample_batch < 0.001:
         status = "Excellent"
         passed = True
-    elif single_avg < 0.02:
+    elif per_sample_batch < 0.003:
         status = "Good"
         passed = True
-    elif single_avg < 0.05:
+    elif per_sample_batch < 0.01:
         status = "Acceptable"
         passed = True
     else:
@@ -76,19 +77,19 @@ def test_inference_speed(network, results: TestResults):
         results.add_issue(
             "MEDIUM",
             "performance",
-            f"Slow inference: {single_avg*1000:.1f}ms per sample",
+            f"Slow batch inference: {per_sample_batch*1000:.2f}ms per sample",
             "May impact MCTS search speed",
         )
 
     print(f"\n  {ok(f'Status: {status}') if passed else warn(f'Status: {status}')}")
 
-    # Calculate score based on speed (faster = better)
-    # Excellent (<5ms) = 1.0, Good (<20ms) = 0.8, Acceptable (<50ms) = 0.6, Slow = 0.4
-    if single_avg < 0.005:
+    # Calculate score based on BATCH speed (faster = better)
+    # Excellent (<1ms) = 1.0, Good (<3ms) = 0.8, Acceptable (<10ms) = 0.6, Slow = 0.4
+    if per_sample_batch < 0.001:
         score = 1.0
-    elif single_avg < 0.02:
+    elif per_sample_batch < 0.003:
         score = 0.8
-    elif single_avg < 0.05:
+    elif per_sample_batch < 0.01:
         score = 0.6
     else:
         score = 0.4

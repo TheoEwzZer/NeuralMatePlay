@@ -23,7 +23,7 @@ from .policy_diversity import test_policy_diversity
 from .mcts_behavior import test_mcts_behavior
 from .inference_speed import test_inference_speed
 from .random_game import test_random_game
-from .mcts_game import test_mcts_game
+from .equilibrium_point import test_equilibrium_point
 
 # All tests in order
 ALL_TESTS = [
@@ -40,7 +40,7 @@ ALL_TESTS = [
     (test_mcts_behavior, "MCTS Behavior", 1.0),
     (test_inference_speed, "Inference Speed", 1.0),
     (test_random_game, "Game vs Random", 1.0),
-    (test_mcts_game, "Game vs Pure MCTS", 1.0),
+    (test_equilibrium_point, "Equilibrium Point", 2.0),  # Important strength metric
 ]
 
 __all__ = [
@@ -57,6 +57,6 @@ __all__ = [
     "test_mcts_behavior",
     "test_inference_speed",
     "test_random_game",
-    "test_mcts_game",
+    "test_equilibrium_point",
     "ALL_TESTS",
 ]

@@ -44,7 +44,8 @@ def test_free_capture(network, results: TestResults):
         },
         {
             "name": "Hanging Knight",
-            "fen": "rnbqkb1r/pppppppp/8/4n3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+            # Knight on e5, white knight on f3 can capture with Nxe5
+            "fen": "rnbqkb1r/pppppppp/8/4n3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1",
             "target_square": chess.E5,
             "target_piece": chess.KNIGHT,
             "piece_value": 3,
