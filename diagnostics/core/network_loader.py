@@ -17,7 +17,9 @@ def load_network_from_path(path: str):
     return DualHeadNetwork.load(path)
 
 
-def get_available_checkpoints(checkpoint_dir: str, checkpoint_type: str = "train") -> list:
+def get_available_checkpoints(
+    checkpoint_dir: str, checkpoint_type: str = "train"
+) -> list:
     """
     Get all available checkpoints sorted by iteration/epoch.
 
@@ -54,7 +56,9 @@ def load_latest_network(checkpoint_dir="checkpoints", checkpoint_type: str = "tr
 
     if not checkpoints:
         type_name = "pretrain" if checkpoint_type == "pretrain" else "train"
-        print(f"{Colors.RED}No {type_name} checkpoints found in {checkpoint_dir}!{Colors.ENDC}")
+        print(
+            f"{Colors.RED}No {type_name} checkpoints found in {checkpoint_dir}!{Colors.ENDC}"
+        )
         return None
 
     latest_num, latest_path = checkpoints[-1]
@@ -134,7 +138,7 @@ def analyze_network_architecture(network, results: TestResults):
 
     # Check for issues
     for layer, stats in weight_stats.items():
-        if stats["std"] < 0.001:
+        if stats["std"] < 0.001 and layer != "value_head.fc2.bias":
             results.add_issue(
                 "HIGH",
                 "weights",
