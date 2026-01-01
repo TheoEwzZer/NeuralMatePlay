@@ -333,7 +333,14 @@ class StreamingTrainer:
         # Restore scheduler state if resuming
         if hasattr(self, '_scheduler_state_to_restore') and self._scheduler_state_to_restore:
             self.scheduler.load_state_dict(self._scheduler_state_to_restore)
-            print(f"Restored scheduler state (LR: {self.optimizer.param_groups[0]['lr']:.6f})")
+            old_lr = self.optimizer.param_groups[0]['lr']
+            # Force the new learning rate from config (override checkpoint)
+            if old_lr != self.learning_rate:
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = self.learning_rate
+                print(f"Restored scheduler state, LR overridden: {old_lr:.6f} → {self.learning_rate:.6f}")
+            else:
+                print(f"Restored scheduler state (LR: {old_lr:.6f})")
             self._scheduler_state_to_restore = None
 
         print("\nStarting streaming training...")
