@@ -391,7 +391,15 @@ class StreamingTrainer:
                 self.best_val_loss = val_loss
                 self.best_count += 1
                 self.epochs_without_improvement = 0
-                self._save_checkpoint(epoch)
+                self._save_checkpoint(
+                    epoch,
+                    train_loss=train_loss,
+                    val_loss=val_loss,
+                    train_policy=train_policy_loss,
+                    train_value=train_value_loss,
+                    val_policy=val_policy_loss,
+                    val_value=val_value_loss,
+                )
                 print(f"  New best model saved! (#{self.best_count})")
             else:
                 self.epochs_without_improvement += 1
@@ -817,7 +825,16 @@ class StreamingTrainer:
         avg_value = total_value_loss / max(1, total_batches)
         return avg_policy + avg_value, avg_policy, avg_value
 
-    def _save_checkpoint(self, epoch: int) -> None:
+    def _save_checkpoint(
+        self,
+        epoch: int,
+        train_loss: float = 0.0,
+        val_loss: float = 0.0,
+        train_policy: float = 0.0,
+        train_value: float = 0.0,
+        val_policy: float = 0.0,
+        val_value: float = 0.0,
+    ) -> None:
         """Save best model checkpoint."""
         state = {
             "epoch": epoch,
@@ -826,6 +843,13 @@ class StreamingTrainer:
             "epochs_without_improvement": self.epochs_without_improvement,
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict(),
+            # Loss metrics for this checkpoint
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "train_policy": train_policy,
+            "train_value": train_value,
+            "val_policy": val_policy,
+            "val_value": val_value,
         }
         if self.scaler is not None:
             state["scaler_state"] = self.scaler.state_dict()
