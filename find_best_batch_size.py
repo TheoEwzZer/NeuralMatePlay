@@ -108,7 +108,20 @@ def main():
     print(f"GPU: {gpu_name}")
     print(f"VRAM: {gpu_mem:.1f} GB")
 
-    batch_sizes = [64, 128, 192, 256, 384, 512, 640, 768, 896]
+    batch_sizes = [
+        64,
+        128,
+        192,
+        256,
+        384,
+        512,
+        640,
+        768,
+        896,
+        1024,
+        1152,
+        1280,
+    ]
 
     print(f"\nTesting batch sizes: {batch_sizes}")
     print("-" * 60)
