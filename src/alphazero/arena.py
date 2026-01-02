@@ -42,6 +42,7 @@ class ArenaStats:
     vs_mcts: Optional[MatchResult] = None
     vs_best: Optional[MatchResult] = None
     vs_old: Optional[MatchResult] = None
+    vs_pretrained: Optional[MatchResult] = None  # vs initial pretrained model
 
     elo: float = 1500.0
     best_elo: float = 1500.0
@@ -689,6 +690,7 @@ class Arena:
         current_network: DualHeadNetwork,
         best_network: Optional[DualHeadNetwork] = None,
         old_network: Optional[DualHeadNetwork] = None,
+        pretrained_network: Optional[DualHeadNetwork] = None,
         best_iteration: Optional[int] = None,
         old_iteration: Optional[int] = None,
         callback: Optional[Callable[[dict], None]] = None,
@@ -702,6 +704,7 @@ class Arena:
             current_network: Network being evaluated.
             best_network: Current best network (optional).
             old_network: Old checkpoint network (optional).
+            pretrained_network: Initial pretrained network for progress tracking (optional).
             best_iteration: Iteration of best network.
             old_iteration: Iteration of old network.
             callback: Progress callback.
@@ -818,6 +821,28 @@ class Arena:
                 stats.veto = True
                 stats.veto_reason = f"Lost to old model #{old_iteration} ({stats.vs_old.score*100:.0f}% < {veto_threshold*100:.0f}%)"
                 stats.is_new_best = False  # Block promotion
+
+        # 5. vs Pretrained - Progress tracking against initial model
+        if pretrained_network is not None:
+            if callback:
+                callback({"phase": "arena_match", "opponent": "Pretrained", "status": "starting"})
+
+            pretrained_player = NetworkPlayer(
+                pretrained_network,
+                num_simulations=self.num_simulations,
+                name="Pretrained",
+                history_length=self.history_length,
+            )
+            pretrained_results = self.play_match(current_player, pretrained_player, callback)
+
+            stats.vs_pretrained = MatchResult(
+                opponent="Pretrained",
+                wins=pretrained_results["player1_wins"],
+                losses=pretrained_results["player2_wins"],
+                draws=pretrained_results["draws"],
+                score=(pretrained_results["player1_wins"] + 0.5 * pretrained_results["draws"]) / max(1, self.num_games),
+                avg_time=pretrained_results.get("avg_time", 0.0),
+            )
 
         # Update ELO based on vs_best results (or vs_random if no best)
         if stats.vs_best is not None:
