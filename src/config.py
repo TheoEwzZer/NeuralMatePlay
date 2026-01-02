@@ -77,6 +77,7 @@ class TrainingConfig:
     dirichlet_epsilon: float = 0.25
     history_length: int = 3  # Must match NetworkConfig.history_length
     checkpoint_interval: int = 1  # Save checkpoint every N iterations
+    pretrained_path: Optional[str] = None  # Path to pretrained model for arena comparison
 
 
 @dataclass

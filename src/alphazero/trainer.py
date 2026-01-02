@@ -58,6 +58,9 @@ class TrainingConfig:
     arena_games: int = 20
     arena_simulations: int = 100
     win_threshold: float = 0.55  # Win rate to replace best model
+    pretrained_path: Optional[str] = (
+        None  # Path to pretrained model for arena comparison
+    )
 
     # Checkpointing
     checkpoint_path: str = "checkpoints"
@@ -116,7 +119,7 @@ class AlphaZeroTrainer:
 
         # Mixed precision
         self._use_amp = supports_mixed_precision()
-        self._scaler = GradScaler('cuda') if self._use_amp else None
+        self._scaler = GradScaler("cuda") if self._use_amp else None
 
         # Tracking
         self._iteration = 0
@@ -124,6 +127,21 @@ class AlphaZeroTrainer:
         self._best_network: Optional[DualHeadNetwork] = None
         self._best_iteration: int = 0
         self._old_checkpoints: list = []  # List of (iteration, path) tuples
+        self._last_training_stats: Optional[dict] = None  # For checkpoint saving
+
+        # Load pretrained model for arena comparison
+        self._pretrained_network: Optional[DualHeadNetwork] = None
+        if self.config.pretrained_path and os.path.exists(self.config.pretrained_path):
+            try:
+                self._pretrained_network = DualHeadNetwork.load(
+                    self.config.pretrained_path
+                )
+                self._pretrained_network.eval()
+                print(
+                    f"Loaded pretrained model for arena: {self.config.pretrained_path}"
+                )
+            except Exception as e:
+                print(f"Warning: Could not load pretrained model: {e}")
 
         # Checkpoint manager
         self._checkpoint_manager = CheckpointManager(
@@ -173,6 +191,7 @@ class AlphaZeroTrainer:
 
             training_stats = self._train_on_buffer(callback)
             stats["training_stats"] = training_stats
+            self._last_training_stats = training_stats
         else:
             if callback:
                 callback(
@@ -190,9 +209,17 @@ class AlphaZeroTrainer:
             arena_stats = self._run_arena(callback)
             stats["arena_stats"] = arena_stats
 
-        # Checkpoint
+        # Checkpoint (only if training actually happened)
         if self._iteration % self.config.checkpoint_interval == 0:
-            self._save_checkpoint()
+            if "training_stats" in stats:
+                self._save_checkpoint()
+            elif callback:
+                callback(
+                    {
+                        "phase": "checkpoint_skip",
+                        "reason": "Training was skipped, no checkpoint saved",
+                    }
+                )
 
         # Update learning rate
         self._decay_learning_rate()
@@ -224,6 +251,12 @@ class AlphaZeroTrainer:
             "avg_game_length": 0,
             "avg_game_time": 0.0,
             "examples_generated": 0,
+            # Termination details
+            "checkmates": 0,
+            "resignations": 0,
+            "stalemates": 0,
+            "max_moves": 0,
+            "other": 0,
         }
 
         total_moves = 0
@@ -250,6 +283,19 @@ class AlphaZeroTrainer:
                 stats["draws"] += 1
                 outcome = 0.0
 
+            # Track termination type
+            termination = game_data.get("termination", "other")
+            if termination == "checkmate":
+                stats["checkmates"] += 1
+            elif termination == "resignation":
+                stats["resignations"] += 1
+            elif termination == "stalemate":
+                stats["stalemates"] += 1
+            elif termination == "max_moves":
+                stats["max_moves"] += 1
+            else:
+                stats["other"] += 1
+
             # Add to buffer
             self._buffer.add_game(
                 game_data["states"],
@@ -270,12 +316,37 @@ class AlphaZeroTrainer:
                         "draws": stats["draws"],
                         "avg_moves": total_moves / max(1, game_idx + 1),
                         "avg_time": total_time / max(1, game_idx + 1),
+                        # Termination details
+                        "checkmates": stats["checkmates"],
+                        "resignations": stats["resignations"],
+                        "stalemates": stats["stalemates"],
+                        "max_moves_reached": stats["max_moves"],
                     }
                 )
 
         stats["avg_game_length"] = total_moves / max(1, stats["games_played"])
         stats["avg_game_time"] = total_time / max(1, stats["games_played"])
         return stats
+
+    def _calculate_material(self, board: chess.Board) -> int:
+        """Calculate material balance from White's perspective.
+
+        Returns positive if White is ahead, negative if Black is ahead.
+        """
+        piece_values = {
+            chess.PAWN: 1,
+            chess.KNIGHT: 3,
+            chess.BISHOP: 3,
+            chess.ROOK: 5,
+            chess.QUEEN: 9,
+        }
+
+        material = 0
+        for piece_type, value in piece_values.items():
+            material += len(board.pieces(piece_type, chess.WHITE)) * value
+            material -= len(board.pieces(piece_type, chess.BLACK)) * value
+
+        return material
 
     def _play_self_play_game(
         self,
@@ -300,7 +371,18 @@ class AlphaZeroTrainer:
         policies = []
         move_count = 0
 
-        while not board.is_game_over() and move_count < self.config.max_moves:
+        if self._iteration <= 10:
+            resignation_threshold = 15
+        else:
+            resignation_threshold = 100  # Very high = disabled
+
+        resigned = False
+
+        while (
+            not board.is_game_over()
+            and move_count < self.config.max_moves
+            and not resigned
+        ):
             # Set temperature based on move count
             if move_count < self.config.temperature_moves:
                 mcts.temperature = 1.0
@@ -315,22 +397,60 @@ class AlphaZeroTrainer:
             policy = mcts.search(board, add_noise=True)
             policies.append(policy)
 
-            # Select and play move
-            move = mcts.get_best_move(board, add_noise=False)
-            if move is None:
+            # Select move by sampling from policy (uses temperature for exploration)
+            legal_moves = list(board.legal_moves)
+            if not legal_moves:
                 break
+
+            # Get move probabilities for legal moves
+            flip = board.turn == chess.BLACK
+            move_probs = []
+            for m in legal_moves:
+                idx = encode_move_from_perspective(m, flip)
+                if idx is not None and idx < len(policy):
+                    move_probs.append(policy[idx])
+                else:
+                    move_probs.append(0.0)
+
+            move_probs = np.array(move_probs)
+            if move_probs.sum() > 0:
+                move_probs = move_probs / move_probs.sum()
+                move_idx = np.random.choice(len(legal_moves), p=move_probs)
+                move = legal_moves[move_idx]
+            else:
+                # Fallback to random if no valid probabilities
+                move = np.random.choice(legal_moves)
+
+            # Get move info before pushing
+            move_san = board.san(move)
+            from_square = move.from_square
+            to_square = move.to_square
 
             board.push(move)
             history.push(board)
             move_count += 1
 
-            if callback and move_count % 10 == 0:
+            # Check for resignation based on material (after move 10 to avoid early gambits)
+            if move_count >= 10:
+                material = self._calculate_material(board)
+                if abs(material) >= resignation_threshold:
+                    resigned = True
+
+            if callback:
+                # Convert squares to (row, col) for GUI
+                from_row = 7 - (from_square // 8)
+                from_col = from_square % 8
+                to_row = 7 - (to_square // 8)
+                to_col = to_square % 8
+
                 callback(
                     {
-                        "phase": "move",
-                        "fen": board.fen(),
+                        "phase": "board_update",
+                        "fen": board.fen().split(" ")[0],  # Just piece positions
+                        "last_move": ((from_row, from_col), (to_row, to_col)),
+                        "move_san": move_san,
+                        "move_number": move_count,
                         "game": game_idx,
-                        "move": move_count,
                     }
                 )
 
@@ -338,9 +458,16 @@ class AlphaZeroTrainer:
         if board.is_checkmate():
             winner = chess.BLACK if board.turn == chess.WHITE else chess.WHITE
             termination = "checkmate"
+        elif resigned:
+            material = self._calculate_material(board)
+            winner = chess.WHITE if material > 0 else chess.BLACK
+            termination = "resignation"
         elif board.is_stalemate():
             winner = None
             termination = "stalemate"
+        elif move_count >= self.config.max_moves:
+            winner = None
+            termination = "max_moves"
         else:
             winner = None
             termination = "other"
@@ -377,7 +504,7 @@ class AlphaZeroTrainer:
         device = get_device()
 
         # Enable TF32 for faster matmul on Ampere+ GPUs (RTX 30xx, 40xx)
-        torch.set_float32_matmul_precision('high')
+        torch.set_float32_matmul_precision("high")
 
         total_policy_loss = 0.0
         total_value_loss = 0.0
@@ -392,10 +519,12 @@ class AlphaZeroTrainer:
             # Skip if not enough samples for even one batch
             if batches_per_epoch == 0:
                 if callback:
-                    callback({
-                        "phase": "training_skip",
-                        "reason": f"Not enough samples for batch ({num_samples} < {self.config.batch_size})",
-                    })
+                    callback(
+                        {
+                            "phase": "training_skip",
+                            "reason": f"Not enough samples for batch ({num_samples} < {self.config.batch_size})",
+                        }
+                    )
                 break
 
             epoch_policy_loss = 0.0
@@ -406,15 +535,21 @@ class AlphaZeroTrainer:
                 states, policies, values = self._buffer.sample(self.config.batch_size)
 
                 # Convert to tensors (non_blocking for async CPU->GPU transfer)
-                states_t = torch.from_numpy(states).float().to(device, non_blocking=True)
-                policies_t = torch.from_numpy(policies).float().to(device, non_blocking=True)
-                values_t = torch.from_numpy(values).float().to(device, non_blocking=True)
+                states_t = (
+                    torch.from_numpy(states).float().to(device, non_blocking=True)
+                )
+                policies_t = (
+                    torch.from_numpy(policies).float().to(device, non_blocking=True)
+                )
+                values_t = (
+                    torch.from_numpy(values).float().to(device, non_blocking=True)
+                )
 
                 # Forward pass with optional mixed precision
                 self._optimizer.zero_grad()
 
                 if self._use_amp:
-                    with autocast(device_type='cuda'):
+                    with autocast(device_type="cuda"):
                         pred_policies, pred_values, _ = self.network(states_t)
                         policy_loss = self._policy_loss(pred_policies, policies_t)
                         value_loss = self._value_loss(pred_values, values_t)
@@ -499,6 +634,7 @@ class AlphaZeroTrainer:
             current_network=self.network,
             best_network=self._best_network,
             old_network=old_network,
+            pretrained_network=self._pretrained_network,
             best_iteration=self._best_iteration,
             old_iteration=old_iteration,
             callback=callback,
@@ -518,7 +654,10 @@ class AlphaZeroTrainer:
             self._best_iteration = self._iteration
 
             # Add current to old checkpoints list
-            checkpoint_path = self._checkpoint_manager.checkpoint_dir / f"iteration_{self._iteration}_network.pt"
+            checkpoint_path = (
+                self._checkpoint_manager.checkpoint_dir
+                / f"iteration_{self._iteration}_network.pt"
+            )
             self._old_checkpoints.append((self._iteration, str(checkpoint_path)))
 
         if callback:
@@ -544,22 +683,57 @@ class AlphaZeroTrainer:
                         "score": stats.vs_mcts.score if stats.vs_mcts else 0,
                         "avg_time": stats.vs_mcts.avg_time if stats.vs_mcts else 0,
                     },
-                    "vs_best": {
-                        "wins": stats.vs_best.wins if stats.vs_best else 0,
-                        "losses": stats.vs_best.losses if stats.vs_best else 0,
-                        "draws": stats.vs_best.draws if stats.vs_best else 0,
-                        "score": stats.vs_best.score if stats.vs_best else 0,
-                        "from_iteration": stats.vs_best.from_iteration if stats.vs_best else None,
-                        "avg_time": stats.vs_best.avg_time if stats.vs_best else 0,
-                    } if stats.vs_best else None,
-                    "vs_old": {
-                        "wins": stats.vs_old.wins if stats.vs_old else 0,
-                        "losses": stats.vs_old.losses if stats.vs_old else 0,
-                        "draws": stats.vs_old.draws if stats.vs_old else 0,
-                        "score": stats.vs_old.score if stats.vs_old else 0,
-                        "from_iteration": stats.vs_old.from_iteration if stats.vs_old else None,
-                        "avg_time": stats.vs_old.avg_time if stats.vs_old else 0,
-                    } if stats.vs_old else None,
+                    "vs_best": (
+                        {
+                            "wins": stats.vs_best.wins if stats.vs_best else 0,
+                            "losses": stats.vs_best.losses if stats.vs_best else 0,
+                            "draws": stats.vs_best.draws if stats.vs_best else 0,
+                            "score": stats.vs_best.score if stats.vs_best else 0,
+                            "from_iteration": (
+                                stats.vs_best.from_iteration if stats.vs_best else None
+                            ),
+                            "avg_time": stats.vs_best.avg_time if stats.vs_best else 0,
+                        }
+                        if stats.vs_best
+                        else None
+                    ),
+                    "vs_old": (
+                        {
+                            "wins": stats.vs_old.wins if stats.vs_old else 0,
+                            "losses": stats.vs_old.losses if stats.vs_old else 0,
+                            "draws": stats.vs_old.draws if stats.vs_old else 0,
+                            "score": stats.vs_old.score if stats.vs_old else 0,
+                            "from_iteration": (
+                                stats.vs_old.from_iteration if stats.vs_old else None
+                            ),
+                            "avg_time": stats.vs_old.avg_time if stats.vs_old else 0,
+                        }
+                        if stats.vs_old
+                        else None
+                    ),
+                    "vs_pretrained": (
+                        {
+                            "wins": (
+                                stats.vs_pretrained.wins if stats.vs_pretrained else 0
+                            ),
+                            "losses": (
+                                stats.vs_pretrained.losses if stats.vs_pretrained else 0
+                            ),
+                            "draws": (
+                                stats.vs_pretrained.draws if stats.vs_pretrained else 0
+                            ),
+                            "score": (
+                                stats.vs_pretrained.score if stats.vs_pretrained else 0
+                            ),
+                            "avg_time": (
+                                stats.vs_pretrained.avg_time
+                                if stats.vs_pretrained
+                                else 0
+                            ),
+                        }
+                        if stats.vs_pretrained
+                        else None
+                    ),
                 }
             )
 
@@ -577,8 +751,7 @@ class AlphaZeroTrainer:
             return None, None
 
         # Separate milestones and recent
-        milestones = [(i, p) for i, p in self._old_checkpoints
-                      if i == 1 or i % 5 == 0]
+        milestones = [(i, p) for i, p in self._old_checkpoints if i == 1 or i % 5 == 0]
         recent = self._old_checkpoints[-5:]  # Last 5
 
         if rand.random() < 0.7 and milestones:
@@ -609,6 +782,12 @@ class AlphaZeroTrainer:
         }
         if self._scaler is not None:
             state["scaler_state"] = self._scaler.state_dict()
+
+        # Add training metrics (compatible with show_losses.py)
+        if self._last_training_stats:
+            state["train_loss"] = self._last_training_stats.get("avg_total_loss")
+            state["train_policy"] = self._last_training_stats.get("avg_policy_loss")
+            state["train_value"] = self._last_training_stats.get("avg_value_loss")
 
         # Save with checkpoint manager (handles cleanup)
         self._checkpoint_manager.save_training_checkpoint(
