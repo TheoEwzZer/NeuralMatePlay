@@ -121,6 +121,8 @@ class AlphaZeroTrainer:
         self._use_amp = supports_mixed_precision()
         self._scaler = GradScaler("cuda") if self._use_amp else None
 
+        self._rng = np.random.default_rng(42)
+
         # Tracking
         self._iteration = 0
         self._best_network_path: Optional[str] = None
@@ -150,6 +152,16 @@ class AlphaZeroTrainer:
             milestone_interval=5,
             verbose=True,
         )
+
+        # Data mixing: load pretrain data if configured
+        self._pretrain_states: Optional[np.ndarray] = None
+        self._pretrain_policy_indices: Optional[np.ndarray] = None
+        self._pretrain_values: Optional[np.ndarray] = None
+        self._pretrain_mix_ratio = getattr(self.config, "pretrain_mix_ratio", 0.0)
+
+        if self._pretrain_mix_ratio > 0:
+            chunks_dir = getattr(self.config, "pretrain_chunks_dir", "data/chunks")
+            self._load_pretrain_data(chunks_dir)
 
     def train_iteration(
         self,
@@ -371,10 +383,12 @@ class AlphaZeroTrainer:
         policies = []
         move_count = 0
 
-        if self._iteration <= 10:
-            resignation_threshold = 15
+        if self._iteration <= 5:
+            resignation_threshold = 20
+        elif self._iteration <= 15:
+            resignation_threshold = 30
         else:
-            resignation_threshold = 100  # Very high = disabled
+            resignation_threshold = None
 
         resigned = False
 
@@ -415,11 +429,11 @@ class AlphaZeroTrainer:
             move_probs = np.array(move_probs)
             if move_probs.sum() > 0:
                 move_probs = move_probs / move_probs.sum()
-                move_idx = np.random.choice(len(legal_moves), p=move_probs)
+                move_idx = self._rng.choice(len(legal_moves), p=move_probs)
                 move = legal_moves[move_idx]
             else:
                 # Fallback to random if no valid probabilities
-                move = np.random.choice(legal_moves)
+                move = self._rng.choice(legal_moves)
 
             # Get move info before pushing
             move_san = board.san(move)
@@ -433,7 +447,10 @@ class AlphaZeroTrainer:
             # Check for resignation based on material (after move 10 to avoid early gambits)
             if move_count >= 10:
                 material = self._calculate_material(board)
-                if abs(material) >= resignation_threshold:
+                if (
+                    resignation_threshold is not None
+                    and abs(material) >= resignation_threshold
+                ):
                     resigned = True
 
             if callback:
@@ -530,9 +547,16 @@ class AlphaZeroTrainer:
             epoch_policy_loss = 0.0
             epoch_value_loss = 0.0
 
-            for batch_idx in range(batches_per_epoch):
-                # Sample batch
-                states, policies, values = self._buffer.sample(self.config.batch_size)
+            for _ in range(batches_per_epoch):
+                # Sample batch (with optional pretrain data mixing)
+                if self._pretrain_mix_ratio > 0 and self._pretrain_states is not None:
+                    states, policies, values = self._sample_mixed_batch(
+                        self.config.batch_size
+                    )
+                else:
+                    states, policies, values = self._buffer.sample(
+                        self.config.batch_size
+                    )
 
                 # Convert to tensors (non_blocking for async CPU->GPU transfer)
                 states_t = (
@@ -612,6 +636,148 @@ class AlphaZeroTrainer:
     ) -> torch.Tensor:
         """MSE loss for value."""
         return torch.nn.functional.mse_loss(pred, target)
+
+    def _load_pretrain_data(self, chunks_dir: str) -> None:
+        """
+        Initialize streaming pretrain data for data mixing.
+
+        Uses streaming approach: keeps only a few chunks in memory at a time
+        and periodically refreshes them. This prevents high RAM usage.
+        """
+        from pretraining.chunk_manager import ChunkManager
+
+        if not os.path.exists(chunks_dir):
+            print(f"Warning: Pretrain chunks dir not found: {chunks_dir}")
+            return
+
+        metadata = ChunkManager.load_metadata(chunks_dir)
+        if not metadata:
+            print(f"Warning: No pretrain metadata found in {chunks_dir}")
+            return
+
+        # Store chunk paths for streaming
+        self._pretrain_chunk_paths = list(ChunkManager.iter_chunk_paths(chunks_dir))
+        if not self._pretrain_chunk_paths:
+            print("Warning: No pretrain chunks found")
+            return
+
+        self._pretrain_chunks_dir = chunks_dir
+        self._pretrain_batch_count = 0
+        self._pretrain_refresh_interval = 500  # Refresh chunks every N batches
+
+        total_examples = metadata.get("total_examples", 0)
+        num_chunks = len(self._pretrain_chunk_paths)
+
+        # Load initial chunks (max 5 chunks to limit RAM ~100K positions)
+        max_chunks_in_memory = min(5, num_chunks)
+        self._pretrain_loaded_chunk_indices = list(range(max_chunks_in_memory))
+        self._load_pretrain_chunks()
+
+        print(f"Pretrain streaming: {total_examples:,} examples in {num_chunks} chunks")
+        print(
+            f"  Loaded {max_chunks_in_memory} chunks in memory ({len(self._pretrain_states):,} positions)"
+        )
+        print(
+            f"  Mix ratio: {self._pretrain_mix_ratio:.0%}, refresh every {self._pretrain_refresh_interval} batches"
+        )
+
+    def _load_pretrain_chunks(self) -> None:
+        """Load the currently selected chunks into memory."""
+        from pretraining.chunk_manager import ChunkManager
+
+        all_states = []
+        all_policy_indices = []
+        all_values = []
+
+        for chunk_idx in self._pretrain_loaded_chunk_indices:
+            if chunk_idx < len(self._pretrain_chunk_paths):
+                chunk_path = self._pretrain_chunk_paths[chunk_idx]
+                try:
+                    chunk = ChunkManager.load_chunk(chunk_path)
+                    all_states.append(chunk["states"])
+                    all_policy_indices.append(chunk["policy_indices"])
+                    all_values.append(chunk["values"])
+                except Exception:
+                    continue
+
+        if all_states:
+            self._pretrain_states = np.concatenate(all_states, axis=0)
+            self._pretrain_policy_indices = np.concatenate(all_policy_indices, axis=0)
+            self._pretrain_values = np.concatenate(all_values, axis=0)
+
+    def _maybe_refresh_pretrain_chunks(self) -> None:
+        """Periodically refresh one chunk to cycle through all pretrain data."""
+        self._pretrain_batch_count += 1
+
+        if self._pretrain_batch_count % self._pretrain_refresh_interval != 0:
+            return
+
+        if not hasattr(self, "_pretrain_chunk_paths") or not self._pretrain_chunk_paths:
+            return
+
+        num_chunks = len(self._pretrain_chunk_paths)
+        if num_chunks <= len(self._pretrain_loaded_chunk_indices):
+            return  # All chunks already loaded
+
+        # Replace oldest chunk with a new random one
+        loaded_set = set(self._pretrain_loaded_chunk_indices)
+        available = [i for i in range(num_chunks) if i not in loaded_set]
+
+        if available:
+            # Remove oldest, add new random chunk
+            self._pretrain_loaded_chunk_indices.pop(0)
+            new_chunk = self._rng.choice(available)
+            self._pretrain_loaded_chunk_indices.append(new_chunk)
+            self._load_pretrain_chunks()
+
+    def _sample_mixed_batch(self, batch_size: int) -> tuple:
+        """
+        Sample a mixed batch from self-play buffer and pretrain data.
+
+        Returns:
+            Tuple of (states, policies, values) numpy arrays.
+        """
+        # Periodically refresh chunks to cycle through all pretrain data
+        self._maybe_refresh_pretrain_chunks()
+
+        # Calculate split
+        pretrain_count = int(batch_size * self._pretrain_mix_ratio)
+        selfplay_count = batch_size - pretrain_count
+
+        # Sample from self-play buffer
+        sp_states, sp_policies, sp_values = self._buffer.sample(selfplay_count)
+
+        # Sample from pretrain data
+        if pretrain_count > 0 and self._pretrain_states is not None:
+            indices = self._rng.choice(
+                len(self._pretrain_states), pretrain_count, replace=False
+            )
+
+            pt_states = self._pretrain_states[indices]
+            pt_values = self._pretrain_values[indices]
+
+            # Convert policy indices to policy vectors (one-hot)
+            pt_policies = np.zeros(
+                (pretrain_count, MOVE_ENCODING_SIZE), dtype=np.float32
+            )
+            for i, idx in enumerate(self._pretrain_policy_indices[indices]):
+                if idx < MOVE_ENCODING_SIZE:
+                    pt_policies[i, idx] = 1.0
+
+            # Concatenate
+            states = np.concatenate([sp_states, pt_states], axis=0)
+            policies = np.concatenate([sp_policies, pt_policies], axis=0)
+            values = np.concatenate([sp_values, pt_values], axis=0)
+
+            # Shuffle to mix the batches
+            shuffle_idx = self._rng.permutation(batch_size)
+            states = states[shuffle_idx]
+            policies = policies[shuffle_idx]
+            values = values[shuffle_idx]
+        else:
+            states, policies, values = sp_states, sp_policies, sp_values
+
+        return states, policies, values
 
     def _run_arena(
         self,

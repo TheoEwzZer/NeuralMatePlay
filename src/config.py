@@ -78,6 +78,9 @@ class TrainingConfig:
     history_length: int = 3  # Must match NetworkConfig.history_length
     checkpoint_interval: int = 1  # Save checkpoint every N iterations
     pretrained_path: Optional[str] = None  # Path to pretrained model for arena comparison
+    # Data mixing to prevent catastrophic forgetting
+    pretrain_mix_ratio: float = 0.0  # Ratio of pretrain data in each batch (0.2 = 20% pretrain, 80% self-play)
+    pretrain_chunks_dir: str = "data/chunks"  # Path to pretrain chunks (same as pretraining.chunks_dir)
 
 
 @dataclass
