@@ -79,7 +79,10 @@ def test_free_capture(network, results: TestResults):
         top_probs = [policy[idx] for idx in top_indices]
 
         print(f"\n  Value head evaluation: {value:+.4f}")
-        print(f"  Policy entropy: {-np.sum(policy * np.log(policy + 1e-10)):.4f}")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            policy_safe = np.maximum(policy, 1e-10)
+            entropy = -np.nansum(policy_safe * np.log(policy_safe))
+        print(f"  Policy entropy: {entropy:.4f}")
 
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Type':<15}")
         print("  " + "-" * 45)
