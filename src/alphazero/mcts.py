@@ -549,7 +549,9 @@ class MCTS:
             if child.effective_visits == 0:
                 q = fpu_value
             else:
-                q = child.q_value
+                # Negate Q-value: child stores value from child's perspective,
+                # but parent needs value from parent's perspective
+                q = -child.q_value
 
             # PUCT formula
             u = self.c_puct * child.prior * sqrt_total / (1 + child.effective_visits)
