@@ -7,16 +7,464 @@ Usage:
     ./neural_mate_train --checkpoint models/pretrained.pt --iterations 100
     ./neural_mate_train --resume-trained latest
     ./neural_mate_train --resume-trained 10 --iterations 50
+    ./neural_mate_train --gui  # With GUI monitoring
 """
 
 import argparse
 import os
 import sys
+import threading
+import queue
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alphazero import DualHeadNetwork, AlphaZeroTrainer
 from config import Config, TrainingConfig, generate_default_config
+
+
+class TrainingGUI:
+    """Non-blocking GUI for monitoring training progress with chess board."""
+
+    def __init__(self):
+        self.data_queue: queue.Queue = queue.Queue()
+        self.running = True
+        self.thread: Optional[threading.Thread] = None
+        self.root = None
+        self.board_widget = None
+
+        # Training state
+        self.iteration = 0
+        self.total_iterations = 0
+        self.current_game = 0
+        self.move_number = 0
+
+    def start(self, total_iterations: int):
+        """Start GUI in a separate thread."""
+        self.total_iterations = total_iterations
+        self.thread = threading.Thread(target=self._run_gui, daemon=True)
+        self.thread.start()
+
+    def _run_gui(self):
+        """Run the GUI main loop."""
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+            import chess
+        except ImportError:
+            print("Warning: tkinter not available, GUI disabled")
+            return
+
+        # Import UI components
+        try:
+            from ui.styles import COLORS, FONTS, apply_theme, create_panel
+            from ui.board_widget import ChessBoardWidget
+
+            use_ui_module = True
+        except ImportError:
+            use_ui_module = False
+            # Fallback colors
+            COLORS = {
+                "bg_primary": "#1a1a2e",
+                "bg_secondary": "#16213e",
+                "text_primary": "#ffffff",
+                "text_secondary": "#a0a0a0",
+                "accent": "#e94560",
+                "success": "#0ead69",
+                "warning": "#ffc107",
+            }
+            FONTS = {
+                "title": ("Segoe UI", 20, "bold"),
+                "heading": ("Segoe UI", 14, "bold"),
+                "body": ("Segoe UI", 11),
+                "body_bold": ("Segoe UI", 11, "bold"),
+                "mono": ("Consolas", 11),
+            }
+
+        self.root = tk.Tk()
+        self.root.title("NeuralMate2 Training Monitor")
+        self.root.geometry("1100x700")
+        self.root.configure(bg=COLORS["bg_primary"])
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        if use_ui_module:
+            apply_theme(self.root)
+
+        # Main container
+        main_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Left side - Chess board
+        left_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"])
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 20))
+
+        board_title = tk.Label(
+            left_frame,
+            text="Self-Play",
+            font=FONTS["heading"],
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_primary"],
+        )
+        board_title.pack(pady=(0, 10))
+
+        if use_ui_module:
+            self.board_widget = ChessBoardWidget(left_frame, size=520)
+            self.board_widget.pack()
+            self.board_widget.set_interactive(False)
+        else:
+            # Fallback canvas
+            self.canvas = tk.Canvas(
+                left_frame,
+                width=520,
+                height=520,
+                bg=COLORS["bg_secondary"],
+                highlightthickness=0,
+            )
+            self.canvas.pack()
+            self._draw_fallback_board()
+
+        # Game info
+        info_frame = tk.Frame(left_frame, bg=COLORS["bg_secondary"])
+        info_frame.pack(fill=tk.X, pady=(10, 0))
+
+        self.game_label = tk.Label(
+            info_frame,
+            text="Game: 0 | Move: 0",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        )
+        self.game_label.pack(pady=8)
+
+        self.move_label = tk.Label(
+            info_frame,
+            text="",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+        )
+        self.move_label.pack(pady=(0, 8))
+
+        # Right side - Stats
+        right_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"], width=400)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        right_frame.pack_propagate(False)
+
+        title = tk.Label(
+            right_frame,
+            text="AlphaZero Training",
+            font=FONTS["title"],
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_primary"],
+        )
+        title.pack(pady=(0, 20))
+
+        # Progress section
+        progress_panel = tk.Frame(right_frame, bg=COLORS["bg_secondary"])
+        progress_panel.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            progress_panel,
+            text="Progress",
+            font=FONTS["heading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor=tk.W, padx=15, pady=(15, 10))
+
+        self.iteration_label = tk.Label(
+            progress_panel,
+            text="Iteration: 0/0",
+            font=FONTS["body_bold"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        )
+        self.iteration_label.pack(anchor=tk.W, padx=15, pady=5)
+
+        self.progress_bar = ttk.Progressbar(
+            progress_panel, length=350, mode="determinate"
+        )
+        self.progress_bar.pack(padx=15, pady=(5, 15))
+
+        # Self-play section
+        selfplay_panel = tk.Frame(right_frame, bg=COLORS["bg_secondary"])
+        selfplay_panel.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            selfplay_panel,
+            text="Self-Play",
+            font=FONTS["heading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor=tk.W, padx=15, pady=(15, 10))
+
+        self.selfplay_label = tk.Label(
+            selfplay_panel,
+            text="Games: 0/0",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        )
+        self.selfplay_label.pack(anchor=tk.W, padx=15, pady=2)
+
+        self.selfplay_stats = tk.Label(
+            selfplay_panel,
+            text="W: 0  B: 0  D: 0",
+            font=FONTS["mono"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+        )
+        self.selfplay_stats.pack(anchor=tk.W, padx=15, pady=(2, 15))
+
+        # Training section
+        training_panel = tk.Frame(right_frame, bg=COLORS["bg_secondary"])
+        training_panel.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            training_panel,
+            text="Training",
+            font=FONTS["heading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor=tk.W, padx=15, pady=(15, 10))
+
+        self.loss_label = tk.Label(
+            training_panel,
+            text="Loss: --",
+            font=FONTS["body_bold"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["accent"],
+        )
+        self.loss_label.pack(anchor=tk.W, padx=15, pady=2)
+
+        self.policy_label = tk.Label(
+            training_panel,
+            text="Policy: --  |  Value: --",
+            font=FONTS["mono"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+        )
+        self.policy_label.pack(anchor=tk.W, padx=15, pady=2)
+
+        self.lr_label = tk.Label(
+            training_panel,
+            text="LR: --",
+            font=FONTS["mono"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+        )
+        self.lr_label.pack(anchor=tk.W, padx=15, pady=(2, 15))
+
+        # Arena section
+        arena_panel = tk.Frame(right_frame, bg=COLORS["bg_secondary"])
+        arena_panel.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            arena_panel,
+            text="Arena",
+            font=FONTS["heading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor=tk.W, padx=15, pady=(15, 10))
+
+        self.elo_label = tk.Label(
+            arena_panel,
+            text="Elo: 1500",
+            font=("Segoe UI", 16, "bold"),
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["success"],
+        )
+        self.elo_label.pack(anchor=tk.W, padx=15, pady=2)
+
+        self.arena_status = tk.Label(
+            arena_panel,
+            text="",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["warning"],
+        )
+        self.arena_status.pack(anchor=tk.W, padx=15, pady=(2, 15))
+
+        # Status at bottom
+        status_frame = tk.Frame(right_frame, bg=COLORS["bg_primary"])
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=10)
+
+        self.status_label = tk.Label(
+            status_frame,
+            text="Status: Initializing...",
+            font=FONTS["body"],
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_secondary"],
+        )
+        self.status_label.pack(anchor=tk.W)
+
+        note = tk.Label(
+            status_frame,
+            text="(Closing window won't stop training)",
+            font=("Segoe UI", 9),
+            bg=COLORS["bg_primary"],
+            fg="#555555",
+        )
+        note.pack(anchor=tk.W)
+
+        # Store chess module for later use
+        self._chess = chess
+        self._use_ui_module = use_ui_module
+
+        # Schedule queue processing
+        self.root.after(50, self._process_queue)
+        self.root.mainloop()
+
+    def _draw_fallback_board(self):
+        """Draw a simple fallback board when UI module not available."""
+        if not hasattr(self, "canvas"):
+            return
+        self.canvas.delete("all")
+        size = 65
+        light = "#eeeed2"
+        dark = "#769656"
+        for r in range(8):
+            for c in range(8):
+                color = light if (r + c) % 2 == 0 else dark
+                self.canvas.create_rectangle(
+                    c * size,
+                    r * size,
+                    (c + 1) * size,
+                    (r + 1) * size,
+                    fill=color,
+                    outline="",
+                )
+
+    def _process_queue(self):
+        """Process incoming data from training thread."""
+        if not self.running or self.root is None:
+            return
+
+        try:
+            while True:
+                data = self.data_queue.get_nowait()
+                self._update_display(data)
+        except queue.Empty:
+            pass
+
+        if self.running and self.root:
+            self.root.after(50, self._process_queue)
+
+    def _update_display(self, data: dict):
+        """Update GUI with new data."""
+        phase = data.get("phase", "")
+
+        if phase == "iteration_start":
+            self.iteration = data.get("iteration", 0)
+            self.iteration_label.config(
+                text=f"Iteration: {self.iteration}/{self.total_iterations}"
+            )
+            progress = (
+                (self.iteration / self.total_iterations) * 100
+                if self.total_iterations > 0
+                else 0
+            )
+            self.progress_bar["value"] = progress
+            self.status_label.config(text="Status: Self-play...")
+
+        elif phase == "self_play":
+            games = data.get("games_played", 0)
+            total = data.get("total_games", 0)
+            w = data.get("white_wins", 0)
+            b = data.get("black_wins", 0)
+            d = data.get("draws", 0)
+            self.selfplay_label.config(text=f"Games: {games}/{total}")
+            self.selfplay_stats.config(text=f"W: {w}  B: {b}  D: {d}")
+            self.current_game = games
+
+        elif phase == "board_update":
+            fen = data.get("fen", "")
+            self.move_number = data.get("move_number", 0)
+            move_san = data.get("move_san", "")
+
+            if self._use_ui_module and self.board_widget and fen:
+                try:
+                    # Reconstruct full FEN for chess.Board
+                    full_fen = fen + " w - - 0 1"
+                    board = self._chess.Board(full_fen)
+                    self.board_widget.set_board(board)
+
+                    # Set last move highlight
+                    last_move = data.get("last_move")
+                    if last_move:
+                        (from_row, from_col), (to_row, to_col) = last_move
+                        from_sq = self._chess.square(from_col, 7 - from_row)
+                        to_sq = self._chess.square(to_col, 7 - to_row)
+                        move = self._chess.Move(from_sq, to_sq)
+                        self.board_widget.set_last_move(move)
+                except Exception:
+                    pass
+
+            self.game_label.config(
+                text=f"Game: {self.current_game} | Move: {self.move_number}"
+            )
+            if move_san:
+                self.move_label.config(text=f"Last: {move_san}")
+
+        elif phase == "training":
+            total_loss = data.get("total_loss", 0)
+            policy_loss = data.get("policy_loss", 0)
+            value_loss = data.get("value_loss", 0)
+            self.loss_label.config(text=f"Loss: {total_loss:.4f}")
+            self.policy_label.config(
+                text=f"Policy: {policy_loss:.4f}  |  Value: {value_loss:.4f}"
+            )
+            self.status_label.config(text="Status: Training...")
+
+        elif phase == "training_start":
+            self.status_label.config(text="Status: Training...")
+
+        elif phase == "iteration_complete":
+            stats = data.get("stats", {})
+            training_stats = stats.get("training_stats", {})
+            final_loss = training_stats.get("avg_total_loss", 0)
+            if final_loss > 0:
+                self.loss_label.config(text=f"Loss: {final_loss:.4f}")
+            lr = stats.get("learning_rate", 0)
+            self.lr_label.config(text=f"LR: {lr:.6f}")
+            self.status_label.config(text="Status: Iteration complete")
+
+        elif phase == "arena_start":
+            self.status_label.config(text="Status: Arena evaluation...")
+
+        elif phase == "arena_complete":
+            elo = data.get("elo", 1500)
+            best_elo = data.get("best_elo", elo)
+            is_new_best = data.get("is_new_best", False)
+            self.elo_label.config(text=f"Elo: {elo:.0f} (best: {best_elo:.0f})")
+            if is_new_best:
+                self.arena_status.config(text="★ NEW BEST MODEL!")
+            else:
+                self.arena_status.config(text="")
+
+        elif phase == "training_complete":
+            self.status_label.config(text="Status: Training complete!")
+            self.progress_bar["value"] = 100
+
+    def _on_close(self):
+        """Handle window close - don't stop training."""
+        self.running = False
+        if self.root:
+            self.root.destroy()
+            self.root = None
+
+    def update(self, data: dict):
+        """Send data to GUI (called from training thread)."""
+        if self.running:
+            self.data_queue.put(data)
+
+    def stop(self):
+        """Stop the GUI."""
+        self.running = False
+        if self.root:
+            try:
+                self.root.after(0, self.root.destroy)
+            except Exception:
+                pass
 
 
 def main() -> int:
@@ -50,42 +498,48 @@ Examples:
     )
 
     parser.add_argument(
-        "--iterations", "-i",
+        "--iterations",
+        "-i",
         type=int,
         default=None,
         help="Number of training iterations",
     )
 
     parser.add_argument(
-        "--games", "-g",
+        "--games",
+        "-g",
         type=int,
         default=None,
         help="Games per iteration",
     )
 
     parser.add_argument(
-        "--simulations", "-s",
+        "--simulations",
+        "-s",
         type=int,
         default=None,
         help="MCTS simulations per move",
     )
 
     parser.add_argument(
-        "--checkpoint", "-c",
+        "--checkpoint",
+        "-c",
         type=str,
         default=None,
         help="Path to checkpoint to resume from",
     )
 
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=str,
         default=None,
         help="Output directory for checkpoints",
     )
 
     parser.add_argument(
-        "--batch-size", "-b",
+        "--batch-size",
+        "-b",
         type=int,
         default=None,
         help="Training batch size",
@@ -131,6 +585,12 @@ Examples:
         type=str,
         default=None,
         help="Resume from checkpoint: 'latest' or iteration number",
+    )
+
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Show GUI window to monitor training (closing window won't stop training)",
     )
 
     args = parser.parse_args()
@@ -200,7 +660,9 @@ Examples:
     # Formula: num_input_planes = (history_length + 1) * 12 + 12 metadata (includes attack maps)
     network_history_length = (network.num_input_planes - 12) // 12 - 1
     if network_history_length != cfg.history_length:
-        print(f"  Adjusting history_length: {cfg.history_length} -> {network_history_length} (from network)")
+        print(
+            f"  Adjusting history_length: {cfg.history_length} -> {network_history_length} (from network)"
+        )
         cfg.history_length = network_history_length
 
     # Create trainer
@@ -229,11 +691,21 @@ Examples:
                 print(f"Invalid resume value: {args.resume_trained}")
                 print("Use 'latest' or an iteration number")
 
+    # Initialize GUI if requested
+    gui: Optional[TrainingGUI] = None
+    if args.gui:
+        gui = TrainingGUI()
+        gui.start(cfg.iterations)
+        print("GUI started (closing window won't stop training)")
+
     # Training state for callback
     iteration_stats = {"prev_loss": None, "last_phase": None}
 
     # Training callback
     def callback(data: dict) -> None:
+        # Send to GUI if active
+        if gui is not None:
+            gui.update(data)
         phase = data.get("phase", "")
         last_phase = iteration_stats["last_phase"]
         iteration_stats["last_phase"] = phase
@@ -247,16 +719,26 @@ Examples:
             w = data.get("white_wins", 0)
             b = data.get("black_wins", 0)
             d = data.get("draws", 0)
+            # Termination details
+            mates = data.get("checkmates", 0)
+            resigns = data.get("resignations", 0)
+            stales = data.get("stalemates", 0)
+            max_mv = data.get("max_moves_reached", 0)
             line = (
                 f"  Self-play: {games}/{total} | {examples} ex | "
-                f"{avg_moves:.0f} moves | {avg_time:.1f}s/game | W:{w} B:{b} D:{d}"
+                f"{avg_moves:.0f} moves | {avg_time:.1f}s | W:{w} B:{b} D:{d} | "
+                f"#:{mates} R:{resigns} S:{stales} M:{max_mv}"
             )
-            # Pad to 100 chars to ensure clean overwrite
-            print(f"\r{line:<100}", end="", flush=True)
+            # Pad to 120 chars to ensure clean overwrite
+            print(f"\r{line:<120}", end="", flush=True)
 
         elif phase == "training_skip":
             reason = data.get("reason", "")
             print(f"\n  Skipping training: {reason}")
+
+        elif phase == "checkpoint_skip":
+            reason = data.get("reason", "")
+            print(f"  [Checkpoint] Skipped: {reason}")
 
         elif phase == "training_start":
             # Print newline to preserve self-play line
@@ -327,7 +809,11 @@ Examples:
         elif phase == "arena_match":
             opponent = data.get("opponent", "")
             # Update progress on same line
-            print(f"\r  Arena: vs {opponent}...                              ", end="", flush=True)
+            print(
+                f"\r  Arena: vs {opponent}...                              ",
+                end="",
+                flush=True,
+            )
 
         elif phase == "arena_complete":
             elo = data.get("elo", 1500)
@@ -338,6 +824,7 @@ Examples:
             vs_random = data.get("vs_random", {})
             vs_best = data.get("vs_best")
             vs_old = data.get("vs_old")
+            vs_pretrained = data.get("vs_pretrained")
 
             print("\n  ========== ARENA EVALUATION ==========")
 
@@ -358,7 +845,9 @@ Examples:
                 sc = vs_best.get("score", 0.5) * 100
                 best_iter = vs_best.get("from_iteration", "?")
                 t = vs_best.get("avg_time", 0)
-                print(f"  vs Best #{best_iter}: {w}W-{l}L-{d}D ({sc:.0f}% score) {t:.1f}s/game")
+                print(
+                    f"  vs Best #{best_iter}: {w}W-{l}L-{d}D ({sc:.0f}% score) {t:.1f}s/game"
+                )
 
             # vs Old
             if vs_old:
@@ -368,7 +857,20 @@ Examples:
                 sc = vs_old.get("score", 0.5) * 100
                 old_iter = vs_old.get("from_iteration", "?")
                 t = vs_old.get("avg_time", 0)
-                print(f"  vs Old #{old_iter}: {w}W-{l}L-{d}D ({sc:.0f}% score) {t:.1f}s/game")
+                print(
+                    f"  vs Old #{old_iter}: {w}W-{l}L-{d}D ({sc:.0f}% score) {t:.1f}s/game"
+                )
+
+            # vs Pretrained
+            if vs_pretrained:
+                w = vs_pretrained.get("wins", 0)
+                l = vs_pretrained.get("losses", 0)
+                d = vs_pretrained.get("draws", 0)
+                sc = vs_pretrained.get("score", 0.5) * 100
+                t = vs_pretrained.get("avg_time", 0)
+                print(
+                    f"  vs Pretrained: {w}W-{l}L-{d}D ({sc:.0f}% score) {t:.1f}s/game"
+                )
 
             # ELO
             print(f"  Elo: {elo:.0f} (best: {best_elo:.0f})")
@@ -392,11 +894,21 @@ Examples:
     try:
         for i in range(start_iteration, cfg.iterations):
             print(f"=== Iteration {i + 1}/{cfg.iterations} ===")
+            # Notify GUI of iteration start
+            if gui is not None:
+                gui.update({"phase": "iteration_start", "iteration": i + 1})
             trainer.train_iteration(callback)
             print()
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by user")
+        if gui is not None:
+            gui.stop()
         return 1
+
+    # Notify completion
+    if gui is not None:
+        gui.update({"phase": "training_complete"})
+        gui.stop()
 
     print("Training complete!")
     return 0
