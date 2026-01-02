@@ -21,8 +21,8 @@ def main():
     parser.add_argument(
         "--dir",
         type=str,
-        default="models",
-        help="Directory containing checkpoints (default: models)",
+        default=None,
+        help="Directory containing checkpoints (default: models for pretrained, checkpoints for iteration)",
     )
     parser.add_argument(
         "--type",
@@ -32,6 +32,10 @@ def main():
         help="Checkpoint type (default: pretrained)",
     )
     args = parser.parse_args()
+
+    # Default directory based on checkpoint type
+    if args.dir is None:
+        args.dir = "checkpoints" if args.type == "iteration" else "models"
 
     checkpoint_dir = Path(args.dir)
     if not checkpoint_dir.exists():
@@ -65,7 +69,7 @@ def main():
     print("=" * 90)
     print()
     print(
-        f"  {'#':<4} {'Epoch':<6} {'Train Loss':<12} {'Val Loss':<12} "
+        f"  {'#':<4} {'Ep/It':<6} {'Train Loss':<12} {'Val Loss':<12} "
         f"{'Train P':<10} {'Train V':<10} {'Val P':<10} {'Val V':<10}"
     )
     print("  " + "-" * 84)
@@ -84,7 +88,8 @@ def main():
         except (ValueError, IndexError):
             checkpoint_num = "?"
 
-        epoch = state.get("epoch", "?")
+        # epoch for pretrained, iteration for training checkpoints
+        epoch = state.get("epoch", state.get("iteration", "?"))
         train_loss = state.get("train_loss", None)
         val_loss = state.get("val_loss", state.get("best_val_loss", None))
         train_policy = state.get("train_policy", None)
@@ -104,8 +109,10 @@ def main():
     print("  " + "-" * 84)
     print()
 
-    # Show note about old checkpoints
-    print("  Note: '-' indicates data not available (old checkpoint format)")
+    # Show notes
+    print("  Note: '-' indicates data not available")
+    if args.type == "iteration":
+        print("        (AlphaZero training has no validation set)")
     print()
 
 
