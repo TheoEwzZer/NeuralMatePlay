@@ -790,9 +790,12 @@ class MCTS:
 
         for move, child in sorted_children[:top_n]:
             pct = (child.visit_count / max(total_visits, 1)) * 100
+            # Negate Q-value: stored Q is from opponent's perspective,
+            # but we want to show value for the player making this move
+            display_q = -child.q_value if child.visit_count > 0 else 0.0
             lines.append(
                 f"{board.san(move):<8} {child.visit_count:>8} {pct:>6.1f}% "
-                f"{child.q_value:>+8.3f} {child.prior:>6.1%}"
+                f"{display_q:>+8.3f} {child.prior:>6.1%}"
             )
 
         lines.append("")
@@ -846,9 +849,12 @@ class MCTS:
         prefix = "├─" if depth > 0 else ""
 
         san_move = board.san(move)
+        # Negate Q-value: stored Q is from opponent's perspective,
+        # but we want to show value for the player making this move
+        display_q = -node.q_value if node.visit_count > 0 else 0.0
         lines.append(
             f"{indent}{prefix}{san_move} "
-            f"(N={node.visit_count}, Q={node.q_value:+.3f}, P={node.prior:.1%})"
+            f"(N={node.visit_count}, Q={display_q:+.3f}, P={node.prior:.1%})"
         )
 
         if depth >= max_depth or not node.children:
