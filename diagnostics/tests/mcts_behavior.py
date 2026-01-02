@@ -56,7 +56,22 @@ def test_mcts_behavior(network, results: TestResults):
         capture_prob = raw_policy[capture_idx] if capture_idx else 0
         print(f"  Queen capture ({capture_move.uci()}): {capture_prob*100:.1f}%")
 
+        # Check value AFTER capturing the queen
+        board_after = board.copy()
+        board_after.push(capture_move)
+        state_after = encode_for_network(board_after, network)
+        _, value_after_capture = network.predict_single(state_after)
+        print(f"  Value after capture: {value_after_capture:+.4f} (should be negative = bad for Black)")
+
+        # Check value after b2b3 for comparison
+        board_b3 = board.copy()
+        board_b3.push(chess.Move.from_uci("b2b3"))
+        state_b3 = encode_for_network(board_b3, network)
+        _, value_after_b3 = network.predict_single(state_b3)
+        print(f"  Value after b2b3:    {value_after_b3:+.4f} (for comparison)")
+
         results.add_diagnostic("mcts", "raw_capture_prob", float(capture_prob))
+        results.add_diagnostic("mcts", "value_after_capture", float(value_after_capture))
         results.add_diagnostic(
             "mcts",
             "raw_capture_is_top",
