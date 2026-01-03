@@ -46,7 +46,7 @@
     "pretrain_mix_ratio": 0.4,
     "pretrain_label_smoothing": 0.1,
     "pretrain_chunks_loaded": 15,
-    "resignation_threshold": 25,
+    "resignation_threshold": null,
     "kl_loss_weight": 0.1
   },
   "network": {
