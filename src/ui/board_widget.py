@@ -779,6 +779,11 @@ class ChessBoardWidget(tk.Canvas):
 
         self._animating = True
 
+        # Set last_move NOW so squares are highlighted during animation
+        # Store the original move (not reversed) for highlighting
+        self._anim_highlight_move = move
+        self.last_move = move
+
         # Calculate start and end positions (center of squares)
         start_x, start_y = self._square_to_coords(from_sq)
         end_x, end_y = self._square_to_coords(to_sq)

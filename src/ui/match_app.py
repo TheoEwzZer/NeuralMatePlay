@@ -378,6 +378,11 @@ class MatchApp:
 
     def _process_queue(self):
         """Process updates from the match thread."""
+        # Skip processing if animation is in progress
+        if self.board_widget.is_animating:
+            self.root.after(50, self._process_queue)
+            return
+
         try:
             while True:
                 msg = self.move_queue.get_nowait()
@@ -385,10 +390,36 @@ class MatchApp:
 
                 if msg_type == "board":
                     board = msg["board"]
-                    self.board_widget.set_board(board)
-                    self.board_widget.last_move = msg.get("last_move")
-                    self.board_widget._draw_board()
-                    self._update_material_display(board)
+                    last_move = msg.get("last_move")
+
+                    if last_move is not None:
+                        # Animate the move: first show board BEFORE the move
+                        board_before = board.copy()
+                        board_before.pop()  # Undo to get state before move
+                        self.board_widget.set_board(board_before)
+
+                        # Store final state for after animation
+                        final_board = board
+                        final_move = last_move
+
+                        def on_animation_complete():
+                            self.board_widget.set_board(final_board)
+                            self.board_widget.last_move = final_move
+                            self.board_widget._draw_board()
+                            self._update_material_display(final_board)
+
+                        # Animate with 300ms duration
+                        self.board_widget.animate_move(
+                            last_move, duration_ms=300,
+                            on_complete=on_animation_complete
+                        )
+                        # Exit loop to let animation complete before processing more
+                        break
+                    else:
+                        # No move to animate (initial position)
+                        self.board_widget.set_board(board)
+                        self.board_widget._draw_board()
+                        self._update_material_display(board)
                 elif msg_type == "move":
                     self.move_label.configure(text=f"Move: {msg['move_num']}")
                 elif msg_type == "game_start":
