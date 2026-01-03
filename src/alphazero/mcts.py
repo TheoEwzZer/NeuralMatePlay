@@ -244,6 +244,10 @@ class MCTS:
             # Select best child using PUCT
             move, child = self._select_child(node, board)
 
+            # Safety check: verify move is legal (transposition table can cause issues)
+            if move is None or move not in board.legal_moves:
+                break
+
             # Apply virtual loss
             child.virtual_loss += 1
 
@@ -321,6 +325,11 @@ class MCTS:
 
             # Select best child using PUCT
             move, child = self._select_child(node, board)
+
+            # Safety check: verify move is legal (transposition table can cause issues)
+            if move is None or move not in board.legal_moves:
+                # Node has stale children from transposition, treat as leaf
+                break
 
             # Apply virtual loss (prevents other traversals from selecting same path)
             child.virtual_loss += 1
@@ -647,8 +656,11 @@ class MCTS:
         Returns:
             MCTSNode for this position.
         """
-        # Use board FEN as key (without move counters for transposition)
-        key = board.board_fen()
+        # Use board FEN + turn as key (different turns = different nodes)
+        # This prevents transposition bugs where same position with different
+        # side to move would share children (causing illegal moves)
+        turn = "w" if board.turn == chess.WHITE else "b"
+        key = f"{board.board_fen()} {turn}"
 
         if key not in self._transposition_table:
             self._transposition_table[key] = MCTSNode()
