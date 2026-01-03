@@ -725,13 +725,23 @@ Examples:
             stales = data.get("stalemates", 0)
             max_mv = data.get("max_moves_reached", 0)
             resign_str = f" R:{resigns}" if resigns > 0 else ""
+
+            # Calculate ETA for current iteration
+            eta_str = ""
+            if games > 0 and avg_time > 0:
+                remaining_games = total - games
+                eta_seconds = remaining_games * avg_time
+                if eta_seconds > 0:
+                    minutes, seconds = divmod(int(eta_seconds), 60)
+                    eta_str = f" | ETA: {minutes}m{seconds:02d}s"
+
             line = (
                 f"  Self-play: {games}/{total} | {examples} ex | "
                 f"{avg_moves:.0f} moves | {avg_time:.1f}s | W:{w} B:{b} D:{d} | "
-                f"#:{mates}{resign_str} S:{stales} M:{max_mv}"
+                f"#:{mates}{resign_str} S:{stales} M:{max_mv}{eta_str}"
             )
-            # Pad to 120 chars to ensure clean overwrite
-            print(f"\r{line:<120}", end="", flush=True)
+            # Pad to 140 chars to ensure clean overwrite
+            print(f"\r{line:<140}", end="", flush=True)
 
         elif phase == "training_skip":
             reason = data.get("reason", "")
