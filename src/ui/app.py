@@ -121,9 +121,9 @@ class ChessGameApp:
         self.root.bind("<Control-n>", lambda e: self._new_game_with_confirm())
         self.root.bind("<Control-N>", lambda e: self._new_game_with_confirm())
 
-        # Ctrl+Z: Undo
-        self.root.bind("<Control-z>", lambda e: self._undo_move())
-        self.root.bind("<Control-Z>", lambda e: self._undo_move())
+        # Ctrl+Z: Back (same as Left arrow)
+        self.root.bind("<Control-z>", lambda e: self._back_one_move())
+        self.root.bind("<Control-Z>", lambda e: self._back_one_move())
 
         # Arrow keys: Navigate history
         self.root.bind("<Left>", lambda e: self._back_one_move())
@@ -472,17 +472,9 @@ class ChessGameApp:
             command=self._new_game,
             style="accent",
         )
-        self.new_game_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        self.new_game_btn.pack(side="left", expand=True, fill="x")
 
-        self.undo_btn = create_styled_button(
-            btn_row1,
-            "Undo",
-            command=self._undo_move,
-            style="normal",
-        )
-        self.undo_btn.pack(side="left", expand=True, fill="x", padx=(5, 0))
-
-        # Analysis controls (back/forward one move)
+        # Navigation controls (back/forward one move)
         btn_row_analysis = tk.Frame(controls_frame, bg=COLORS["bg_primary"])
         btn_row_analysis.pack(fill="x", pady=(5, 5))
 
@@ -523,8 +515,7 @@ class ChessGameApp:
 
         # Add tooltips to buttons
         create_tooltip(self.new_game_btn, "Start a new game (Ctrl+N)")
-        create_tooltip(self.undo_btn, "Undo last move(s) (Ctrl+Z)")
-        create_tooltip(self.back_btn, "Go back one move (Left arrow)")
+        create_tooltip(self.back_btn, "Go back one move (Ctrl+Z / Left arrow)")
         create_tooltip(self.forward_btn, "Go forward one move (Right arrow)")
         create_tooltip(self.flip_btn, "Flip the board orientation (F)")
         create_tooltip(self.load_btn, "Load a trained neural network")
@@ -724,24 +715,6 @@ class ChessGameApp:
         self.board_widget.drag_from = None
         self.board_widget.drag_piece = None
         self.board_widget._draw_board()
-
-    def _undo_move(self) -> None:
-        """Undo the last move(s)."""
-        if self.ai_thinking:
-            return
-
-        # Clear forward history when undoing normally
-        self.undone_moves.clear()
-
-        if self.game_mode == "human_vs_ai":
-            # Undo both AI and human moves
-            self.board_widget.undo_move()
-            self.board_widget.undo_move()
-        else:
-            # human_vs_human and ai_vs_ai: undo single move
-            self.board_widget.undo_move()
-
-        self._update_game_info()
 
     def _back_one_move(self) -> None:
         """
