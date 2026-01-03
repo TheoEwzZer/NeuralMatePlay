@@ -183,11 +183,15 @@ class MCTS:
                         if self.temperature > 0:
                             policy[idx] = child.visit_count / total_visits
                         else:
-                            # Temperature 0: deterministic selection
+                            # Temperature 0: deterministic selection by visits, then Q-value
+                            max_visits = max(c.visit_count for c in root.children.values())
+                            best_q = min(
+                                c.q_value for c in root.children.values()
+                                if c.visit_count == max_visits
+                            )
                             policy[idx] = (
                                 1.0
-                                if child.visit_count
-                                == max(c.visit_count for c in root.children.values())
+                                if child.visit_count == max_visits and child.q_value == best_q
                                 else 0.0
                             )
 
@@ -774,9 +778,9 @@ class MCTS:
             if winning:
                 best_move = min(winning, key=lambda x: x[1].q_value)[0]
             else:
-                # Get most visited move (use prior as tiebreaker when visits are equal)
+                # Get most visited move (use Q-value as tiebreaker: lower = better for us)
                 best_move = max(
-                    node.children.items(), key=lambda x: (x[1].visit_count, x[1].prior)
+                    node.children.items(), key=lambda x: (x[1].visit_count, -x[1].q_value)
                 )[0]
             pv.append(best_move)
 
@@ -826,10 +830,10 @@ class MCTS:
         lines.append(f"Root value: {root.q_value:+.3f}")
         lines.append("")
 
-        # Sort children by visit count (use prior as tiebreaker when visits are equal)
+        # Sort children by visit count (use Q-value as tiebreaker: lower = better for us)
         sorted_children = sorted(
             root.children.items(),
-            key=lambda x: (x[1].visit_count, x[1].prior),
+            key=lambda x: (x[1].visit_count, -x[1].q_value if x[1].visit_count > 0 else x[1].prior),
             reverse=True,
         )
 
