@@ -657,7 +657,7 @@ class AlphaZeroTrainer:
         if self._pretrained_network is None:
             return torch.tensor(0.0, device=states.device)
 
-        with torch.inference_mode():
+        with torch.no_grad():
             pretrain_policy, _, _ = self._pretrained_network(states)
             pretrain_policy = torch.nn.functional.softmax(pretrain_policy, dim=-1)
 
