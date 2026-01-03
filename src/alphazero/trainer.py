@@ -579,7 +579,10 @@ class AlphaZeroTrainer:
 
                         # Add KL divergence loss to prevent catastrophic forgetting
                         kl_loss = None
-                        if self.config.kl_loss_weight > 0 and self._pretrained_network is not None:
+                        if (
+                            self.config.kl_loss_weight > 0
+                            and self._pretrained_network is not None
+                        ):
                             kl_loss = self._kl_divergence_loss(pred_policies, states_t)
                             loss = loss + self.config.kl_loss_weight * kl_loss
 
@@ -594,7 +597,10 @@ class AlphaZeroTrainer:
 
                     # Add KL divergence loss to prevent catastrophic forgetting
                     kl_loss = None
-                    if self.config.kl_loss_weight > 0 and self._pretrained_network is not None:
+                    if (
+                        self.config.kl_loss_weight > 0
+                        and self._pretrained_network is not None
+                    ):
                         kl_loss = self._kl_divergence_loss(pred_policies, states_t)
                         loss = loss + self.config.kl_loss_weight * kl_loss
 
@@ -610,7 +616,11 @@ class AlphaZeroTrainer:
             total_policy_loss += epoch_policy_loss
             total_value_loss += epoch_value_loss
             total_kl_loss += epoch_kl_loss
-            total_loss += epoch_policy_loss + epoch_value_loss + self.config.kl_loss_weight * epoch_kl_loss
+            total_loss += (
+                epoch_policy_loss
+                + epoch_value_loss
+                + self.config.kl_loss_weight * epoch_kl_loss
+            )
 
             if callback:
                 callback(
@@ -621,7 +631,11 @@ class AlphaZeroTrainer:
                         "policy_loss": epoch_policy_loss / max(1, batches_per_epoch),
                         "value_loss": epoch_value_loss / max(1, batches_per_epoch),
                         "kl_loss": epoch_kl_loss / max(1, batches_per_epoch),
-                        "total_loss": (epoch_policy_loss + epoch_value_loss + self.config.kl_loss_weight * epoch_kl_loss)
+                        "total_loss": (
+                            epoch_policy_loss
+                            + epoch_value_loss
+                            + self.config.kl_loss_weight * epoch_kl_loss
+                        )
                         / max(1, batches_per_epoch),
                     }
                 )
@@ -1053,8 +1067,10 @@ class AlphaZeroTrainer:
                 for param_group in self._optimizer.param_groups:
                     param_group["lr"] = state["learning_rate"]
 
-            if self._scaler and "scaler_state" in state:
-                self._scaler.load_state_dict(state["scaler_state"])
+            # Note: Don't restore scaler state - it can cause issues after resume
+            # The scaler will auto-adjust its scale factor during training
+            if self._scaler:
+                self._scaler = GradScaler("cuda")  # Fresh scaler
 
         # Load buffer
         buffer = checkpoint.get("buffer")
