@@ -211,6 +211,9 @@ class ChessBoardWidget(tk.Canvas):
         # Animation state
         self._invalid_move_flash: int | None = None
         self._flash_count = 0
+        self._animation_id: int | None = None
+        self._animating = False
+        self._anim_rook: dict | None = None  # For castling animation
 
         # Piece image cache (for SVG rendering)
         self._piece_cache: dict[tuple[str, int], Any] = {}
@@ -528,9 +531,14 @@ class ChessBoardWidget(tk.Canvas):
             self.create_text(x, y, text=rank_label, font=bold_font,
                            fill=text_color, anchor="nw")
 
+    @property
+    def is_animating(self) -> bool:
+        """Check if an animation is in progress."""
+        return self._animating
+
     def _on_click(self, event: tk.Event) -> None:
         """Handle mouse click."""
-        if not self.interactive:
+        if not self.interactive or self._animating:
             return
 
         # Check if it's the player's turn
@@ -578,7 +586,7 @@ class ChessBoardWidget(tk.Canvas):
 
     def _on_drag(self, event: tk.Event) -> None:
         """Handle mouse drag."""
-        if not self.interactive or self.drag_piece is None:
+        if not self.interactive or self._animating or self.drag_piece is None:
             return
 
         self.dragging = True
@@ -587,7 +595,7 @@ class ChessBoardWidget(tk.Canvas):
 
     def _on_release(self, event: tk.Event) -> None:
         """Handle mouse release."""
-        if not self.interactive:
+        if not self.interactive or self._animating:
             return
 
         if self.dragging and self.drag_from is not None:
@@ -646,19 +654,34 @@ class ChessBoardWidget(tk.Canvas):
         dialog = PromotionDialog(self, color, (screen_x, screen_y))
         return dialog.show()
 
-    def _make_move(self, move: chess.Move) -> None:
+    def _make_move(self, move: chess.Move, animate: bool = True) -> None:
         """Make a move and trigger callback."""
-        self.last_move = move
-        self.board.push(move)
+        # Skip animation if piece was dragged (user already "animated" it manually)
+        should_animate = animate and not self.dragging
+
+        # Clear selection state
         self.selected_square = None
         self.legal_moves = set()
         self.drag_from = None
         self.drag_piece = None
 
-        self._draw_board()
+        if should_animate:
+            # Animate the move, then apply it
+            def on_animation_complete():
+                self.last_move = move
+                self.board.push(move)
+                self._draw_board()
+                if self.on_move:
+                    self.on_move(move)
 
-        if self.on_move:
-            self.on_move(move)
+            self.animate_move(move, duration_ms=200, on_complete=on_animation_complete)
+        else:
+            # Instant move (no animation for drag-and-drop)
+            self.last_move = move
+            self.board.push(move)
+            self._draw_board()
+            if self.on_move:
+                self.on_move(move)
 
     def get_board(self) -> chess.Board:
         """Get the current board state."""
@@ -718,3 +741,201 @@ class ChessBoardWidget(tk.Canvas):
 
         self._flash_count += 1
         self._invalid_move_flash = self.after(100, lambda: self._do_flash(square))
+
+    def animate_move(
+        self,
+        move: chess.Move,
+        duration_ms: int = 300,
+        on_complete: Callable[[], None] | None = None,
+        reverse: bool = False,
+    ) -> None:
+        """
+        Animate a piece moving from one square to another.
+
+        Args:
+            move: The move to animate.
+            duration_ms: Animation duration in milliseconds.
+            on_complete: Callback when animation completes.
+            reverse: If True, animate the move in reverse (for undo).
+        """
+        # Cancel any ongoing animation
+        if self._animation_id is not None:
+            self.after_cancel(self._animation_id)
+            self._animation_id = None
+
+        # Determine from/to squares based on direction
+        if reverse:
+            from_sq, to_sq = move.to_square, move.from_square
+        else:
+            from_sq, to_sq = move.from_square, move.to_square
+
+        # Get the piece to animate
+        piece = self.board.piece_at(from_sq)
+        if piece is None:
+            # No piece to animate, just call callback
+            if on_complete:
+                on_complete()
+            return
+
+        self._animating = True
+
+        # Calculate start and end positions (center of squares)
+        start_x, start_y = self._square_to_coords(from_sq)
+        end_x, end_y = self._square_to_coords(to_sq)
+
+        # Center positions
+        start_x += self.square_size // 2
+        start_y += self.square_size // 2
+        end_x += self.square_size // 2
+        end_y += self.square_size // 2
+
+        # Store animation state for main piece (king for castling)
+        self._anim_piece_symbol = piece.symbol()
+        self._anim_start = (start_x, start_y)
+        self._anim_end = (end_x, end_y)
+        self._anim_duration = duration_ms
+        self._anim_start_time = None
+        self._anim_on_complete = on_complete
+        self._anim_from_square = from_sq
+
+        # Check for castling - need to animate rook too
+        self._anim_rook = None
+        is_castling = (not reverse and self.board.is_castling(move)) or \
+                      (reverse and piece.piece_type == chess.KING and
+                       abs(chess.square_file(move.from_square) - chess.square_file(move.to_square)) == 2)
+
+        if is_castling:
+            # Determine rook's from and to squares
+            if chess.square_file(move.to_square) == 6:  # Kingside (g-file)
+                rook_from = chess.square(7, chess.square_rank(move.from_square))  # h-file
+                rook_to = chess.square(5, chess.square_rank(move.from_square))    # f-file
+            else:  # Queenside (c-file)
+                rook_from = chess.square(0, chess.square_rank(move.from_square))  # a-file
+                rook_to = chess.square(3, chess.square_rank(move.from_square))    # d-file
+
+            # Swap for reverse animation
+            if reverse:
+                rook_from, rook_to = rook_to, rook_from
+
+            rook = self.board.piece_at(rook_from)
+            if rook:
+                rook_start_x, rook_start_y = self._square_to_coords(rook_from)
+                rook_end_x, rook_end_y = self._square_to_coords(rook_to)
+
+                self._anim_rook = {
+                    "symbol": rook.symbol(),
+                    "start": (rook_start_x + self.square_size // 2,
+                              rook_start_y + self.square_size // 2),
+                    "end": (rook_end_x + self.square_size // 2,
+                            rook_end_y + self.square_size // 2),
+                    "from_square": rook_from,
+                }
+
+        # Start animation loop
+        self._animate_step()
+
+    def _animate_step(self) -> None:
+        """Perform one step of the animation."""
+        import time
+
+        if self._anim_start_time is None:
+            self._anim_start_time = time.time() * 1000  # ms
+
+        elapsed = time.time() * 1000 - self._anim_start_time
+        progress = min(elapsed / self._anim_duration, 1.0)
+
+        # Ease-out cubic for smooth deceleration
+        eased = 1 - (1 - progress) ** 3
+
+        # Calculate current position for main piece (king)
+        start_x, start_y = self._anim_start
+        end_x, end_y = self._anim_end
+        current_x = start_x + (end_x - start_x) * eased
+        current_y = start_y + (end_y - start_y) * eased
+
+        # Collect squares to exclude (for castling, exclude both king and rook)
+        exclude_squares = [self._anim_from_square]
+        if self._anim_rook:
+            exclude_squares.append(self._anim_rook["from_square"])
+
+        # Redraw board without the animated pieces
+        self._draw_board_without_squares(exclude_squares)
+
+        # Draw the animated king at current position
+        self._draw_animated_piece(self._anim_piece_symbol, current_x, current_y)
+
+        # Draw the animated rook if castling
+        if self._anim_rook:
+            rook_start_x, rook_start_y = self._anim_rook["start"]
+            rook_end_x, rook_end_y = self._anim_rook["end"]
+            rook_current_x = rook_start_x + (rook_end_x - rook_start_x) * eased
+            rook_current_y = rook_start_y + (rook_end_y - rook_start_y) * eased
+            self._draw_animated_piece(self._anim_rook["symbol"], rook_current_x, rook_current_y)
+
+        if progress < 1.0:
+            # Continue animation (~60 FPS)
+            self._animation_id = self.after(16, self._animate_step)
+        else:
+            # Animation complete
+            self._animating = False
+            self._animation_id = None
+            self._anim_rook = None
+            self.delete("animated_piece")
+
+            if self._anim_on_complete:
+                self._anim_on_complete()
+
+    def _draw_animated_piece(self, symbol: str, x: float, y: float) -> None:
+        """Draw a piece at the given position during animation."""
+        if self._use_svg:
+            image = self._get_piece_image(symbol)
+            self.create_image(
+                x, y,
+                image=image,
+                anchor="center",
+                tags="animated_piece",
+            )
+        else:
+            # Unicode fallback
+            unicode_char = PIECE_UNICODE.get(symbol, "?")
+            is_white = symbol.isupper()
+            fill_color = "#ffffff" if is_white else "#000000"
+            outline_color = "#000000" if is_white else "#ffffff"
+            font = ("Segoe UI Symbol", self.square_size // 2)
+
+            for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                self.create_text(
+                    x + dx, y + dy,
+                    text=unicode_char,
+                    font=font,
+                    fill=outline_color,
+                    tags="animated_piece",
+                )
+            self.create_text(
+                x, y,
+                text=unicode_char,
+                font=font,
+                fill=fill_color,
+                tags="animated_piece",
+            )
+
+    def _draw_board_without_squares(self, exclude_squares: list[int]) -> None:
+        """Redraw the board but skip drawing pieces at excluded squares."""
+        self.delete("all")
+
+        # Draw squares
+        for square in chess.SQUARES:
+            self._draw_square(square)
+
+        # Draw coordinates
+        self._draw_coordinates()
+
+        # Draw pieces except those being animated
+        for square in chess.SQUARES:
+            if square not in exclude_squares:
+                if not (self.dragging and square == self.drag_from):
+                    self._draw_piece(square)
+
+        # Draw dragged piece on top
+        if self.dragging and self.drag_piece and self.drag_pos:
+            self._draw_dragged_piece()

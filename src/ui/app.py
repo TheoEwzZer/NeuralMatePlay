@@ -750,7 +750,7 @@ class ChessGameApp:
         In Human vs AI: undoes your move + AI's response so you can try different moves.
         In AI vs AI / Human vs Human: undoes one move.
         """
-        if self.ai_thinking:
+        if self.ai_thinking or self.board_widget.is_animating:
             return
 
         board = self.board_widget.get_board()
@@ -760,49 +760,90 @@ class ChessGameApp:
         # Cancel AI if it's the AI's turn
         self.ai_cancelled = True
 
+        # Animation duration for back/forward (2x faster than normal)
+        anim_duration = 100
+
         if self.game_mode == "human_vs_ai":
-            # Need at least 2 moves to go back (your move + AI response)
-            # Or 1 move if it's currently your turn (AI hasn't responded yet)
             if board.turn == self.human_color:
-                # It's your turn - AI already responded, undo both
+                # It's your turn - AI already responded, undo both moves with animation
                 if len(board.move_stack) >= 2:
-                    # Save AI move then your move
                     ai_move = board.peek()
-                    board.pop()
-                    human_move = board.peek()
-                    board.pop()
-                    self.undone_moves.append((human_move, ai_move))
-                    self.board_widget.set_board(board)
-                    self.board_widget.set_last_move(
-                        board.peek() if board.move_stack else None
+                    self.undone_moves.append((board.move_stack[-2], ai_move))
+
+                    # Animate AI move in reverse first
+                    def after_ai_undo():
+                        board.pop()  # Remove AI move
+                        human_move = board.peek()
+
+                        # Now animate human move in reverse
+                        def after_human_undo():
+                            board.pop()  # Remove human move
+                            self.board_widget.set_board(board)
+                            self.board_widget.set_last_move(
+                                board.peek() if board.move_stack else None
+                            )
+                            self._update_game_info()
+                            self.status_label.configure(
+                                text="Try a different move!",
+                                fg=COLORS["accent"],
+                            )
+
+                        self.board_widget.animate_move(
+                            human_move, duration_ms=anim_duration,
+                            on_complete=after_human_undo, reverse=True
+                        )
+
+                    self.board_widget.animate_move(
+                        ai_move, duration_ms=anim_duration,
+                        on_complete=after_ai_undo, reverse=True
                     )
             else:
                 # It's AI's turn - just undo your move
                 if len(board.move_stack) >= 1:
                     human_move = board.peek()
-                    board.pop()
                     self.undone_moves.append((human_move, None))
-                    self.board_widget.set_board(board)
-                    self.board_widget.set_last_move(
-                        board.peek() if board.move_stack else None
+
+                    def after_undo():
+                        board.pop()
+                        self.board_widget.set_board(board)
+                        self.board_widget.set_last_move(
+                            board.peek() if board.move_stack else None
+                        )
+                        self._update_game_info()
+                        self.status_label.configure(
+                            text="Try a different move!",
+                            fg=COLORS["accent"],
+                        )
+
+                    self.board_widget.animate_move(
+                        human_move, duration_ms=anim_duration,
+                        on_complete=after_undo, reverse=True
                     )
         else:
-            # AI vs AI / Human vs Human - just undo one move
+            # AI vs AI / Human vs Human - just undo one move with animation
             last_move = board.peek()
             self.undone_moves.append((last_move, None))
-            self.board_widget.undo_move()
 
-        self._update_game_info()
+            def after_undo():
+                board.pop()
+                self.board_widget.set_board(board)
+                self.board_widget.set_last_move(
+                    board.peek() if board.move_stack else None
+                )
+                self._update_game_info()
+                self.status_label.configure(
+                    text="Try a different move!",
+                    fg=COLORS["accent"],
+                )
 
-        # Update status to show we're in analysis mode
-        self.status_label.configure(
-            text="Try a different move!",
-            fg=COLORS["accent"],
-        )
+            self.board_widget.animate_move(
+                last_move, duration_ms=anim_duration,
+                on_complete=after_undo, reverse=True
+            )
 
     def _forward_one_move(self) -> None:
         """Go forward (replay the undone moves)."""
-        if self.ai_thinking:
+        if self.ai_thinking or self.board_widget.is_animating:
             return
 
         if not self.undone_moves:
@@ -820,33 +861,55 @@ class ChessGameApp:
             )
             return
 
-        # Play the human move
-        board.push(human_move)
+        # Animation duration for back/forward (2x faster than normal)
+        anim_duration = 100
 
-        # Play the AI move if there was one
-        if ai_move and ai_move in board.legal_moves:
-            board.push(ai_move)
+        # Animate the human move first
+        def after_human_move():
+            board.push(human_move)
             self.board_widget.set_board(board)
-            self.board_widget.set_last_move(ai_move)
-        else:
-            self.board_widget.set_board(board)
-            self.board_widget.set_last_move(human_move)
-            # If there was supposed to be an AI move but it's not valid, trigger AI
-            if ai_move and self.game_mode == "human_vs_ai":
+
+            # Play the AI move if there was one
+            if ai_move and ai_move in board.legal_moves:
+                def after_ai_move():
+                    board.push(ai_move)
+                    self.board_widget.set_board(board)
+                    self.board_widget.set_last_move(ai_move)
+                    self._update_game_info()
+
+                    # If we're at the end and it's AI's turn, trigger AI
+                    if (
+                        self.game_mode == "human_vs_ai"
+                        and board.turn != self.human_color
+                        and not board.is_game_over()
+                        and not self.undone_moves
+                    ):
+                        self._trigger_ai_move()
+
+                self.board_widget.animate_move(
+                    ai_move, duration_ms=anim_duration,
+                    on_complete=after_ai_move
+                )
+            else:
+                self.board_widget.set_last_move(human_move)
                 self._update_game_info()
-                self._trigger_ai_move()
-                return
 
-        self._update_game_info()
+                # If there was supposed to be an AI move but it's not valid, trigger AI
+                if ai_move and self.game_mode == "human_vs_ai":
+                    self._trigger_ai_move()
+                # If we're at the end and it's AI's turn, trigger AI
+                elif (
+                    self.game_mode == "human_vs_ai"
+                    and board.turn != self.human_color
+                    and not board.is_game_over()
+                    and not self.undone_moves
+                ):
+                    self._trigger_ai_move()
 
-        # If we're at the end and it's AI's turn, trigger AI
-        if (
-            self.game_mode == "human_vs_ai"
-            and board.turn != self.human_color
-            and not board.is_game_over()
-            and not self.undone_moves
-        ):
-            self._trigger_ai_move()
+        self.board_widget.animate_move(
+            human_move, duration_ms=anim_duration,
+            on_complete=after_human_move
+        )
 
     def _flip_board(self) -> None:
         """Flip the board orientation."""
@@ -943,7 +1006,7 @@ class ChessGameApp:
             pass
 
     def _apply_ai_move(self, move: chess.Move) -> None:
-        """Apply AI move to the board."""
+        """Apply AI move to the board with animation."""
         self.ai_thinking = False
 
         # Hide thinking indicator
@@ -952,18 +1015,24 @@ class ChessGameApp:
 
         board = self.board_widget.get_board()
         if move in board.legal_moves:
-            board.push(move)
-            self.board_widget.set_board(board)
-            self.board_widget.set_last_move(move)
+            # Animate the move, then apply it after animation completes
+            def on_animation_complete():
+                board.push(move)
+                self.board_widget.set_board(board)
+                self.board_widget.set_last_move(move)
+                self._update_game_info()
 
-        self._update_game_info()
+                updated_board = self.board_widget.get_board()
+                if updated_board.is_game_over():
+                    self._show_game_over()
+                elif self.game_mode == "ai_vs_ai":
+                    # Continue AI vs AI game
+                    self.root.after(300, self._trigger_ai_move)
 
-        board = self.board_widget.get_board()
-        if board.is_game_over():
-            self._show_game_over()
-        elif self.game_mode == "ai_vs_ai":
-            # Continue AI vs AI game
-            self.root.after(500, self._trigger_ai_move)
+            # Start animation (300ms duration)
+            self.board_widget.animate_move(move, duration_ms=300, on_complete=on_animation_complete)
+        else:
+            self._update_game_info()
 
     def _calculate_material(self, board: chess.Board) -> tuple[int, int]:
         """
