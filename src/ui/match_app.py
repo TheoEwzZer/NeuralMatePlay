@@ -16,6 +16,7 @@ except ImportError:
 
 from .board_widget import ChessBoardWidget
 from .styles import COLORS, FONTS, STATUS_ICONS, create_tooltip
+from chess_encoding.board_utils import get_material_count
 
 
 class MatchApp:
@@ -28,14 +29,12 @@ class MatchApp:
         num_games: int = 10,
         num_simulations: int = 200,
         move_delay: float = 0.0,
-        no_adjudication: bool = False,
     ):
         self.network1_path = network1_path
         self.network2_path = network2_path
         self.num_games = num_games
         self.num_simulations = num_simulations
         self.move_delay = move_delay
-        self.no_adjudication = no_adjudication
 
         # Results tracking
         self.results = {"player1": 0, "player2": 0, "draws": 0}
@@ -347,22 +346,7 @@ class MatchApp:
 
     def _calculate_material(self, board) -> tuple[int, int]:
         """Calculate material for each side."""
-        piece_values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-        }
-        white_mat = sum(
-            len(board.pieces(pt, chess.WHITE)) * val
-            for pt, val in piece_values.items()
-        )
-        black_mat = sum(
-            len(board.pieces(pt, chess.BLACK)) * val
-            for pt, val in piece_values.items()
-        )
-        return white_mat, black_mat
+        return get_material_count(board, chess.WHITE), get_material_count(board, chess.BLACK)
 
     def _update_material_display(self, board):
         """Update material display label."""
@@ -564,14 +548,6 @@ class MatchApp:
                     })
                     self.move_queue.put({"type": "move", "move_num": move_count})
 
-                    # Check adjudication (unless disabled)
-                    adjudicated = False
-                    adj_reason = ""
-                    if not self.no_adjudication:
-                        adjudicated, winner, adj_reason = arena._check_adjudication(board, move_count)
-                        if adjudicated:
-                            break
-
                     # Delay between moves
                     time.sleep(self.speed_var.get())
 
@@ -582,8 +558,6 @@ class MatchApp:
                 if board.is_checkmate():
                     winner = "black" if board.turn == chess.WHITE else "white"
                     termination = "checkmate"
-                elif adjudicated:
-                    termination = f"adj: {adj_reason}"
                 elif board.is_stalemate():
                     winner = "draw"
                     termination = "stalemate"

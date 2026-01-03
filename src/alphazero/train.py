@@ -721,10 +721,8 @@ Examples:
             d = data.get("draws", 0)
             # Termination details
             mates = data.get("checkmates", 0)
-            resigns = data.get("resignations", 0)
             stales = data.get("stalemates", 0)
             max_mv = data.get("max_moves_reached", 0)
-            resign_str = f" R:{resigns}" if resigns > 0 else ""
 
             # Calculate ETA for current iteration
             eta_str = ""
@@ -742,7 +740,7 @@ Examples:
             line = (
                 f"  Self-play: {games}/{total} | {examples} ex | "
                 f"{avg_moves:.0f} moves | {avg_time:.1f}s | W:{w} B:{b} D:{d} | "
-                f"#:{mates}{resign_str} S:{stales} M:{max_mv}{eta_str}"
+                f"#:{mates} S:{stales} M:{max_mv}{eta_str}"
             )
             # Pad to 140 chars to ensure clean overwrite
             print(f"\r{line:<140}", end="", flush=True)

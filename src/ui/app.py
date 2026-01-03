@@ -37,6 +37,7 @@ from .styles import (
 )
 from .board_widget import ChessBoardWidget
 from .training_panel import TrainingPanel, TrainingConfigDialog
+from chess_encoding.board_utils import get_material_count
 
 
 class ChessGameApp:
@@ -1014,22 +1015,7 @@ class ChessGameApp:
         Returns:
             Tuple of (white_material, black_material).
         """
-        piece_values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-        }
-
-        white_material = 0
-        black_material = 0
-
-        for piece_type, value in piece_values.items():
-            white_material += len(board.pieces(piece_type, chess.WHITE)) * value
-            black_material += len(board.pieces(piece_type, chess.BLACK)) * value
-
-        return white_material, black_material
+        return get_material_count(board, chess.WHITE), get_material_count(board, chess.BLACK)
 
     def _update_game_info(self) -> None:
         """Update game information display."""

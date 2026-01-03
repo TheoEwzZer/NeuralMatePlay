@@ -83,7 +83,6 @@ class TrainingConfig:
     pretrain_chunks_dir: str = "data/chunks"  # Path to pretrain chunks (same as pretraining.chunks_dir)
     pretrain_label_smoothing: float = 0.1  # Label smoothing for pretrain targets (0.1 = 10% smoothing)
     pretrain_chunks_loaded: int = 15  # Number of pretrain chunks to keep in memory
-    resignation_threshold: Optional[int] = 25  # Material threshold for resignation (None = disabled)
     kl_loss_weight: float = 0.0  # Weight for KL divergence loss to pretrained model (0.1 recommended)
 
 

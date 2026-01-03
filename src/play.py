@@ -295,6 +295,7 @@ def run_match(
         import chess
         from alphazero import DualHeadNetwork, get_device
         from alphazero.arena import Arena, NetworkPlayer, RandomPlayer, PureMCTSPlayer
+        from chess_encoding.board_utils import get_raw_material_diff
 
         device = get_device()
         print(f"NeuralMate2 Match Mode")
@@ -390,20 +391,10 @@ def run_match(
                 board.push(move)
                 move_count += 1
 
-                # Check adjudication
-                adjudicated, winner, reason = arena._check_adjudication(
-                    board, move_count
-                )
-                if adjudicated:
-                    break
-
             # Determine result
             if board.is_checkmate():
                 winner = "black" if board.turn == chess.WHITE else "white"
                 termination = "checkmate"
-            elif adjudicated:
-                winner = "white" if winner == chess.WHITE else "black"
-                termination = f"adj:{reason}"
             elif board.is_stalemate():
                 winner = "draw"
                 termination = "stalemate"
@@ -434,7 +425,7 @@ def run_match(
             # Calculate material advantage for draws
             material_info = ""
             if winner_str == "Draw":
-                diff = arena._get_material_diff(board)
+                diff = get_raw_material_diff(board)
                 if diff > 0:
                     material_info = f" [W+{diff}]"
                 elif diff < 0:

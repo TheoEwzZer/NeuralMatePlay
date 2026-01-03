@@ -544,7 +544,6 @@ class TrainingApp:
             term_names = {
                 "checkmate": "checkmate",
                 "stalemate": "stalemate",
-                "adjudication": "adjudication",
                 "insufficient": "insufficient material",
                 "fifty_moves": "50-move rule",
                 "repetition": "repetition",

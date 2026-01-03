@@ -17,6 +17,7 @@ import chess
 from .network import DualHeadNetwork
 from .mcts import MCTS
 from .spatial_encoding import DEFAULT_HISTORY_LENGTH
+from chess_encoding.board_utils import get_raw_material_diff
 
 
 @dataclass
@@ -350,23 +351,8 @@ class PureMCTSPlayer(Player):
 
         Returns value in [-1, 1] from perspective of side to move.
         """
-        piece_values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-        }
-
-        white_material = 0
-        black_material = 0
-
-        for piece_type, value in piece_values.items():
-            white_material += len(board.pieces(piece_type, chess.WHITE)) * value
-            black_material += len(board.pieces(piece_type, chess.BLACK)) * value
-
         # Normalize to [-1, 1] range (39 = max material difference)
-        diff = (white_material - black_material) / 39.0
+        diff = get_raw_material_diff(board) / 39.0
 
         # Return from perspective of side to move
         if board.turn == chess.WHITE:
@@ -553,18 +539,6 @@ class Arena:
                     }
                 )
 
-            # Check for adjudication
-            adjudicated, winner, reason = self._check_adjudication(board, move_count)
-            if adjudicated:
-                return GameResult(
-                    winner=winner,
-                    termination=reason,
-                    moves=move_count,
-                    white_player=white.name,
-                    black_player=black.name,
-                    pgn=self._moves_to_pgn(moves_san, white.name, black.name),
-                )
-
         # Determine result
         if board.is_checkmate():
             winner = chess.BLACK if board.turn == chess.WHITE else chess.WHITE
@@ -596,52 +570,6 @@ class Arena:
             black_player=black.name,
             pgn=self._moves_to_pgn(moves_san, white.name, black.name),
         )
-
-    def _check_adjudication(
-        self,
-        board: chess.Board,
-        move_count: int,
-    ) -> tuple[bool, Optional[chess.Color], str]:
-        """
-        Check if game should be adjudicated.
-
-        Args:
-            board: Current board state.
-            move_count: Number of moves played.
-
-        Returns:
-            Tuple of (adjudicated, winner, reason).
-        """
-        # Material-based adjudication
-        if move_count >= 40:  # Only after move 40
-            material_diff = self._get_material_diff(board)
-
-            # Decisive material advantage for 10+ moves
-            if abs(material_diff) >= 15:
-                if material_diff > 0:
-                    return True, chess.WHITE, "material"
-                else:
-                    return True, chess.BLACK, "material"
-
-        return False, None, ""
-
-    def _get_material_diff(self, board: chess.Board) -> int:
-        """Calculate material difference (positive = white advantage)."""
-        piece_values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-        }
-
-        diff = 0
-        for piece_type, value in piece_values.items():
-            white_count = len(board.pieces(piece_type, chess.WHITE))
-            black_count = len(board.pieces(piece_type, chess.BLACK))
-            diff += (white_count - black_count) * value
-
-        return diff
 
     def _update_elo(self, results: dict) -> None:
         """Update ELO based on match results."""

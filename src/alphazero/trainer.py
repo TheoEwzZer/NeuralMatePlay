@@ -265,7 +265,6 @@ class AlphaZeroTrainer:
             "examples_generated": 0,
             # Termination details
             "checkmates": 0,
-            "resignations": 0,
             "stalemates": 0,
             "max_moves": 0,
             "other": 0,
@@ -299,8 +298,6 @@ class AlphaZeroTrainer:
             termination = game_data.get("termination", "other")
             if termination == "checkmate":
                 stats["checkmates"] += 1
-            elif termination == "resignation":
-                stats["resignations"] += 1
             elif termination == "stalemate":
                 stats["stalemates"] += 1
             elif termination == "max_moves":
@@ -330,7 +327,6 @@ class AlphaZeroTrainer:
                         "avg_time": total_time / max(1, game_idx + 1),
                         # Termination details
                         "checkmates": stats["checkmates"],
-                        "resignations": stats["resignations"],
                         "stalemates": stats["stalemates"],
                         "max_moves_reached": stats["max_moves"],
                     }
@@ -339,26 +335,6 @@ class AlphaZeroTrainer:
         stats["avg_game_length"] = total_moves / max(1, stats["games_played"])
         stats["avg_game_time"] = total_time / max(1, stats["games_played"])
         return stats
-
-    def _calculate_material(self, board: chess.Board) -> int:
-        """Calculate material balance from White's perspective.
-
-        Returns positive if White is ahead, negative if Black is ahead.
-        """
-        piece_values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-        }
-
-        material = 0
-        for piece_type, value in piece_values.items():
-            material += len(board.pieces(piece_type, chess.WHITE)) * value
-            material -= len(board.pieces(piece_type, chess.BLACK)) * value
-
-        return material
 
     def _play_self_play_game(
         self,
@@ -383,16 +359,7 @@ class AlphaZeroTrainer:
         policies = []
         move_count = 0
 
-        # Use fixed resignation threshold from config (prevents distribution shift)
-        resignation_threshold = self.config.resignation_threshold
-
-        resigned = False
-
-        while (
-            not board.is_game_over()
-            and move_count < self.config.max_moves
-            and not resigned
-        ):
+        while not board.is_game_over() and move_count < self.config.max_moves:
             # Set temperature based on move count
             if move_count < self.config.temperature_moves:
                 mcts.temperature = 1.0
@@ -440,15 +407,6 @@ class AlphaZeroTrainer:
             history.push(board)
             move_count += 1
 
-            # Check for resignation based on material (after move 10 to avoid early gambits)
-            if move_count >= 10:
-                material = self._calculate_material(board)
-                if (
-                    resignation_threshold is not None
-                    and abs(material) >= resignation_threshold
-                ):
-                    resigned = True
-
             if callback:
                 # Convert squares to (row, col) for GUI
                 from_row = 7 - (from_square // 8)
@@ -471,10 +429,6 @@ class AlphaZeroTrainer:
         if board.is_checkmate():
             winner = chess.BLACK if board.turn == chess.WHITE else chess.WHITE
             termination = "checkmate"
-        elif resigned:
-            material = self._calculate_material(board)
-            winner = chess.WHITE if material > 0 else chess.BLACK
-            termination = "resignation"
         elif board.is_stalemate():
             winner = None
             termination = "stalemate"
