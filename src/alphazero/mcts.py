@@ -155,20 +155,27 @@ class MCTS:
 
         total_visits = sum(child.visit_count for child in root.children.values())
 
-        for move, child in root.children.items():
-            if child.visit_count > 0:
+        if total_visits == 0:
+            # No simulations run: use prior probabilities from neural network
+            for move, child in root.children.items():
                 idx = encode_move_from_perspective(move, flip)
                 if idx is not None:
-                    if self.temperature > 0:
-                        policy[idx] = child.visit_count / max(total_visits, 1)
-                    else:
-                        # Temperature 0: deterministic selection
-                        policy[idx] = (
-                            1.0
-                            if child.visit_count
-                            == max(c.visit_count for c in root.children.values())
-                            else 0.0
-                        )
+                    policy[idx] = child.prior
+        else:
+            for move, child in root.children.items():
+                if child.visit_count > 0:
+                    idx = encode_move_from_perspective(move, flip)
+                    if idx is not None:
+                        if self.temperature > 0:
+                            policy[idx] = child.visit_count / total_visits
+                        else:
+                            # Temperature 0: deterministic selection
+                            policy[idx] = (
+                                1.0
+                                if child.visit_count
+                                == max(c.visit_count for c in root.children.values())
+                                else 0.0
+                            )
 
         # Apply temperature
         if self.temperature > 0 and self.temperature != 1.0:
@@ -737,8 +744,10 @@ class MCTS:
             if not node.children:
                 break
 
-            # Get most visited move
-            best_move = max(node.children.items(), key=lambda x: x[1].visit_count)[0]
+            # Get most visited move (use prior as tiebreaker when visits are equal)
+            best_move = max(
+                node.children.items(), key=lambda x: (x[1].visit_count, x[1].prior)
+            )[0]
             pv.append(best_move)
 
             current_board.push(best_move)
@@ -787,10 +796,10 @@ class MCTS:
         lines.append(f"Root value: {root.q_value:+.3f}")
         lines.append("")
 
-        # Sort children by visit count
+        # Sort children by visit count (use prior as tiebreaker when visits are equal)
         sorted_children = sorted(
             root.children.items(),
-            key=lambda x: x[1].visit_count,
+            key=lambda x: (x[1].visit_count, x[1].prior),
             reverse=True,
         )
 
