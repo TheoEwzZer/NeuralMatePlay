@@ -587,6 +587,7 @@ class AlphaZeroTrainer:
                             loss = loss + self.config.kl_loss_weight * kl_loss
 
                     self._scaler.scale(loss).backward()
+                    self._scaler.unscale_(self._optimizer)
                     self._scaler.step(self._optimizer)
                     self._scaler.update()
                 else:
