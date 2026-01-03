@@ -732,8 +732,12 @@ Examples:
                 remaining_games = total - games
                 eta_seconds = remaining_games * avg_time
                 if eta_seconds > 0:
-                    minutes, seconds = divmod(int(eta_seconds), 60)
-                    eta_str = f" | ETA: {minutes}m{seconds:02d}s"
+                    hours, remainder = divmod(int(eta_seconds), 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    if hours > 0:
+                        eta_str = f" | ETA: {hours}h{minutes:02d}m"
+                    else:
+                        eta_str = f" | ETA: {minutes}m{seconds:02d}s"
 
             line = (
                 f"  Self-play: {games}/{total} | {examples} ex | "
