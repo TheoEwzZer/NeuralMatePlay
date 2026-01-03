@@ -23,7 +23,7 @@
     "checkpoint_path": "checkpoints",
     "iterations": 100,
     "games_per_iteration": 100,
-    "num_simulations": 400,
+    "num_simulations": 600,
     "mcts_batch_size": 1024,
     "batch_size": 1024,
     "learning_rate": 0.00001,
@@ -43,7 +43,11 @@
     "dirichlet_alpha": 0.3,
     "dirichlet_epsilon": 0.25,
     "pretrained_path": "models/pretrained_best_network.pt",
-    "pretrain_mix_ratio": 0.2
+    "pretrain_mix_ratio": 0.4,
+    "pretrain_label_smoothing": 0.1,
+    "pretrain_chunks_loaded": 15,
+    "resignation_threshold": 25,
+    "kl_loss_weight": 0.1
   },
   "network": {
     "num_filters": 192,

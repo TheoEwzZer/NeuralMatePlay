@@ -383,12 +383,8 @@ class AlphaZeroTrainer:
         policies = []
         move_count = 0
 
-        if self._iteration <= 5:
-            resignation_threshold = 20
-        elif self._iteration <= 15:
-            resignation_threshold = 30
-        else:
-            resignation_threshold = None
+        # Use fixed resignation threshold from config (prevents distribution shift)
+        resignation_threshold = self.config.resignation_threshold
 
         resigned = False
 
@@ -579,6 +575,11 @@ class AlphaZeroTrainer:
                         value_loss = self._value_loss(pred_values, values_t)
                         loss = policy_loss + value_loss
 
+                        # Add KL divergence loss to prevent catastrophic forgetting
+                        if self.config.kl_loss_weight > 0 and self._pretrained_network is not None:
+                            kl_loss = self._kl_divergence_loss(pred_policies, states_t)
+                            loss = loss + self.config.kl_loss_weight * kl_loss
+
                     self._scaler.scale(loss).backward()
                     self._scaler.step(self._optimizer)
                     self._scaler.update()
@@ -587,6 +588,11 @@ class AlphaZeroTrainer:
                     policy_loss = self._policy_loss(pred_policies, policies_t)
                     value_loss = self._value_loss(pred_values, values_t)
                     loss = policy_loss + value_loss
+
+                    # Add KL divergence loss to prevent catastrophic forgetting
+                    if self.config.kl_loss_weight > 0 and self._pretrained_network is not None:
+                        kl_loss = self._kl_divergence_loss(pred_policies, states_t)
+                        loss = loss + self.config.kl_loss_weight * kl_loss
 
                     loss.backward()
                     self._optimizer.step()
@@ -637,6 +643,29 @@ class AlphaZeroTrainer:
         """MSE loss for value."""
         return torch.nn.functional.mse_loss(pred, target)
 
+    def _kl_divergence_loss(
+        self,
+        current_policy: torch.Tensor,
+        states: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        KL divergence loss to keep policy close to pretrained model.
+
+        This prevents catastrophic forgetting by penalizing deviation
+        from pretrained policy distributions.
+        """
+        if self._pretrained_network is None:
+            return torch.tensor(0.0, device=states.device)
+
+        with torch.inference_mode():
+            pretrain_policy, _, _ = self._pretrained_network(states)
+            pretrain_policy = torch.nn.functional.softmax(pretrain_policy, dim=-1)
+
+        current_log_policy = torch.nn.functional.log_softmax(current_policy, dim=-1)
+        return torch.nn.functional.kl_div(
+            current_log_policy, pretrain_policy, reduction="batchmean"
+        )
+
     def _load_pretrain_data(self, chunks_dir: str) -> None:
         """
         Initialize streaming pretrain data for data mixing.
@@ -668,8 +697,8 @@ class AlphaZeroTrainer:
         total_examples = metadata.get("total_examples", 0)
         num_chunks = len(self._pretrain_chunk_paths)
 
-        # Load initial chunks (max 5 chunks to limit RAM ~100K positions)
-        max_chunks_in_memory = min(5, num_chunks)
+        # Load initial chunks (configurable, default 15 for ~300K positions)
+        max_chunks_in_memory = min(self.config.pretrain_chunks_loaded, num_chunks)
         self._pretrain_loaded_chunk_indices = list(range(max_chunks_in_memory))
         self._load_pretrain_chunks()
 
@@ -756,13 +785,16 @@ class AlphaZeroTrainer:
             pt_states = self._pretrain_states[indices]
             pt_values = self._pretrain_values[indices]
 
-            # Convert policy indices to policy vectors (one-hot)
-            pt_policies = np.zeros(
-                (pretrain_count, MOVE_ENCODING_SIZE), dtype=np.float32
+            # Convert policy indices to policy vectors with label smoothing
+            # This makes pretrain targets softer, closer to MCTS distributions
+            label_smoothing = self.config.pretrain_label_smoothing
+            smoothing_value = label_smoothing / MOVE_ENCODING_SIZE
+            pt_policies = np.full(
+                (pretrain_count, MOVE_ENCODING_SIZE), smoothing_value, dtype=np.float32
             )
             for i, idx in enumerate(self._pretrain_policy_indices[indices]):
                 if idx < MOVE_ENCODING_SIZE:
-                    pt_policies[i, idx] = 1.0
+                    pt_policies[i, idx] = 1.0 - label_smoothing + smoothing_value
 
             # Concatenate
             states = np.concatenate([sp_states, pt_states], axis=0)
