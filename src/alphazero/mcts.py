@@ -77,6 +77,7 @@ class MCTS:
         batch_size: int = 8,
         history_length: int = DEFAULT_HISTORY_LENGTH,
         fpu_reduction: float = 0.25,  # First Play Urgency reduction
+        temperature: float = 0.0,  # 0 = deterministic, >0 = sample from policy
     ):
         """
         Initialize MCTS.
@@ -90,6 +91,7 @@ class MCTS:
             batch_size: Batch size for neural network inference.
             history_length: Number of past positions to track.
             fpu_reduction: FPU reduction for unexplored moves.
+            temperature: Move selection temperature (0 = best move, >0 = sample).
         """
         self.network = network
         self.num_simulations = num_simulations
@@ -99,9 +101,7 @@ class MCTS:
         self.batch_size = batch_size
         self.history_length = history_length
         self.fpu_reduction = fpu_reduction
-
-        # Temperature for move selection
-        self.temperature: float = 0.1
+        self.temperature = temperature
 
         # Random number generator
         self._rng = np.random.default_rng(42)
