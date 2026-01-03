@@ -724,10 +724,11 @@ Examples:
             resigns = data.get("resignations", 0)
             stales = data.get("stalemates", 0)
             max_mv = data.get("max_moves_reached", 0)
+            resign_str = f" R:{resigns}" if resigns > 0 else ""
             line = (
                 f"  Self-play: {games}/{total} | {examples} ex | "
                 f"{avg_moves:.0f} moves | {avg_time:.1f}s | W:{w} B:{b} D:{d} | "
-                f"#:{mates} R:{resigns} S:{stales} M:{max_mv}"
+                f"#:{mates}{resign_str} S:{stales} M:{max_mv}"
             )
             # Pad to 120 chars to ensure clean overwrite
             print(f"\r{line:<120}", end="", flush=True)
@@ -750,10 +751,12 @@ Examples:
             total_loss = data.get("total_loss", 0)
             policy_loss = data.get("policy_loss", 0)
             value_loss = data.get("value_loss", 0)
+            kl_loss = data.get("kl_loss", 0)
             if epochs > 0:
+                kl_str = f", kl: {kl_loss:.4f}" if kl_loss > 0 else ""
                 line = (
                     f"  Epoch {epoch}/{epochs} | Loss: {total_loss:.4f} "
-                    f"(policy: {policy_loss:.4f}, value: {value_loss:.4f})"
+                    f"(policy: {policy_loss:.4f}, value: {value_loss:.4f}{kl_str})"
                 )
                 print(f"\r{line:<80}", end="", flush=True)
 
@@ -763,6 +766,7 @@ Examples:
             final_loss = training_stats.get("avg_total_loss", 0)
             final_policy = training_stats.get("avg_policy_loss", 0)
             final_value = training_stats.get("avg_value_loss", 0)
+            final_kl = training_stats.get("avg_kl_loss", 0)
             buffer_size = stats.get("buffer_size", 0)
             lr = stats.get("learning_rate", 0)
 
@@ -788,9 +792,10 @@ Examples:
             )
 
             if final_loss > 0:
+                kl_str = f", kl: {final_kl:.4f}" if final_kl > 0 else ""
                 print(
                     f"\n  Final: {final_loss:.4f}{trend} "
-                    f"(policy: {final_policy:.4f}, value: {final_value:.4f})"
+                    f"(policy: {final_policy:.4f}, value: {final_value:.4f}{kl_str})"
                 )
                 print(f"  LR: {lr:.6f} | Buffer: {buffer_size}")
                 avg_time = sp_stats.get("avg_game_time", 0)

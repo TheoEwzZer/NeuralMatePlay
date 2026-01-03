@@ -521,6 +521,7 @@ class AlphaZeroTrainer:
 
         total_policy_loss = 0.0
         total_value_loss = 0.0
+        total_kl_loss = 0.0
         total_loss = 0.0
         num_batches = 0
 
@@ -542,6 +543,7 @@ class AlphaZeroTrainer:
 
             epoch_policy_loss = 0.0
             epoch_value_loss = 0.0
+            epoch_kl_loss = 0.0
 
             for _ in range(batches_per_epoch):
                 # Sample batch (with optional pretrain data mixing)
@@ -576,6 +578,7 @@ class AlphaZeroTrainer:
                         loss = policy_loss + value_loss
 
                         # Add KL divergence loss to prevent catastrophic forgetting
+                        kl_loss = None
                         if self.config.kl_loss_weight > 0 and self._pretrained_network is not None:
                             kl_loss = self._kl_divergence_loss(pred_policies, states_t)
                             loss = loss + self.config.kl_loss_weight * kl_loss
@@ -590,6 +593,7 @@ class AlphaZeroTrainer:
                     loss = policy_loss + value_loss
 
                     # Add KL divergence loss to prevent catastrophic forgetting
+                    kl_loss = None
                     if self.config.kl_loss_weight > 0 and self._pretrained_network is not None:
                         kl_loss = self._kl_divergence_loss(pred_policies, states_t)
                         loss = loss + self.config.kl_loss_weight * kl_loss
@@ -599,11 +603,14 @@ class AlphaZeroTrainer:
 
                 epoch_policy_loss += policy_loss.item()
                 epoch_value_loss += value_loss.item()
+                if kl_loss is not None:
+                    epoch_kl_loss += kl_loss.item()
                 num_batches += 1
 
             total_policy_loss += epoch_policy_loss
             total_value_loss += epoch_value_loss
-            total_loss += epoch_policy_loss + epoch_value_loss
+            total_kl_loss += epoch_kl_loss
+            total_loss += epoch_policy_loss + epoch_value_loss + self.config.kl_loss_weight * epoch_kl_loss
 
             if callback:
                 callback(
@@ -613,7 +620,8 @@ class AlphaZeroTrainer:
                         "epochs": self.config.epochs_per_iteration,
                         "policy_loss": epoch_policy_loss / max(1, batches_per_epoch),
                         "value_loss": epoch_value_loss / max(1, batches_per_epoch),
-                        "total_loss": (epoch_policy_loss + epoch_value_loss)
+                        "kl_loss": epoch_kl_loss / max(1, batches_per_epoch),
+                        "total_loss": (epoch_policy_loss + epoch_value_loss + self.config.kl_loss_weight * epoch_kl_loss)
                         / max(1, batches_per_epoch),
                     }
                 )
@@ -623,6 +631,7 @@ class AlphaZeroTrainer:
         return {
             "avg_policy_loss": total_policy_loss / max(1, num_batches),
             "avg_value_loss": total_value_loss / max(1, num_batches),
+            "avg_kl_loss": total_kl_loss / max(1, num_batches),
             "avg_total_loss": total_loss / max(1, num_batches),
             "num_batches": num_batches,
         }
