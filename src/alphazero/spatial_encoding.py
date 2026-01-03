@@ -305,12 +305,13 @@ def _encode_metadata_54(
     planes[offset + 7] = halfmove_clock
 
     # Plane 8: Repetition count
-    # Note: is_repetition() requires move stack, may return False for standalone boards
+    # is_repetition(n) = position has occurred n times total (including current)
+    # Note: requires move stack, may return False for standalone boards
     try:
-        if board.is_repetition(2):
-            planes[offset + 8] = 1.0  # 2+ repetitions (draw imminent)
-        elif board.is_repetition(1):
-            planes[offset + 8] = 0.5  # 1 repetition
+        if board.is_repetition(3):
+            planes[offset + 8] = 1.0  # Threefold repetition (draw claimable)
+        elif board.is_repetition(2):
+            planes[offset + 8] = 0.5  # Position seen once before
     except Exception:
         pass  # No move stack available, leave as 0
 
