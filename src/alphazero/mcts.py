@@ -155,7 +155,21 @@ class MCTS:
 
         total_visits = sum(child.visit_count for child in root.children.values())
 
-        if total_visits == 0:
+        # Check for winning moves (Q >= 0.9999 from our perspective = Q <= -0.9999 stored)
+        # Prioritize guaranteed wins (like checkmate) even if they have fewer visits
+        winning_moves = [
+            (move, child)
+            for move, child in root.children.items()
+            if child.visit_count > 0 and child.q_value <= -0.9999
+        ]
+
+        if winning_moves:
+            # Found winning move(s): select the one with best Q-value (most negative)
+            best_move, _ = min(winning_moves, key=lambda x: x[1].q_value)
+            idx = encode_move_from_perspective(best_move, flip)
+            if idx is not None:
+                policy[idx] = 1.0
+        elif total_visits == 0:
             # No simulations run: use prior probabilities from neural network
             for move, child in root.children.items():
                 idx = encode_move_from_perspective(move, flip)
@@ -225,7 +239,15 @@ class MCTS:
         if move is None:
             root = self._get_or_create_node(board)
             if root.children:
-                move = max(root.children.items(), key=lambda x: x[1].visit_count)[0]
+                # Check for winning moves first
+                winning = [
+                    (m, c) for m, c in root.children.items()
+                    if c.visit_count > 0 and c.q_value <= -0.9999
+                ]
+                if winning:
+                    move = min(winning, key=lambda x: x[1].q_value)[0]
+                else:
+                    move = max(root.children.items(), key=lambda x: x[1].visit_count)[0]
 
         return move
 
@@ -744,10 +766,18 @@ class MCTS:
             if not node.children:
                 break
 
-            # Get most visited move (use prior as tiebreaker when visits are equal)
-            best_move = max(
-                node.children.items(), key=lambda x: (x[1].visit_count, x[1].prior)
-            )[0]
+            # Check for winning moves first (Q <= -0.9999 = guaranteed win)
+            winning = [
+                (m, c) for m, c in node.children.items()
+                if c.visit_count > 0 and c.q_value <= -0.9999
+            ]
+            if winning:
+                best_move = min(winning, key=lambda x: x[1].q_value)[0]
+            else:
+                # Get most visited move (use prior as tiebreaker when visits are equal)
+                best_move = max(
+                    node.children.items(), key=lambda x: (x[1].visit_count, x[1].prior)
+                )[0]
             pv.append(best_move)
 
             current_board.push(best_move)
