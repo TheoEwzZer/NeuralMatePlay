@@ -194,6 +194,9 @@ class AlphaZeroTrainer:
         """
         self._iteration += 1
 
+        # Reseed RNG based on iteration (reproducible + works with resume)
+        self._rng = np.random.default_rng(self._iteration)
+
         # Check if veto recovery period is over
         self._check_veto_recovery()
 
@@ -230,12 +233,14 @@ class AlphaZeroTrainer:
                 stats["force_arena"] = True
                 self._kl_warning_count += 1
                 if callback:
-                    callback({
-                        "phase": "kl_critical",
-                        "kl_loss": avg_kl,
-                        "threshold": kl_critical,
-                        "message": "KL divergence critical - forcing arena evaluation",
-                    })
+                    callback(
+                        {
+                            "phase": "kl_critical",
+                            "kl_loss": avg_kl,
+                            "threshold": kl_critical,
+                            "message": "KL divergence critical - forcing arena evaluation",
+                        }
+                    )
             elif avg_kl > kl_warning:
                 # Warning: boost pretrain mix
                 self._kl_warning_count += 1
@@ -243,19 +248,23 @@ class AlphaZeroTrainer:
                     old_mix = self._pretrain_mix_ratio
                     self._pretrain_mix_ratio = min(0.6, self._pretrain_mix_ratio + 0.1)
                     if callback:
-                        callback({
+                        callback(
+                            {
+                                "phase": "kl_warning",
+                                "kl_loss": avg_kl,
+                                "threshold": kl_warning,
+                                "message": f"KL elevated - boosted pretrain mix {old_mix:.0%} -> {self._pretrain_mix_ratio:.0%}",
+                            }
+                        )
+                elif callback:
+                    callback(
+                        {
                             "phase": "kl_warning",
                             "kl_loss": avg_kl,
                             "threshold": kl_warning,
-                            "message": f"KL elevated - boosted pretrain mix {old_mix:.0%} -> {self._pretrain_mix_ratio:.0%}",
-                        })
-                elif callback:
-                    callback({
-                        "phase": "kl_warning",
-                        "kl_loss": avg_kl,
-                        "threshold": kl_warning,
-                        "message": "KL divergence elevated - monitoring",
-                    })
+                            "message": "KL divergence elevated - monitoring",
+                        }
+                    )
             else:
                 # KL is healthy, reset warning count
                 self._kl_warning_count = 0
@@ -769,13 +778,17 @@ class AlphaZeroTrainer:
         # 1. Restore network weights from best_network
         if self._best_network is not None:
             self.network.load_state_dict(self._best_network.state_dict())
-            recovery_actions.append(f"Restored network to iteration {self._best_iteration}")
+            recovery_actions.append(
+                f"Restored network to iteration {self._best_iteration}"
+            )
 
         # 2. Purge recent buffer entries (they came from degraded model)
         purge_ratio = getattr(self.config, "veto_buffer_purge_ratio", 0.25)
         if purge_ratio > 0:
             purged = self._buffer.purge_recent(purge_ratio)
-            recovery_actions.append(f"Purged {purged} buffer entries ({purge_ratio:.0%})")
+            recovery_actions.append(
+                f"Purged {purged} buffer entries ({purge_ratio:.0%})"
+            )
 
         # 3. Reset optimizer momentum (prevents carrying bad gradients)
         current_lr = self._optimizer.param_groups[0]["lr"]
@@ -804,10 +817,7 @@ class AlphaZeroTrainer:
         # Escalation level 2: Reduce learning rate after 2+ consecutive vetoes
         if self._consecutive_vetoes >= 2:
             lr_factor = getattr(self.config, "veto_escalation_lr_factor", 0.5)
-            new_lr = max(
-                self.config.min_learning_rate,
-                current_lr * lr_factor
-            )
+            new_lr = max(self.config.min_learning_rate, current_lr * lr_factor)
             for pg in self._optimizer.param_groups:
                 pg["lr"] = new_lr
             recovery_actions.append(
@@ -835,12 +845,14 @@ class AlphaZeroTrainer:
             )
 
         if callback:
-            callback({
-                "phase": "veto_recovery",
-                "reason": stats.veto_reason,
-                "consecutive_vetoes": self._consecutive_vetoes,
-                "actions": recovery_actions,
-            })
+            callback(
+                {
+                    "phase": "veto_recovery",
+                    "reason": stats.veto_reason,
+                    "consecutive_vetoes": self._consecutive_vetoes,
+                    "actions": recovery_actions,
+                }
+            )
 
     def _check_veto_recovery(self) -> None:
         """Check if veto recovery period is over and restore pretrain mix."""
