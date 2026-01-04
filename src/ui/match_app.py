@@ -16,7 +16,7 @@ except ImportError:
 
 from .board_widget import ChessBoardWidget
 from .styles import COLORS, FONTS, STATUS_ICONS, create_tooltip
-from chess_encoding.board_utils import get_material_count
+from src.chess_encoding.board_utils import get_material_count
 
 
 class MatchApp:

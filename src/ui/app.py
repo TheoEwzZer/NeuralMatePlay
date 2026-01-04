@@ -37,7 +37,7 @@ from .styles import (
 )
 from .board_widget import ChessBoardWidget
 from .training_panel import TrainingPanel, TrainingConfigDialog
-from chess_encoding.board_utils import get_material_count
+from src.chess_encoding.board_utils import get_material_count
 
 
 class ChessGameApp:

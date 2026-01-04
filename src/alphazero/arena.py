@@ -17,7 +17,7 @@ import chess
 from .network import DualHeadNetwork
 from .mcts import MCTS
 from .spatial_encoding import DEFAULT_HISTORY_LENGTH
-from chess_encoding.board_utils import get_raw_material_diff
+from src.chess_encoding.board_utils import get_raw_material_diff
 
 
 @dataclass

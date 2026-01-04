@@ -4,7 +4,7 @@ import time
 import chess
 
 from alphazero.arena import NetworkPlayer, RandomPlayer
-from chess_encoding.board_utils import get_raw_material_diff
+from src.chess_encoding.board_utils import get_raw_material_diff
 from ..core import (
     TestResults,
     header,

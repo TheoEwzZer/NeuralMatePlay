@@ -295,7 +295,7 @@ def run_match(
         import chess
         from alphazero import DualHeadNetwork, get_device
         from alphazero.arena import Arena, NetworkPlayer, RandomPlayer, PureMCTSPlayer
-        from chess_encoding.board_utils import get_raw_material_diff
+        from src.chess_encoding.board_utils import get_raw_material_diff
 
         device = get_device()
         print(f"NeuralMate2 Match Mode")
