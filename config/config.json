@@ -55,7 +55,10 @@
     "kl_critical_threshold": 0.30,
     "veto_buffer_purge_ratio": 0.25,
     "veto_recovery_iterations": 3,
-    "use_best_for_selfplay": true
+    "use_best_for_selfplay": true,
+    "veto_escalation_lr_factor": 0.5,
+    "veto_exploration_ratio": 0.3,
+    "veto_critical_purge_ratio": 0.5
   },
   "network": {
     "num_filters": 192,

@@ -137,6 +137,10 @@ class AlphaZeroTrainer:
         self._veto_recovery_remaining: int = 0  # Iterations remaining with boosted mix
         self._original_pretrain_mix: float = 0.0  # Original mix ratio before boost
         self._kl_warning_count: int = 0  # Consecutive KL warnings
+        # Veto escalation tracking (prevents infinite rollback loops)
+        self._consecutive_vetoes: int = 0  # Counter of consecutive vetoes
+        self._exploration_ratio: float = 0.0  # Ratio of games using current network
+        self._exploration_remaining: int = 0  # Iterations of forced exploration
 
         # Load pretrained model for arena comparison
         self._pretrained_network: Optional[DualHeadNetwork] = None
@@ -399,12 +403,16 @@ class AlphaZeroTrainer:
         history.push(board)
 
         # Use best network for self-play if available (prevents buffer pollution)
+        # Exploration mode: use current network for some games after repeated vetoes
         use_best = getattr(self.config, "use_best_for_selfplay", True)
-        selfplay_network = (
-            self._best_network
-            if use_best and self._best_network is not None
-            else self.network
-        )
+
+        if self._exploration_ratio > 0 and self._rng.random() < self._exploration_ratio:
+            # Exploration: use current network to generate diverse data
+            selfplay_network = self.network
+        elif use_best and self._best_network is not None:
+            selfplay_network = self._best_network
+        else:
+            selfplay_network = self.network
 
         mcts = MCTS(
             selfplay_network,
@@ -737,16 +745,24 @@ class AlphaZeroTrainer:
         callback: Optional[Callable[[dict], None]] = None,
     ) -> None:
         """
-        Handle veto by rolling back to best known state.
+        Handle veto by rolling back to best known state with escalation.
 
         When veto is triggered (catastrophic forgetting detected):
         1. Restore network weights from best_network
         2. Purge recent buffer entries (likely from degraded model)
         3. Reset optimizer (prevents carrying bad momentum)
         4. Temporarily boost pretrain mix ratio
+
+        Escalation levels for repeated vetoes:
+        - 2+ vetoes: Reduce learning rate by 50%
+        - 3+ vetoes: Enable exploration mode (30% current network for self-play)
+        - 4+ vetoes: Critical purge (50% buffer) + max pretrain mix (80%)
         """
         if not stats.veto:
             return
+
+        # Increment consecutive veto counter
+        self._consecutive_vetoes += 1
 
         recovery_actions = []
 
@@ -762,9 +778,10 @@ class AlphaZeroTrainer:
             recovery_actions.append(f"Purged {purged} buffer entries ({purge_ratio:.0%})")
 
         # 3. Reset optimizer momentum (prevents carrying bad gradients)
+        current_lr = self._optimizer.param_groups[0]["lr"]
         self._optimizer = optim.AdamW(
             self.network.parameters(),
-            lr=self._optimizer.param_groups[0]["lr"],
+            lr=current_lr,
             weight_decay=self.config.weight_decay,
         )
         # Also reset AMP scaler if using mixed precision
@@ -782,10 +799,46 @@ class AlphaZeroTrainer:
                 f"Boosted pretrain mix: {self._original_pretrain_mix:.0%} -> {self._pretrain_mix_ratio:.0%} for {veto_recovery_iters} iterations"
             )
 
+        # === ESCALATION LEVELS ===
+
+        # Escalation level 2: Reduce learning rate after 2+ consecutive vetoes
+        if self._consecutive_vetoes >= 2:
+            lr_factor = getattr(self.config, "veto_escalation_lr_factor", 0.5)
+            new_lr = max(
+                self.config.min_learning_rate,
+                current_lr * lr_factor
+            )
+            for pg in self._optimizer.param_groups:
+                pg["lr"] = new_lr
+            recovery_actions.append(
+                f"[Escalation L2] Reduced LR: {current_lr:.2e} -> {new_lr:.2e}"
+            )
+
+        # Escalation level 3: Enable exploration mode after 3+ consecutive vetoes
+        if self._consecutive_vetoes >= 3:
+            exploration_ratio = getattr(self.config, "veto_exploration_ratio", 0.3)
+            self._exploration_ratio = exploration_ratio
+            self._exploration_remaining = veto_recovery_iters
+            recovery_actions.append(
+                f"[Escalation L3] Enabled {exploration_ratio:.0%} exploration with current network"
+            )
+
+        # Escalation level 4: Critical measures after 4+ consecutive vetoes
+        if self._consecutive_vetoes >= 4:
+            critical_purge = getattr(self.config, "veto_critical_purge_ratio", 0.5)
+            # Additional purge (on top of normal purge)
+            extra_purged = self._buffer.purge_recent(critical_purge - purge_ratio)
+            # Force max pretrain mix
+            self._pretrain_mix_ratio = 0.8
+            recovery_actions.append(
+                f"[Escalation L4] CRITICAL: purged {extra_purged} more, pretrain mix=80%"
+            )
+
         if callback:
             callback({
                 "phase": "veto_recovery",
                 "reason": stats.veto_reason,
+                "consecutive_vetoes": self._consecutive_vetoes,
                 "actions": recovery_actions,
             })
 
@@ -796,6 +849,12 @@ class AlphaZeroTrainer:
             if self._veto_recovery_remaining == 0:
                 # Restore original pretrain mix ratio
                 self._pretrain_mix_ratio = self._original_pretrain_mix
+
+        # Check if exploration mode period is over
+        if self._exploration_remaining > 0:
+            self._exploration_remaining -= 1
+            if self._exploration_remaining == 0:
+                self._exploration_ratio = 0.0
 
     def _load_pretrain_data(self, chunks_dir: str) -> None:
         """
@@ -981,6 +1040,11 @@ class AlphaZeroTrainer:
             )
             self._best_network.load_state_dict(self.network.state_dict())
             self._best_iteration = self._iteration
+
+            # Reset escalation counters on successful promotion
+            self._consecutive_vetoes = 0
+            self._exploration_ratio = 0.0
+            self._exploration_remaining = 0
 
             # Add current to old checkpoints list
             checkpoint_path = (

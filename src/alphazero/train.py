@@ -919,11 +919,24 @@ Examples:
         elif phase == "veto_recovery":
             reason = data.get("reason", "")
             actions = data.get("actions", [])
-            print("\n  ========== VETO RECOVERY ==========")
+            consecutive = data.get("consecutive_vetoes", 1)
+
+            # Show escalation level with visual emphasis
+            if consecutive >= 4:
+                header = "VETO RECOVERY [ESCALATION L4 - CRITICAL]"
+            elif consecutive >= 3:
+                header = "VETO RECOVERY [ESCALATION L3]"
+            elif consecutive >= 2:
+                header = "VETO RECOVERY [ESCALATION L2]"
+            else:
+                header = "VETO RECOVERY"
+
+            print(f"\n  ========== {header} ==========")
             print(f"  Reason: {reason}")
+            print(f"  Consecutive vetoes: {consecutive}")
             for action in actions:
                 print(f"  - {action}")
-            print("  =====================================")
+            print("  " + "=" * (len(header) + 22))
 
         elif phase == "kl_warning":
             kl_loss = data.get("kl_loss", 0)

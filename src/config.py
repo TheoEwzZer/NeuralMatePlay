@@ -97,6 +97,10 @@ class TrainingConfig:
     veto_recovery_iterations: int = 3  # Iterations to boost pretrain mix after veto
     # Self-play quality
     use_best_for_selfplay: bool = True  # Use best network for self-play (prevents buffer pollution)
+    # Veto escalation (prevents infinite rollback loops)
+    veto_escalation_lr_factor: float = 0.5  # Reduce LR by this factor after 2+ vetoes
+    veto_exploration_ratio: float = 0.3  # Use current network for this ratio of games after 3+ vetoes
+    veto_critical_purge_ratio: float = 0.5  # Purge this ratio of buffer after 4+ vetoes
 
 
 @dataclass
