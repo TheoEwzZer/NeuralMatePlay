@@ -84,6 +84,19 @@ class TrainingConfig:
     pretrain_label_smoothing: float = 0.1  # Label smoothing for pretrain targets (0.1 = 10% smoothing)
     pretrain_chunks_loaded: int = 15  # Number of pretrain chunks to keep in memory
     kl_loss_weight: float = 0.0  # Weight for KL divergence loss to pretrained model (0.1 recommended)
+    # Adaptive KL divergence control
+    kl_target: float = 0.15  # Target KL divergence threshold
+    kl_weight_base: float = 0.1  # Base KL weight when KL < target
+    kl_weight_max: float = 2.0  # Maximum KL weight when KL >> target
+    kl_adaptive_factor: float = 10.0  # How aggressively weight scales above target
+    # Early warning thresholds
+    kl_warning_threshold: float = 0.20  # Trigger warning and boost pretrain mix
+    kl_critical_threshold: float = 0.30  # Force immediate arena evaluation
+    # Veto recovery settings
+    veto_buffer_purge_ratio: float = 0.25  # Purge this ratio of buffer on veto
+    veto_recovery_iterations: int = 3  # Iterations to boost pretrain mix after veto
+    # Self-play quality
+    use_best_for_selfplay: bool = True  # Use best network for self-play (prevents buffer pollution)
 
 
 @dataclass

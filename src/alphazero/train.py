@@ -764,8 +764,16 @@ Examples:
             policy_loss = data.get("policy_loss", 0)
             value_loss = data.get("value_loss", 0)
             kl_loss = data.get("kl_loss", 0)
+            kl_weight = data.get("kl_weight", 0.1)
             if epochs > 0:
-                kl_str = f", kl: {kl_loss:.4f}" if kl_loss > 0 else ""
+                # Show KL weight if it's been adapted (above base 0.1)
+                if kl_loss > 0:
+                    if kl_weight > 0.15:  # Adapted weight
+                        kl_str = f", kl: {kl_loss:.4f} w={kl_weight:.2f}"
+                    else:
+                        kl_str = f", kl: {kl_loss:.4f}"
+                else:
+                    kl_str = ""
                 line = (
                     f"  Epoch {epoch}/{epochs} | Loss: {total_loss:.4f} "
                     f"(policy: {policy_loss:.4f}, value: {value_loss:.4f}{kl_str})"
@@ -804,7 +812,14 @@ Examples:
             )
 
             if final_loss > 0:
-                kl_str = f", kl: {final_kl:.4f}" if final_kl > 0 else ""
+                kl_weight = training_stats.get("kl_weight", 0.1)
+                if final_kl > 0:
+                    if kl_weight > 0.15:  # Adapted weight
+                        kl_str = f", kl: {final_kl:.4f} w={kl_weight:.2f}"
+                    else:
+                        kl_str = f", kl: {final_kl:.4f}"
+                else:
+                    kl_str = ""
                 print(
                     f"\n  Final: {final_loss:.4f}{trend} "
                     f"(policy: {final_policy:.4f}, value: {final_value:.4f}{kl_str})"
@@ -900,6 +915,25 @@ Examples:
                 print(f"  {veto_reason}")
 
             print("  ======================================")
+
+        elif phase == "veto_recovery":
+            reason = data.get("reason", "")
+            actions = data.get("actions", [])
+            print("\n  ========== VETO RECOVERY ==========")
+            print(f"  Reason: {reason}")
+            for action in actions:
+                print(f"  - {action}")
+            print("  =====================================")
+
+        elif phase == "kl_warning":
+            kl_loss = data.get("kl_loss", 0)
+            message = data.get("message", "")
+            print(f"\n  [KL WARNING] {message} (KL={kl_loss:.4f})")
+
+        elif phase == "kl_critical":
+            kl_loss = data.get("kl_loss", 0)
+            message = data.get("message", "")
+            print(f"\n  [KL CRITICAL] {message} (KL={kl_loss:.4f})")
 
     # Run training
     remaining = cfg.iterations - start_iteration

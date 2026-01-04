@@ -180,6 +180,31 @@ class ReplayBuffer:
         self._policies.clear()
         self._values.clear()
 
+    def purge_recent(self, ratio: float) -> int:
+        """
+        Remove most recent entries from buffer.
+
+        Used to purge potentially low-quality data after veto detection.
+
+        Args:
+            ratio: Fraction of buffer to remove (0.25 = remove 25% of entries).
+
+        Returns:
+            Number of entries removed.
+        """
+        if ratio <= 0 or len(self) == 0:
+            return 0
+
+        purge_count = int(len(self) * ratio)
+        purge_count = min(purge_count, len(self))
+
+        for _ in range(purge_count):
+            self._states.pop()
+            self._policies.pop()
+            self._values.pop()
+
+        return purge_count
+
     def __len__(self) -> int:
         """Return number of examples in buffer."""
         return len(self._states)

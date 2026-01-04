@@ -130,6 +130,13 @@ class AlphaZeroTrainer:
         self._best_iteration: int = 0
         self._old_checkpoints: list = []  # List of (iteration, path) tuples
         self._last_training_stats: Optional[dict] = None  # For checkpoint saving
+        # Adaptive KL tracking
+        self._last_avg_kl: float = 0.0  # Track KL for adaptive weight
+        self._current_kl_weight: float = 0.1  # Current adaptive KL weight
+        # Veto recovery tracking
+        self._veto_recovery_remaining: int = 0  # Iterations remaining with boosted mix
+        self._original_pretrain_mix: float = 0.0  # Original mix ratio before boost
+        self._kl_warning_count: int = 0  # Consecutive KL warnings
 
         # Load pretrained model for arena comparison
         self._pretrained_network: Optional[DualHeadNetwork] = None
@@ -148,7 +155,7 @@ class AlphaZeroTrainer:
         # Checkpoint manager
         self._checkpoint_manager = CheckpointManager(
             self.config.checkpoint_path,
-            keep_last_n=3,
+            keep_last_n=5,
             milestone_interval=5,
             verbose=True,
         )
@@ -182,6 +189,10 @@ class AlphaZeroTrainer:
             Iteration statistics.
         """
         self._iteration += 1
+
+        # Check if veto recovery period is over
+        self._check_veto_recovery()
+
         stats = {
             "iteration": self._iteration,
             "selfplay_stats": {},
@@ -204,6 +215,46 @@ class AlphaZeroTrainer:
             training_stats = self._train_on_buffer(callback)
             stats["training_stats"] = training_stats
             self._last_training_stats = training_stats
+
+            # Early warning: check KL divergence thresholds
+            avg_kl = training_stats.get("avg_kl_loss", 0)
+            kl_warning = getattr(self.config, "kl_warning_threshold", 0.20)
+            kl_critical = getattr(self.config, "kl_critical_threshold", 0.30)
+
+            if avg_kl > kl_critical:
+                # Critical: force arena evaluation
+                stats["force_arena"] = True
+                self._kl_warning_count += 1
+                if callback:
+                    callback({
+                        "phase": "kl_critical",
+                        "kl_loss": avg_kl,
+                        "threshold": kl_critical,
+                        "message": "KL divergence critical - forcing arena evaluation",
+                    })
+            elif avg_kl > kl_warning:
+                # Warning: boost pretrain mix
+                self._kl_warning_count += 1
+                if self._kl_warning_count >= 2 and self._pretrain_mix_ratio < 0.6:
+                    old_mix = self._pretrain_mix_ratio
+                    self._pretrain_mix_ratio = min(0.6, self._pretrain_mix_ratio + 0.1)
+                    if callback:
+                        callback({
+                            "phase": "kl_warning",
+                            "kl_loss": avg_kl,
+                            "threshold": kl_warning,
+                            "message": f"KL elevated - boosted pretrain mix {old_mix:.0%} -> {self._pretrain_mix_ratio:.0%}",
+                        })
+                elif callback:
+                    callback({
+                        "phase": "kl_warning",
+                        "kl_loss": avg_kl,
+                        "threshold": kl_warning,
+                        "message": "KL divergence elevated - monitoring",
+                    })
+            else:
+                # KL is healthy, reset warning count
+                self._kl_warning_count = 0
         else:
             if callback:
                 callback(
@@ -214,7 +265,8 @@ class AlphaZeroTrainer:
                 )
 
         # Phase 3: Arena evaluation
-        if self._iteration % self.config.arena_interval == 0:
+        force_arena = stats.get("force_arena", False)
+        if self._iteration % self.config.arena_interval == 0 or force_arena:
             if callback:
                 callback({"phase": "arena_start", "iteration": self._iteration})
 
@@ -346,8 +398,16 @@ class AlphaZeroTrainer:
         history = PositionHistory(self.config.history_length)
         history.push(board)
 
+        # Use best network for self-play if available (prevents buffer pollution)
+        use_best = getattr(self.config, "use_best_for_selfplay", True)
+        selfplay_network = (
+            self._best_network
+            if use_best and self._best_network is not None
+            else self.network
+        )
+
         mcts = MCTS(
-            self.network,
+            selfplay_network,
             num_simulations=self.config.num_simulations,
             batch_size=self.config.mcts_batch_size,
             dirichlet_alpha=self.config.dirichlet_alpha,
@@ -479,6 +539,9 @@ class AlphaZeroTrainer:
         total_loss = 0.0
         num_batches = 0
 
+        # Compute adaptive KL weight based on previous iteration's KL
+        self._current_kl_weight = self._compute_adaptive_kl_weight(self._last_avg_kl)
+
         for epoch in range(self.config.epochs_per_iteration):
             # Number of batches per epoch
             num_samples = min(len(self._buffer), 10000)
@@ -533,12 +596,9 @@ class AlphaZeroTrainer:
 
                         # Add KL divergence loss to prevent catastrophic forgetting
                         kl_loss = None
-                        if (
-                            self.config.kl_loss_weight > 0
-                            and self._pretrained_network is not None
-                        ):
+                        if self._pretrained_network is not None:
                             kl_loss = self._kl_divergence_loss(pred_policies, states_t)
-                            loss = loss + self.config.kl_loss_weight * kl_loss
+                            loss = loss + self._current_kl_weight * kl_loss
 
                     self._scaler.scale(loss).backward()
                     self._scaler.unscale_(self._optimizer)
@@ -552,12 +612,9 @@ class AlphaZeroTrainer:
 
                     # Add KL divergence loss to prevent catastrophic forgetting
                     kl_loss = None
-                    if (
-                        self.config.kl_loss_weight > 0
-                        and self._pretrained_network is not None
-                    ):
+                    if self._pretrained_network is not None:
                         kl_loss = self._kl_divergence_loss(pred_policies, states_t)
-                        loss = loss + self.config.kl_loss_weight * kl_loss
+                        loss = loss + self._current_kl_weight * kl_loss
 
                     loss.backward()
                     self._optimizer.step()
@@ -574,7 +631,7 @@ class AlphaZeroTrainer:
             total_loss += (
                 epoch_policy_loss
                 + epoch_value_loss
-                + self.config.kl_loss_weight * epoch_kl_loss
+                + self._current_kl_weight * epoch_kl_loss
             )
 
             if callback:
@@ -586,10 +643,11 @@ class AlphaZeroTrainer:
                         "policy_loss": epoch_policy_loss / max(1, batches_per_epoch),
                         "value_loss": epoch_value_loss / max(1, batches_per_epoch),
                         "kl_loss": epoch_kl_loss / max(1, batches_per_epoch),
+                        "kl_weight": self._current_kl_weight,
                         "total_loss": (
                             epoch_policy_loss
                             + epoch_value_loss
-                            + self.config.kl_loss_weight * epoch_kl_loss
+                            + self._current_kl_weight * epoch_kl_loss
                         )
                         / max(1, batches_per_epoch),
                     }
@@ -597,12 +655,17 @@ class AlphaZeroTrainer:
 
         self.network.eval()
 
+        # Update KL tracking for next iteration's adaptive weight
+        avg_kl_loss = total_kl_loss / max(1, num_batches)
+        self._last_avg_kl = avg_kl_loss
+
         return {
             "avg_policy_loss": total_policy_loss / max(1, num_batches),
             "avg_value_loss": total_value_loss / max(1, num_batches),
-            "avg_kl_loss": total_kl_loss / max(1, num_batches),
+            "avg_kl_loss": avg_kl_loss,
             "avg_total_loss": total_loss / max(1, num_batches),
             "num_batches": num_batches,
+            "kl_weight": self._current_kl_weight,
         }
 
     def _policy_loss(
@@ -643,6 +706,96 @@ class AlphaZeroTrainer:
         return torch.nn.functional.kl_div(
             current_log_policy, pretrain_policy, reduction="batchmean"
         )
+
+    def _compute_adaptive_kl_weight(self, current_kl: float) -> float:
+        """
+        Compute adaptive KL weight based on current divergence.
+
+        When KL is below target, use base weight. When above, scale up
+        progressively to create a "soft wall" against drift.
+        """
+        kl_target = getattr(self.config, "kl_target", 0.15)
+        kl_weight_base = getattr(self.config, "kl_weight_base", 0.1)
+        kl_weight_max = getattr(self.config, "kl_weight_max", 2.0)
+        kl_adaptive_factor = getattr(self.config, "kl_adaptive_factor", 10.0)
+
+        # If using old-style single kl_loss_weight, fall back to it
+        if self.config.kl_loss_weight > 0 and kl_weight_base == 0.1:
+            kl_weight_base = self.config.kl_loss_weight
+
+        if current_kl <= kl_target:
+            return kl_weight_base
+
+        # Scale weight progressively above target
+        excess_ratio = (current_kl - kl_target) / kl_target
+        scaled_weight = kl_weight_base * (1 + kl_adaptive_factor * excess_ratio)
+        return min(scaled_weight, kl_weight_max)
+
+    def _handle_veto(
+        self,
+        stats,
+        callback: Optional[Callable[[dict], None]] = None,
+    ) -> None:
+        """
+        Handle veto by rolling back to best known state.
+
+        When veto is triggered (catastrophic forgetting detected):
+        1. Restore network weights from best_network
+        2. Purge recent buffer entries (likely from degraded model)
+        3. Reset optimizer (prevents carrying bad momentum)
+        4. Temporarily boost pretrain mix ratio
+        """
+        if not stats.veto:
+            return
+
+        recovery_actions = []
+
+        # 1. Restore network weights from best_network
+        if self._best_network is not None:
+            self.network.load_state_dict(self._best_network.state_dict())
+            recovery_actions.append(f"Restored network to iteration {self._best_iteration}")
+
+        # 2. Purge recent buffer entries (they came from degraded model)
+        purge_ratio = getattr(self.config, "veto_buffer_purge_ratio", 0.25)
+        if purge_ratio > 0:
+            purged = self._buffer.purge_recent(purge_ratio)
+            recovery_actions.append(f"Purged {purged} buffer entries ({purge_ratio:.0%})")
+
+        # 3. Reset optimizer momentum (prevents carrying bad gradients)
+        self._optimizer = optim.AdamW(
+            self.network.parameters(),
+            lr=self._optimizer.param_groups[0]["lr"],
+            weight_decay=self.config.weight_decay,
+        )
+        # Also reset AMP scaler if using mixed precision
+        if self._use_amp:
+            self._scaler = GradScaler("cuda")
+        recovery_actions.append("Reset optimizer state")
+
+        # 4. Boost pretrain mix temporarily
+        veto_recovery_iters = getattr(self.config, "veto_recovery_iterations", 3)
+        if veto_recovery_iters > 0 and self._pretrain_mix_ratio > 0:
+            self._veto_recovery_remaining = veto_recovery_iters
+            self._original_pretrain_mix = self._pretrain_mix_ratio
+            self._pretrain_mix_ratio = min(0.6, self._pretrain_mix_ratio + 0.2)
+            recovery_actions.append(
+                f"Boosted pretrain mix: {self._original_pretrain_mix:.0%} -> {self._pretrain_mix_ratio:.0%} for {veto_recovery_iters} iterations"
+            )
+
+        if callback:
+            callback({
+                "phase": "veto_recovery",
+                "reason": stats.veto_reason,
+                "actions": recovery_actions,
+            })
+
+    def _check_veto_recovery(self) -> None:
+        """Check if veto recovery period is over and restore pretrain mix."""
+        if self._veto_recovery_remaining > 0:
+            self._veto_recovery_remaining -= 1
+            if self._veto_recovery_remaining == 0:
+                # Restore original pretrain mix ratio
+                self._pretrain_mix_ratio = self._original_pretrain_mix
 
     def _load_pretrain_data(self, chunks_dir: str) -> None:
         """
@@ -835,6 +988,10 @@ class AlphaZeroTrainer:
                 / f"iteration_{self._iteration}_network.pt"
             )
             self._old_checkpoints.append((self._iteration, str(checkpoint_path)))
+
+        # Handle veto with recovery actions
+        if stats.veto:
+            self._handle_veto(stats, callback)
 
         if callback:
             callback(

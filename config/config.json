@@ -46,7 +46,16 @@
     "pretrain_mix_ratio": 0.4,
     "pretrain_label_smoothing": 0.1,
     "pretrain_chunks_loaded": 15,
-    "kl_loss_weight": 0.1
+    "kl_loss_weight": 0.1,
+    "kl_target": 0.15,
+    "kl_weight_base": 0.1,
+    "kl_weight_max": 2.0,
+    "kl_adaptive_factor": 10.0,
+    "kl_warning_threshold": 0.20,
+    "kl_critical_threshold": 0.30,
+    "veto_buffer_purge_ratio": 0.25,
+    "veto_recovery_iterations": 3,
+    "use_best_for_selfplay": true
   },
   "network": {
     "num_filters": 192,
