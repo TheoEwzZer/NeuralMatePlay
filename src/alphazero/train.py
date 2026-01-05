@@ -766,12 +766,8 @@ Examples:
             kl_loss = data.get("kl_loss", 0)
             kl_weight = data.get("kl_weight", 0.1)
             if epochs > 0:
-                # Show KL weight if it's been adapted (above base 0.1)
                 if kl_loss > 0:
-                    if kl_weight > 0.15:  # Adapted weight
-                        kl_str = f", kl: {kl_loss:.4f} w={kl_weight:.2f}"
-                    else:
-                        kl_str = f", kl: {kl_loss:.4f}"
+                    kl_str = f", kl: {kl_loss:.4f} w={kl_weight:.2f}"
                 else:
                     kl_str = ""
                 line = (
@@ -814,10 +810,7 @@ Examples:
             if final_loss > 0:
                 kl_weight = training_stats.get("kl_weight", 0.1)
                 if final_kl > 0:
-                    if kl_weight > 0.15:  # Adapted weight
-                        kl_str = f", kl: {final_kl:.4f} w={kl_weight:.2f}"
-                    else:
-                        kl_str = f", kl: {final_kl:.4f}"
+                    kl_str = f", kl: {final_kl:.4f} w={kl_weight:.2f}"
                 else:
                     kl_str = ""
                 print(
@@ -914,7 +907,7 @@ Examples:
                 print("  VETO: Catastrophic forgetting detected!")
                 print(f"  {veto_reason}")
 
-            print("  ======================================")
+            print("  " + "=" * 38)
 
         elif phase == "veto_recovery":
             reason = data.get("reason", "")

@@ -58,6 +58,7 @@ class TrainingConfig:
     arena_games: int = 20
     arena_simulations: int = 100
     win_threshold: float = 0.55  # Win rate to replace best model
+    veto_threshold: float = 0.35  # Min score vs old/pretrained to avoid veto
     pretrained_path: Optional[str] = (
         None  # Path to pretrained model for arena comparison
     )
@@ -1039,7 +1040,7 @@ class AlphaZeroTrainer:
             old_iteration=old_iteration,
             callback=callback,
             promotion_threshold=self.config.win_threshold,
-            veto_threshold=0.35,
+            veto_threshold=self.config.veto_threshold,
         )
 
         # Handle promotion

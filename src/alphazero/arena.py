@@ -772,6 +772,12 @@ class Arena:
                 avg_time=pretrained_results.get("avg_time", 0.0),
             )
 
+            # Veto if worse than pretrained (should not regress from starting point)
+            if stats.vs_pretrained.score < veto_threshold:
+                stats.veto = True
+                stats.veto_reason = f"Lost to pretrained ({stats.vs_pretrained.score*100:.0f}% < {veto_threshold*100:.0f}%)"
+                stats.is_new_best = False
+
         # Update ELO based on vs_best results (or vs_random if no best)
         if stats.vs_best is not None:
             self._update_elo_from_match(stats.vs_best)
