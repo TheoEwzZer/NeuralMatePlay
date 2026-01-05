@@ -718,6 +718,51 @@ class MCTS:
         if reset_rng:
             self._rng = np.random.default_rng(42)
 
+    def advance_root(self, new_board: chess.Board) -> int:
+        """
+        Advance the search tree to a new position after a move is played.
+
+        This enables tree reuse: instead of starting from scratch, we keep
+        the subtree rooted at the new position (if it was explored before).
+
+        Args:
+            new_board: The board position after the move was played.
+
+        Returns:
+            Number of simulations preserved (visit count of new root),
+            or 0 if position wasn't in the tree.
+        """
+        new_root = None
+        preserved_visits = 0
+
+        # Try to find the child node from the parent's children
+        if new_board.move_stack:
+            last_move = new_board.peek()
+            new_board.pop()
+
+            old_turn = "w" if new_board.turn == chess.WHITE else "b"
+            old_key = f"{new_board.board_fen()} {old_turn}"
+            old_root = self._transposition_table.get(old_key)
+
+            new_board.push(last_move)
+
+            if old_root and last_move in old_root.children:
+                new_root = old_root.children[last_move]
+                preserved_visits = new_root.visit_count
+
+        # Clear transposition table and set new root
+        self._transposition_table.clear()
+
+        if new_root:
+            turn = "w" if new_board.turn == chess.WHITE else "b"
+            new_key = f"{new_board.board_fen()} {turn}"
+            self._transposition_table[new_key] = new_root
+
+        # Clear eval cache (old positions no longer needed)
+        self._eval_cache.clear()
+
+        return preserved_visits
+
     def _get_cached_eval(
         self,
         board: chess.Board,

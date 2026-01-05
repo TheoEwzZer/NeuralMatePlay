@@ -487,6 +487,9 @@ class AlphaZeroTrainer:
             history.push(board)
             move_count += 1
 
+            # Tree reuse: preserve subtree for deeper analysis
+            mcts.advance_root(board)
+
             if callback:
                 # Convert squares to (row, col) for GUI
                 from_row = 7 - (from_square // 8)

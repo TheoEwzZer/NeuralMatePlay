@@ -611,6 +611,10 @@ class ChessGameApp:
         self.thinking_indicator.stop()
         self.thinking_indicator.pack_forget()
 
+        # Clear MCTS tree for new game
+        if self.mcts is not None:
+            self.mcts.clear_cache()
+
         self.undone_moves.clear()
         self.eval_history.clear()
 
@@ -653,6 +657,10 @@ class ChessGameApp:
         board = self.board_widget.get_board()
         if not board.move_stack:
             return
+
+        # Clear MCTS tree when going back (tree is no longer valid)
+        if self.mcts is not None:
+            self.mcts.clear_cache()
 
         self.ai_cancelled = True
         anim_duration = 100
@@ -737,6 +745,10 @@ class ChessGameApp:
         if not self.undone_moves:
             return
 
+        # Clear MCTS tree when going forward (for consistency after back)
+        if self.mcts is not None:
+            self.mcts.clear_cache()
+
         board = self.board_widget.get_board()
         human_move, ai_move = self.undone_moves.pop()
 
@@ -787,6 +799,11 @@ class ChessGameApp:
         """Handle human move."""
         self.undone_moves.clear()
         self._update_game_info()
+
+        # Tree reuse: preserve subtree for next AI search
+        if self.mcts is not None:
+            board = self.board_widget.get_board()
+            self.mcts.advance_root(board)
 
         # Update evaluation
         self._update_eval_after_move()
@@ -937,6 +954,10 @@ class ChessGameApp:
                 self.board_widget.set_board(board)
                 self.board_widget.set_last_move(move)
                 self._update_game_info()
+
+                # Tree reuse: preserve subtree for next search
+                if self.mcts is not None:
+                    self.mcts.advance_root(board)
 
                 # Update evaluation after AI move
                 self._update_eval_after_move(ai_value=root_value)
