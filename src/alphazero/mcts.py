@@ -164,8 +164,8 @@ class MCTS:
         ]
 
         if winning_moves:
-            # Found winning move(s): select the one with best Q-value (most negative)
-            best_move, _ = min(winning_moves, key=lambda x: x[1].q_value)
+            # Found winning move(s): select by Q-value, then prior as tiebreaker
+            best_move, _ = min(winning_moves, key=lambda x: (x[1].q_value, -x[1].prior))
             idx = encode_move_from_perspective(best_move, flip)
             if idx is not None:
                 policy[idx] = 1.0
