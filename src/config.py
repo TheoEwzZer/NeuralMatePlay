@@ -7,7 +7,7 @@ Provides unified JSON configuration for pretraining and self-play training.
 import json
 import os
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Optional, List
 
 
 @dataclass
@@ -30,7 +30,9 @@ class PretrainingConfig:
     """Pretraining configuration."""
 
     pgn_path: str = "data/lichess_elite_2020-08.pgn"
+    pgn_paths: Optional[List[str]] = None  # Multiple PGN files (overrides pgn_path)
     output_path: str = "models/pretrained.pt"
+
     chunks_dir: str = "data/chunks"  # Directory for chunk files
     chunk_size: int = 20000  # Number of positions per chunk file
     epochs: int = 5
@@ -46,6 +48,12 @@ class PretrainingConfig:
     entropy_coefficient: float = 0.01  # Entropy bonus to encourage policy diversity
     prefetch_workers: int = 2  # Number of prefetch threads for chunk loading
     gradient_accumulation_steps: int = 1  # Accumulate gradients over N steps (effective batch = batch_size * N)
+
+    def get_pgn_paths(self) -> List[str]:
+        """Get all PGN paths as a list (handles both legacy and new format)."""
+        if self.pgn_paths:
+            return self.pgn_paths
+        return [self.pgn_path] if self.pgn_path else []
 
 
 @dataclass
@@ -133,7 +141,12 @@ class Config:
         if "pretraining" in data:
             for key, value in data["pretraining"].items():
                 if hasattr(config.pretraining, key):
-                    setattr(config.pretraining, key, value)
+                    # Handle pgn_path as list (new format) or string (legacy)
+                    if key == "pgn_path" and isinstance(value, list):
+                        config.pretraining.pgn_paths = value
+                        config.pretraining.pgn_path = value[0] if value else ""
+                    else:
+                        setattr(config.pretraining, key, value)
 
         # Load training config
         if "training" in data:

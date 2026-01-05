@@ -4,15 +4,18 @@ Pretraining script for supervised learning on master games.
 Usage:
     ./neural_mate_pretrain --config config.json
     ./neural_mate_pretrain --pgn data/lichess_elite_2020-08.pgn --epochs 5
+    ./neural_mate_pretrain --pgn data/jan.pgn data/feb.pgn data/mar.pgn
+    ./neural_mate_pretrain --pgn "data/lichess_*.pgn"
     ./neural_mate_pretrain --resume-pretrained latest
     ./neural_mate_pretrain --resume-pretrained 3 --epochs 10
 """
 
+import glob
 import json
 import os
 import argparse
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import numpy as np
 import torch
@@ -30,6 +33,30 @@ from config import Config, PretrainingConfig
 from .dataset import ChessPositionDataset
 from .chunk_manager import ChunkManager
 from .streaming_trainer import StreamingTrainer
+
+
+def expand_pgn_paths(paths: List[str]) -> List[str]:
+    """
+    Expand glob patterns and deduplicate PGN paths.
+
+    Args:
+        paths: List of file paths or glob patterns.
+
+    Returns:
+        List of expanded, deduplicated file paths.
+    """
+    expanded = []
+    for path in paths:
+        if '*' in path or '?' in path:
+            # Glob pattern - expand it
+            matches = sorted(glob.glob(path))
+            if not matches:
+                print(f"Warning: No files match pattern '{path}'")
+            expanded.extend(matches)
+        else:
+            expanded.append(path)
+    # Deduplicate while preserving order
+    return list(dict.fromkeys(expanded))
 
 
 def create_dataloaders(
@@ -91,9 +118,14 @@ def pretrain(
     print(f"Device: {device}")
     print(f"Mixed precision: {use_amp}")
 
+    # Get all PGN paths
+    pgn_paths = cfg.get_pgn_paths()
+
     # Print config
     print("\n[Configuration]")
-    print(f"  PGN: {cfg.pgn_path}")
+    print(f"  PGN files: {len(pgn_paths)}")
+    for p in pgn_paths:
+        print(f"    - {p}")
     print(f"  Output: {cfg.output_path}")
     print(f"  Chunks: {cfg.chunks_dir}")
     print(f"  Chunk size: {cfg.chunk_size}")
@@ -105,87 +137,81 @@ def pretrain(
 
     # Check if we need to create or extend chunks
     metadata = ChunkManager.load_metadata(cfg.chunks_dir)
-    games_already_processed = metadata.get("games_processed", 0) if metadata else 0
-    need_more_games = cfg.max_games and games_already_processed < cfg.max_games
+    processed_files = set(metadata.get("processed_files", [])) if metadata else set()
+    files_to_process = [p for p in pgn_paths if p not in processed_files]
 
-    if metadata is None or need_more_games:
+    if files_to_process:
         from .pgn_processor import PGNProcessor
         from alphazero.spatial_encoding import PositionHistory
         from alphazero.move_encoding import encode_move_from_perspective
 
-        if metadata is None:
-            print(f"\nNo chunks found, creating from PGN...")
-            resume_mode = False
-            skip_games = 0
+        resume_mode = metadata is not None
+        if resume_mode:
+            print(f"\nExtending chunks with {len(files_to_process)} new file(s)...")
+            print(f"  Already processed: {len(processed_files)} file(s)")
         else:
-            print(f"\nExtending chunks: {games_already_processed} → {cfg.max_games} games...")
-            resume_mode = True
-            skip_games = games_already_processed
-
-        processor = PGNProcessor(
-            cfg.pgn_path,
-            min_elo=cfg.min_elo,
-            max_games=cfg.max_games,
-            skip_first_n_moves=cfg.skip_first_n_moves,
-        )
-
-        history = PositionHistory(3)  # Default history length
-        prev_game_idx = -1
-
-        print(f"Processing up to {cfg.max_games or 'all'} games...")
-        if skip_games > 0:
-            print(f"Skipping first {skip_games} games (already processed)...")
+            print(f"\nNo chunks found, creating from {len(files_to_process)} PGN file(s)...")
 
         chunk_manager = ChunkManager(cfg.chunks_dir, chunk_size=cfg.chunk_size, verbose=True, resume=resume_mode)
-        position_count = 0
-        games_skipped = 0
+        total_position_count = 0
+        total_games_count = chunk_manager._games_processed
 
-        last_skip_print = 0
-        for board, move, outcome, phase in processor.process_all():
-            if cfg.max_positions and position_count >= cfg.max_positions:
+        for file_idx, pgn_file in enumerate(files_to_process):
+            print(f"\n[File {file_idx + 1}/{len(files_to_process)}] Processing: {pgn_file}")
+
+            processor = PGNProcessor(
+                pgn_file,
+                min_elo=cfg.min_elo,
+                max_games=cfg.max_games,  # Per-file limit
+                skip_first_n_moves=cfg.skip_first_n_moves,
+            )
+
+            history = PositionHistory(3)  # Default history length
+            prev_game_idx = -1
+            file_position_count = 0
+
+            for board, move, outcome, phase in processor.process_all():
+                if cfg.max_positions and total_position_count >= cfg.max_positions:
+                    break
+
+                game_idx = processor.games_processed
+
+                if game_idx != prev_game_idx:
+                    history.clear()
+                    prev_game_idx = game_idx
+
+                history.push(board)
+                state = history.encode(from_perspective=True)
+
+                flip = board.turn == False
+                move_idx = encode_move_from_perspective(move, flip)
+                if move_idx is None:
+                    continue
+
+                value = outcome if board.turn else -outcome
+                chunk_manager.add_example(state, move_idx, value, phase)
+                file_position_count += 1
+                total_position_count += 1
+
+                if file_position_count % 50000 == 0:
+                    print(f"  {file_position_count:,} positions, {processor.games_processed} games, {processor.progress:.1%}")
+
+            # Track this file as processed
+            processed_files.add(pgn_file)
+            total_games_count += processor.games_processed
+            print(f"  Completed: {file_position_count:,} positions from {processor.games_processed} games")
+
+            # Check global position limit
+            if cfg.max_positions and total_position_count >= cfg.max_positions:
+                print(f"\nReached max_positions limit ({cfg.max_positions:,})")
                 break
 
-            game_idx = processor.games_processed
-
-            # Skip games that were already processed
-            if game_idx <= skip_games:
-                if game_idx != prev_game_idx:
-                    games_skipped = game_idx
-                    prev_game_idx = game_idx
-                    # Show progress while skipping (every 5000 games)
-                    if game_idx - last_skip_print >= 5000:
-                        print(f"  Skipping... {game_idx:,}/{skip_games:,} games", end="\r", flush=True)
-                        last_skip_print = game_idx
-                continue
-
-            # First position after skipping - print completion message
-            if skip_games > 0 and position_count == 0:
-                print(f"  Skipped {skip_games:,} games                    ")
-
-            if game_idx != prev_game_idx:
-                history.clear()
-                prev_game_idx = game_idx
-
-            history.push(board)
-            state = history.encode(from_perspective=True)
-
-            flip = board.turn == False
-            move_idx = encode_move_from_perspective(move, flip)
-            if move_idx is None:
-                continue
-
-            value = outcome if board.turn else -outcome
-            chunk_manager.add_example(state, move_idx, value, phase)
-            position_count += 1
-
-            if position_count % 50000 == 0:
-                total_games = processor.games_processed
-                new_games = total_games - skip_games
-                print(f"  {position_count:,} new positions, {new_games} new games, {processor.progress:.1%}")
-
-        chunk_manager.set_games_processed(processor.games_processed)
+        chunk_manager.set_games_processed(total_games_count)
+        chunk_manager.set_processed_files(list(processed_files))
         chunk_manager.finalize()
         metadata = ChunkManager.load_metadata(cfg.chunks_dir)
+    else:
+        print(f"\nAll {len(pgn_paths)} PGN file(s) already processed.")
 
     if metadata:
         print(f"\nChunk info:")
@@ -546,6 +572,8 @@ Examples:
   ./neural_mate_pretrain --config config.json
   ./neural_mate_pretrain --config config.json --epochs 10 --max-games 5000
   ./neural_mate_pretrain --pgn data/lichess_elite_2020-08.pgn --epochs 5
+  ./neural_mate_pretrain --pgn data/jan.pgn data/feb.pgn data/mar.pgn
+  ./neural_mate_pretrain --pgn "data/lichess_*.pgn"
   ./neural_mate_pretrain --resume-pretrained latest
   ./neural_mate_pretrain --resume-pretrained 3 --epochs 10
   ./neural_mate_pretrain --generate-config
@@ -566,8 +594,9 @@ Examples:
     parser.add_argument(
         "--pgn",
         type=str,
+        nargs="+",
         default=None,
-        help="Path to PGN file (overrides config)",
+        help="Path(s) to PGN file(s). Supports multiple files and glob patterns (e.g., 'data/*.pgn')",
     )
     parser.add_argument(
         "--output", "-o",
@@ -656,7 +685,13 @@ Examples:
 
     # Override with CLI arguments
     if args.pgn:
-        cfg.pgn_path = args.pgn
+        expanded = expand_pgn_paths(args.pgn)
+        if len(expanded) == 1:
+            cfg.pgn_path = expanded[0]
+            cfg.pgn_paths = None
+        else:
+            cfg.pgn_paths = expanded
+            cfg.pgn_path = expanded[0] if expanded else ""
     if args.output:
         cfg.output_path = args.output
     if args.epochs:
@@ -675,9 +710,17 @@ Examples:
         cfg.chunks_dir = args.chunks_dir
 
     # Validate required fields
-    if not cfg.pgn_path or not os.path.exists(cfg.pgn_path):
-        print(f"Error: PGN file not found: {cfg.pgn_path}")
-        print("Use --pgn to specify a valid PGN file or update config.json")
+    pgn_paths = cfg.get_pgn_paths()
+    if not pgn_paths:
+        print("Error: No PGN files specified")
+        print("Use --pgn to specify PGN file(s) or update config.json")
+        return 1
+
+    missing = [p for p in pgn_paths if not os.path.exists(p)]
+    if missing:
+        print(f"Error: PGN file(s) not found:")
+        for p in missing:
+            print(f"  - {p}")
         return 1
 
     try:

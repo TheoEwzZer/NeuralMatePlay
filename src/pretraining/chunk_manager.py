@@ -12,7 +12,7 @@ Uses HDF5 format with LZF compression for:
 
 import json
 import os
-from typing import Optional, Iterator
+from typing import Optional, Iterator, List
 import numpy as np
 import h5py
 
@@ -61,6 +61,7 @@ class ChunkManager:
         self._chunk_count = 0
         self._total_examples = 0
         self._games_processed = 0
+        self._processed_files: List[str] = []
 
         # Resume from existing chunks
         if resume:
@@ -69,10 +70,13 @@ class ChunkManager:
                 self._chunk_count = metadata.get("num_chunks", 0)
                 self._total_examples = metadata.get("total_examples", 0)
                 self._games_processed = metadata.get("games_processed", 0)
+                self._processed_files = metadata.get("processed_files", [])
                 if verbose:
                     print(
                         f"Resuming from chunk {self._chunk_count}, {self._games_processed} games already processed"
                     )
+                    if self._processed_files:
+                        print(f"  Already processed files: {len(self._processed_files)}")
 
     def get_chunk_path(self, chunk_idx: int) -> str:
         """Get path for a specific chunk file."""
@@ -162,6 +166,14 @@ class ChunkManager:
         """Set the number of games processed (for metadata)."""
         self._games_processed = count
 
+    def set_processed_files(self, files: List[str]) -> None:
+        """Set the list of processed PGN files (for resume tracking)."""
+        self._processed_files = files
+
+    def get_processed_files(self) -> List[str]:
+        """Get the list of already processed PGN files."""
+        return self._processed_files.copy()
+
     def finalize(self) -> int:
         """
         Finalize writing and flush remaining data.
@@ -179,6 +191,7 @@ class ChunkManager:
             "total_examples": self._total_examples,
             "chunk_size": self.chunk_size,
             "games_processed": self._games_processed,
+            "processed_files": self._processed_files,
         }
         metadata_path = os.path.join(self.chunks_dir, "metadata.json")
         with open(metadata_path, "w") as f:
