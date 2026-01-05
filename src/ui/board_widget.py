@@ -16,13 +16,16 @@ try:
     import chess
     import chess.svg
 except ImportError:
-    raise ImportError("python-chess is required. Install with: pip install python-chess")
+    raise ImportError(
+        "python-chess is required. Install with: pip install python-chess"
+    )
 
 # Try to import SVG rendering libraries
 _USE_SVG = False
 try:
     import cairosvg
     from PIL import Image, ImageTk
+
     _USE_SVG = True
 except ImportError:
     pass  # Fall back to Unicode
@@ -91,7 +94,7 @@ class PromotionDialog(tk.Toplevel):
 
         # Lift to top
         self.lift()
-        self.attributes('-topmost', True)
+        self.attributes("-topmost", True)
 
     def _create_buttons(self) -> None:
         """Create piece selection buttons."""
@@ -328,8 +331,9 @@ class ChessBoardWidget(tk.Canvas):
             color = COLORS["selected"]
 
         # Highlight last move
-        elif self.last_move and (square == self.last_move.from_square or
-                                  square == self.last_move.to_square):
+        elif self.last_move and (
+            square == self.last_move.from_square or square == self.last_move.to_square
+        ):
             # Blend with last move highlight
             color = COLORS["last_move"] if is_light else "#c4c444"
 
@@ -340,8 +344,12 @@ class ChessBoardWidget(tk.Canvas):
                 color = COLORS["check"]
 
         self.create_rectangle(
-            x, y, x + self.square_size, y + self.square_size,
-            fill=color, outline="",
+            x,
+            y,
+            x + self.square_size,
+            y + self.square_size,
+            fill=color,
+            outline="",
         )
 
         # Draw legal move indicators
@@ -354,7 +362,10 @@ class ChessBoardWidget(tk.Canvas):
                     # Capture indicator (ring)
                     r = self.square_size // 2 - 4
                     self.create_oval(
-                        cx - r, cy - r, cx + r, cy + r,
+                        cx - r,
+                        cy - r,
+                        cx + r,
+                        cy + r,
                         outline=COLORS["legal_move"],
                         width=4,
                     )
@@ -362,7 +373,10 @@ class ChessBoardWidget(tk.Canvas):
                     # Move indicator (dot)
                     r = self.square_size // 6
                     self.create_oval(
-                        cx - r, cy - r, cx + r, cy + r,
+                        cx - r,
+                        cy - r,
+                        cx + r,
+                        cy + r,
                         fill=COLORS["legal_move"],
                         outline="",
                     )
@@ -379,7 +393,7 @@ class ChessBoardWidget(tk.Canvas):
             svg_data = chess.svg.piece(piece, size=piece_size)
 
             # Convert SVG to PNG bytes
-            png_data = cairosvg.svg2png(bytestring=svg_data.encode('utf-8'))
+            png_data = cairosvg.svg2png(bytestring=svg_data.encode("utf-8"))
 
             # Convert to PhotoImage
             image = Image.open(BytesIO(png_data))
@@ -397,7 +411,7 @@ class ChessBoardWidget(tk.Canvas):
             # Generate if not cached
             piece = chess.Piece.from_symbol(symbol)
             svg_data = chess.svg.piece(piece, size=piece_size)
-            png_data = cairosvg.svg2png(bytestring=svg_data.encode('utf-8'))
+            png_data = cairosvg.svg2png(bytestring=svg_data.encode("utf-8"))
             image = Image.open(BytesIO(png_data))
             photo = ImageTk.PhotoImage(image)
             self._piece_cache[key] = photo
@@ -441,14 +455,16 @@ class ChessBoardWidget(tk.Canvas):
         # Shadow/outline effect
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
             self.create_text(
-                cx + dx, cy + dy,
+                cx + dx,
+                cy + dy,
                 text=unicode_char,
                 font=font,
                 fill=outline_color,
             )
 
         self.create_text(
-            cx, cy,
+            cx,
+            cy,
             text=unicode_char,
             font=font,
             fill=fill_color,
@@ -478,14 +494,16 @@ class ChessBoardWidget(tk.Canvas):
             # Shadow/outline
             for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
                 self.create_text(
-                    x + dx, y + dy,
+                    x + dx,
+                    y + dy,
                     text=unicode_char,
                     font=font,
                     fill=outline_color,
                 )
 
             self.create_text(
-                x, y,
+                x,
+                y,
                 text=unicode_char,
                 font=font,
                 fill=fill_color,
@@ -499,7 +517,7 @@ class ChessBoardWidget(tk.Canvas):
 
         for i in range(8):
             # File labels (a-h) - bottom row
-            file_label = chr(ord('a') + (7 - i if self.flipped else i))
+            file_label = chr(ord("a") + (7 - i if self.flipped else i))
             x = i * self.square_size + self.square_size - margin - 5
             y = self.size - margin - 3
 
@@ -513,8 +531,9 @@ class ChessBoardWidget(tk.Canvas):
                 text_color = "#f0f0d0"  # Light cream for contrast
 
             # Draw text (shadow effect removed for Tkinter compatibility)
-            self.create_text(x, y, text=file_label, font=bold_font,
-                           fill=text_color, anchor="se")
+            self.create_text(
+                x, y, text=file_label, font=bold_font, fill=text_color, anchor="se"
+            )
 
             # Rank labels (1-8) - left column
             rank_label = str(i + 1 if self.flipped else 8 - i)
@@ -528,8 +547,9 @@ class ChessBoardWidget(tk.Canvas):
                 text_color = "#f0f0d0"
 
             # Draw text (shadow effect removed for Tkinter compatibility)
-            self.create_text(x, y, text=rank_label, font=bold_font,
-                           fill=text_color, anchor="nw")
+            self.create_text(
+                x, y, text=rank_label, font=bold_font, fill=text_color, anchor="nw"
+            )
 
     @property
     def is_animating(self) -> bool:
@@ -552,8 +572,9 @@ class ChessBoardWidget(tk.Canvas):
             # First click - select piece
             if piece and piece.color == self.board.turn:
                 self.selected_square = square
-                self.legal_moves = {m for m in self.board.legal_moves
-                                   if m.from_square == square}
+                self.legal_moves = {
+                    m for m in self.board.legal_moves if m.from_square == square
+                }
 
                 # Start potential drag
                 self.drag_from = square
@@ -570,8 +591,9 @@ class ChessBoardWidget(tk.Canvas):
             elif piece and piece.color == self.board.turn:
                 # Select different piece
                 self.selected_square = square
-                self.legal_moves = {m for m in self.board.legal_moves
-                                   if m.from_square == square}
+                self.legal_moves = {
+                    m for m in self.board.legal_moves if m.from_square == square
+                }
                 self.drag_from = square
                 self.drag_piece = piece.symbol()
                 self.drag_pos = (event.x, event.y)
@@ -620,8 +642,9 @@ class ChessBoardWidget(tk.Canvas):
         piece = self.board.piece_at(from_sq)
         if piece and piece.piece_type == chess.PAWN:
             to_rank = chess.square_rank(to_sq)
-            if (piece.color == chess.WHITE and to_rank == 7) or \
-               (piece.color == chess.BLACK and to_rank == 0):
+            if (piece.color == chess.WHITE and to_rank == 7) or (
+                piece.color == chess.BLACK and to_rank == 0
+            ):
                 # Check if any promotion move is legal
                 test_move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
                 if test_move in self.board.legal_moves:
@@ -729,7 +752,10 @@ class ChessBoardWidget(tk.Canvas):
         if self._flash_count % 2 == 0:
             # Flash red
             self.create_rectangle(
-                x, y, x + self.square_size, y + self.square_size,
+                x,
+                y,
+                x + self.square_size,
+                y + self.square_size,
                 fill=COLORS["error"],
                 outline="",
                 tags="flash",
@@ -805,18 +831,27 @@ class ChessBoardWidget(tk.Canvas):
 
         # Check for castling - need to animate rook too
         self._anim_rook = None
-        is_castling = (not reverse and self.board.is_castling(move)) or \
-                      (reverse and piece.piece_type == chess.KING and
-                       abs(chess.square_file(move.from_square) - chess.square_file(move.to_square)) == 2)
+        is_castling = (not reverse and self.board.is_castling(move)) or (
+            reverse
+            and piece.piece_type == chess.KING
+            and abs(
+                chess.square_file(move.from_square) - chess.square_file(move.to_square)
+            )
+            == 2
+        )
 
         if is_castling:
             # Determine rook's from and to squares
             if chess.square_file(move.to_square) == 6:  # Kingside (g-file)
-                rook_from = chess.square(7, chess.square_rank(move.from_square))  # h-file
-                rook_to = chess.square(5, chess.square_rank(move.from_square))    # f-file
+                rook_from = chess.square(
+                    7, chess.square_rank(move.from_square)
+                )  # h-file
+                rook_to = chess.square(5, chess.square_rank(move.from_square))  # f-file
             else:  # Queenside (c-file)
-                rook_from = chess.square(0, chess.square_rank(move.from_square))  # a-file
-                rook_to = chess.square(3, chess.square_rank(move.from_square))    # d-file
+                rook_from = chess.square(
+                    0, chess.square_rank(move.from_square)
+                )  # a-file
+                rook_to = chess.square(3, chess.square_rank(move.from_square))  # d-file
 
             # Swap for reverse animation
             if reverse:
@@ -829,10 +864,14 @@ class ChessBoardWidget(tk.Canvas):
 
                 self._anim_rook = {
                     "symbol": rook.symbol(),
-                    "start": (rook_start_x + self.square_size // 2,
-                              rook_start_y + self.square_size // 2),
-                    "end": (rook_end_x + self.square_size // 2,
-                            rook_end_y + self.square_size // 2),
+                    "start": (
+                        rook_start_x + self.square_size // 2,
+                        rook_start_y + self.square_size // 2,
+                    ),
+                    "end": (
+                        rook_end_x + self.square_size // 2,
+                        rook_end_y + self.square_size // 2,
+                    ),
                     "from_square": rook_from,
                 }
 
@@ -875,7 +914,9 @@ class ChessBoardWidget(tk.Canvas):
             rook_end_x, rook_end_y = self._anim_rook["end"]
             rook_current_x = rook_start_x + (rook_end_x - rook_start_x) * eased
             rook_current_y = rook_start_y + (rook_end_y - rook_start_y) * eased
-            self._draw_animated_piece(self._anim_rook["symbol"], rook_current_x, rook_current_y)
+            self._draw_animated_piece(
+                self._anim_rook["symbol"], rook_current_x, rook_current_y
+            )
 
         if progress < 1.0:
             # Continue animation (~60 FPS)
@@ -895,7 +936,8 @@ class ChessBoardWidget(tk.Canvas):
         if self._use_svg:
             image = self._get_piece_image(symbol)
             self.create_image(
-                x, y,
+                x,
+                y,
                 image=image,
                 anchor="center",
                 tags="animated_piece",
@@ -910,14 +952,16 @@ class ChessBoardWidget(tk.Canvas):
 
             for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
                 self.create_text(
-                    x + dx, y + dy,
+                    x + dx,
+                    y + dy,
                     text=unicode_char,
                     font=font,
                     fill=outline_color,
                     tags="animated_piece",
                 )
             self.create_text(
-                x, y,
+                x,
+                y,
                 text=unicode_char,
                 font=font,
                 fill=fill_color,

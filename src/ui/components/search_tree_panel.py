@@ -136,7 +136,11 @@ class SearchTreePanel(tk.Frame):
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def update_tree(
-        self, tree_data: List[Dict[str, Any]], depth: int = 0, top_n: int = 0
+        self,
+        tree_data: List[Dict[str, Any]],
+        depth: int = 0,
+        top_n: int = 0,
+        mate_in: int | None = None,
     ) -> None:
         """
         Update the tree display with new data.
@@ -146,14 +150,16 @@ class SearchTreePanel(tk.Frame):
                        san, visits, q_value, prior, children
             depth: Actual max depth of the search tree.
             top_n: Number of top moves shown per level.
+            mate_in: Number of moves to mate, or None if no forced mate.
         """
-        # Update title with depth and top_n
+        # Update title with depth, top_n, and mate info
+        mate_str = f" - Mate in {mate_in}" if mate_in else ""
         if depth > 0 and top_n > 0:
-            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n})")
+            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}")
         elif depth > 0:
-            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n})")
+            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}")
         else:
-            self._title_label.config(text="Search Tree")
+            self._title_label.config(text=f"Search Tree{mate_str}")
         self._tree_data = tree_data
         # Keep first level expanded by default
         self._expanded = {node["san"] for node in tree_data}

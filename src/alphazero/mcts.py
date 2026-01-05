@@ -801,7 +801,7 @@ class MCTS:
         key = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
         self._eval_cache[key] = (policy.copy(), value)
 
-    def get_pv(self, board: chess.Board, depth: int = 10) -> list[chess.Move]:
+    def get_pv(self, board: chess.Board, depth: int = 50) -> list[chess.Move]:
         """
         Get principal variation (most visited path).
 
@@ -814,33 +814,133 @@ class MCTS:
         """
         pv = []
         current_board = board.copy()
+        node = self._get_or_create_node(current_board)
 
         for _ in range(depth):
-            node = self._get_or_create_node(current_board)
-
             if not node.children:
+                break
+
+            # Only consider children with visits
+            visited_children = [
+                (m, c) for m, c in node.children.items() if c.visit_count > 0
+            ]
+            if not visited_children:
                 break
 
             # Check for winning moves first (Q <= -0.9999 = guaranteed win)
             winning = [
-                (m, c)
-                for m, c in node.children.items()
-                if c.visit_count > 0 and c.q_value <= -0.9999
+                (m, c) for m, c in visited_children if c.q_value <= -0.9999
             ]
             if winning:
                 # Use Q-value first, then prior as tiebreaker (network's preference)
-                best_move = min(winning, key=lambda x: (x[1].q_value, -x[1].prior))[0]
+                best_move, best_child = min(
+                    winning, key=lambda x: (x[1].q_value, -x[1].prior)
+                )
             else:
                 # Get most visited move (use Q-value as tiebreaker: lower = better for us)
-                best_move = max(
-                    node.children.items(),
+                best_move, best_child = max(
+                    visited_children,
                     key=lambda x: (x[1].visit_count, -x[1].q_value),
-                )[0]
+                )
             pv.append(best_move)
-
             current_board.push(best_move)
 
+            # Follow the child node directly (not via transposition table)
+            node = best_child
+
         return pv
+
+    def get_mate_in(self, board: chess.Board) -> int | None:
+        """
+        Check if there's a forced mate in the search tree.
+
+        Uses minimax: we play optimally to mate fastest, opponent defends optimally.
+
+        Args:
+            board: Current position.
+
+        Returns:
+            Mate in X (number of our moves), or None if no forced mate found.
+        """
+        root = self._get_or_create_node(board)
+        if not root.children:
+            return None
+
+        return self._find_forced_mate(root, board.copy(), is_our_turn=True, our_moves=0)
+
+    def _find_forced_mate(
+        self,
+        node: "MCTSNode",
+        board: chess.Board,
+        is_our_turn: bool,
+        our_moves: int,
+        max_our_moves: int = 15,
+    ) -> int | None:
+        """
+        Minimax search for forced mate in the MCTS tree.
+
+        Args:
+            node: Current MCTS node.
+            board: Current board state.
+            is_our_turn: True if it's our turn to move.
+            our_moves: Number of our moves played so far.
+            max_our_moves: Maximum depth to search.
+
+        Returns:
+            Mate in X (number of our moves), or None if no forced mate.
+        """
+        if our_moves > max_our_moves:
+            return None
+
+        if not node.children:
+            return None
+
+        visited = [(m, c) for m, c in node.children.items() if c.visit_count > 0]
+        if not visited:
+            return None
+
+        if is_our_turn:
+            # Our turn: find the fastest mate among all our options
+            best_mate = None
+            for move, child in visited:
+                temp_board = board.copy()
+                temp_board.push(move)
+
+                if temp_board.is_checkmate():
+                    # Mate in 1!
+                    return our_moves + 1
+
+                child_mate = self._find_forced_mate(
+                    child, temp_board, False, our_moves + 1, max_our_moves
+                )
+                if child_mate is not None:
+                    if best_mate is None or child_mate < best_mate:
+                        best_mate = child_mate
+
+            return best_mate
+        else:
+            # Opponent's turn: ALL responses must lead to mate (forced)
+            # Return the worst case (longest mate) among opponent's options
+            worst_mate = None
+            for move, child in visited:
+                temp_board = board.copy()
+                temp_board.push(move)
+
+                if temp_board.is_checkmate():
+                    # We got mated - not a winning line
+                    return None
+
+                child_mate = self._find_forced_mate(
+                    child, temp_board, True, our_moves, max_our_moves
+                )
+                if child_mate is None:
+                    # Opponent has escape - no forced mate
+                    return None
+
+                if worst_mate is None or child_mate > worst_mate:
+                    worst_mate = child_mate
+
+            return worst_mate
 
     def get_visit_counts(self, board: chess.Board) -> dict[chess.Move, int]:
         """
@@ -1024,7 +1124,9 @@ class MCTS:
         # Show tree structure for top moves
         actual_depth = self._compute_tree_depth(root)
         actual_branching = self._compute_max_branching(root)
-        lines.append(f"Search Tree (depth: {actual_depth}, top: {actual_branching}):")
+        mate_in = self.get_mate_in(board)
+        mate_str = f" - Mate in {mate_in}" if mate_in else ""
+        lines.append(f"Search Tree (depth: {actual_depth}, top: {actual_branching}){mate_str}:")
         lines.append("-" * 60)
 
         for move, child in sorted_children[: min(3, len(sorted_children))]:

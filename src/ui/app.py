@@ -841,6 +841,7 @@ class ChessGameApp:
             tree_data = None
             tree_depth = 0
             tree_branching = 0
+            mate_in = None
 
             if self.use_pure_mcts and self.pure_mcts_player is not None:
                 move = self.pure_mcts_player.select_move(board)
@@ -853,6 +854,7 @@ class ChessGameApp:
                 tree_data = self.mcts.get_search_tree_data(board, top_n=5, max_depth=5)
                 tree_depth = self.mcts.get_tree_depth(board)
                 tree_branching = self.mcts.get_max_branching_factor(board)
+                mate_in = self.mcts.get_mate_in(board)
 
                 if self.verbose and not self.ai_cancelled:
                     self.mcts.print_search_tree(board, top_n=20, max_depth=20)
@@ -868,6 +870,7 @@ class ChessGameApp:
                             "tree_data": tree_data,
                             "tree_depth": tree_depth,
                             "tree_branching": tree_branching,
+                            "mate_in": mate_in,
                         },
                     )
                 )
@@ -923,6 +926,7 @@ class ChessGameApp:
         tree_data = data.get("tree_data")
         tree_depth = data.get("tree_depth", 0)
         tree_branching = data.get("tree_branching", 0)
+        mate_in = data.get("mate_in")
 
         board = self.board_widget.get_board()
 
@@ -933,7 +937,7 @@ class ChessGameApp:
 
         # Update Search Tree panel
         if tree_data:
-            self.search_tree_panel.update_tree(tree_data, tree_depth, tree_branching)
+            self.search_tree_panel.update_tree(tree_data, tree_depth, tree_branching, mate_in)
 
         # Update Value label
         value_color = (
