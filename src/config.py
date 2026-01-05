@@ -75,7 +75,9 @@ class TrainingConfig:
     temperature_moves: int = 30
     dirichlet_alpha: float = 0.3
     dirichlet_epsilon: float = 0.25
+    c_puct: float = 1.5  # Exploration constant for MCTS
     history_length: int = 3  # Must match NetworkConfig.history_length
+    veto_threshold: float = 0.35  # Min score vs old/pretrained to avoid veto
     checkpoint_interval: int = 1  # Save checkpoint every N iterations
     pretrained_path: Optional[str] = None  # Path to pretrained model for arena comparison
     # Data mixing to prevent catastrophic forgetting
