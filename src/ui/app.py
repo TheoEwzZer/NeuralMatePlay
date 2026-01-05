@@ -3,11 +3,13 @@ Main chess game application.
 
 Provides the complete UI for playing chess against the AlphaZero AI,
 watching AI vs AI games, and managing training.
+
+Professional chess.com-inspired design with AI debugging features.
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Any
+from typing import Any, Optional, List
 import threading
 import queue
 import os
@@ -33,10 +35,19 @@ from .styles import (
     create_tooltip,
     create_confirmation_dialog,
     ThinkingIndicator,
-    Spinner,
 )
 from .board_widget import ChessBoardWidget
-from .training_panel import TrainingPanel, TrainingConfigDialog
+from .training_panel import TrainingPanel
+from .components import (
+    EvalBar,
+    EvalGraph,
+    MCTSPanel,
+    MoveList,
+    PlayerInfo,
+    OpeningDisplay,
+    PhaseIndicator,
+    SearchTreePanel,
+)
 from src.chess_encoding.board_utils import get_material_count
 
 
@@ -50,6 +61,7 @@ class ChessGameApp:
     - AI vs AI spectating
     - Training panel for self-play
     - Game controls (new game, undo, flip board)
+    - AI debugging: MCTS stats, eval bar, eval graph, network output
     """
 
     # Default MCTS settings for play mode (optimized for quality over speed)
@@ -76,16 +88,16 @@ class ChessGameApp:
         """
         self.root = tk.Tk()
         self.root.title("NeuralMate Chess - AlphaZero")
-        self.root.resizable(True, True)  # Allow resize
-        self.root.geometry("1600x900")  # Default size for 1920x1080 screens
-        self.root.minsize(1200, 800)  # Minimum size
+        self.root.resizable(True, True)
+        self.root.geometry("1700x950")  # Wider for new layout
+        self.root.minsize(1400, 850)
 
         apply_theme(self.root)
 
         # Network and AI
         self.network = None
         self.mcts = None
-        self.pure_mcts_player = None  # For pure MCTS mode (no neural network)
+        self.pure_mcts_player = None
         self.network_path = network_path
         self.num_simulations = num_simulations
         self.mcts_batch_size = mcts_batch_size
@@ -94,14 +106,17 @@ class ChessGameApp:
         self.use_pure_mcts = network_path and network_path.lower() == "mcts"
 
         # Game state
-        self.game_mode = "human_vs_ai"  # human_vs_ai, human_vs_human, ai_vs_ai
+        self.game_mode = "human_vs_ai"
         self.human_color = chess.WHITE
         self.ai_thinking = False
         self.ai_thread: threading.Thread | None = None
         self.ai_cancelled = False
 
         # Move history for back/forward navigation
-        self.undone_moves: list = []  # Stack of undone moves for forward
+        self.undone_moves: list = []
+
+        # Evaluation history for graph
+        self.eval_history: List[float] = []
 
         # Update queue for thread-safe UI updates
         self.update_queue = queue.Queue()
@@ -118,442 +133,321 @@ class ChessGameApp:
 
     def _bind_keyboard_shortcuts(self) -> None:
         """Bind keyboard shortcuts for common actions."""
-        # Ctrl+N: New game
         self.root.bind("<Control-n>", lambda e: self._new_game_with_confirm())
         self.root.bind("<Control-N>", lambda e: self._new_game_with_confirm())
-
-        # Ctrl+Z: Back (same as Left arrow)
         self.root.bind("<Control-z>", lambda e: self._back_one_move())
         self.root.bind("<Control-Z>", lambda e: self._back_one_move())
-
-        # Arrow keys: Navigate history
         self.root.bind("<Left>", lambda e: self._back_one_move())
         self.root.bind("<Right>", lambda e: self._forward_one_move())
-
-        # F: Flip board
         self.root.bind("<f>", lambda e: self._flip_board())
         self.root.bind("<F>", lambda e: self._flip_board())
-
-        # Escape: Cancel selection / deselect
         self.root.bind("<Escape>", lambda e: self._cancel_selection())
 
     def _create_ui(self) -> None:
-        """Create the main UI layout."""
-        # Main container (larger padding for 1080p)
+        """Create the main UI layout - chess.com inspired design."""
+        # Main container
         main_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
-        main_frame.pack(padx=40, pady=30, fill="both", expand=True)
+        main_frame.pack(padx=20, pady=15, fill="both", expand=True)
 
-        # Title
-        title_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"])
-        title_frame.pack(fill="x", pady=(0, 25))
+        # Top bar with controls
+        self._create_top_bar(main_frame)
 
-        title = create_styled_label(
-            title_frame,
-            "NeuralMate Chess",
-            style="title",
-        )
-        title.pack(side="left")
-
-        subtitle = create_styled_label(
-            title_frame,
-            "AlphaZero-lite",
-            style="body",
-            fg=COLORS["accent"],
-        )
-        subtitle.pack(side="left", padx=(10, 0), pady=(8, 0))
-
-        # Content area
+        # Content area - 3 column layout
         content_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"])
-        content_frame.pack(fill="both", expand=True)
+        content_frame.pack(fill="both", expand=True, pady=(10, 0))
 
-        # Left side - Chess board (larger for 1080p)
-        board_frame = tk.Frame(content_frame, bg=COLORS["bg_primary"])
-        board_frame.pack(side="left", padx=(0, 30))
+        # Left panel - Player info, opening, phase
+        self._create_left_panel(content_frame)
 
-        self.board_widget = ChessBoardWidget(
-            board_frame,
-            size=720,  # Larger board for 1080p displays
-            on_move=self._on_human_move,
+        # Center panel - Board + eval bar
+        self._create_center_panel(content_frame)
+
+        # Right panel - Analysis (MCTS, eval graph, network output)
+        self._create_right_panel(content_frame)
+
+    def _create_top_bar(self, parent: tk.Widget) -> None:
+        """Create the top bar with game controls."""
+        top_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
+        top_frame.pack(fill="x")
+
+        # Left side - Game control buttons
+        left_btns = tk.Frame(top_frame, bg=COLORS["bg_primary"])
+        left_btns.pack(side="left")
+
+        self.new_game_btn = create_styled_button(
+            left_btns,
+            "New Game",
+            command=self._new_game,
+            style="accent",
         )
-        self.board_widget.pack()
+        self.new_game_btn.pack(side="left", padx=(0, 10))
 
-        # Right side - Controls and info with tabs (wider panel)
-        side_panel = tk.Frame(content_frame, bg=COLORS["bg_primary"], width=450)
-        side_panel.pack(side="left", fill="both", expand=True)
-        side_panel.pack_propagate(False)
-
-        # Create notebook (tabs)
-        style = ttk.Style()
-        style.configure("Dark.TNotebook", background=COLORS["bg_primary"])
-        style.configure(
-            "Dark.TNotebook.Tab",
-            background=COLORS["bg_secondary"],
-            foreground=COLORS["text_primary"],
-            padding=[15, 8],
-            font=FONTS["body_bold"],
+        self.back_btn = create_styled_button(
+            left_btns,
+            "◀",
+            command=self._back_one_move,
+            style="outline",
         )
-        style.map(
-            "Dark.TNotebook.Tab",
-            background=[("selected", COLORS["bg_tertiary"])],
-            foreground=[("selected", COLORS["text_primary"])],
+        self.back_btn.pack(side="left", padx=(0, 3))
+
+        self.forward_btn = create_styled_button(
+            left_btns,
+            "▶",
+            command=self._forward_one_move,
+            style="outline",
         )
+        self.forward_btn.pack(side="left", padx=(0, 10))
 
-        self.notebook = ttk.Notebook(side_panel, style="Dark.TNotebook")
-        self.notebook.pack(fill="both", expand=True)
-
-        # Game tab
-        game_tab = tk.Frame(self.notebook, bg=COLORS["bg_primary"])
-        self.notebook.add(game_tab, text="Game")
-
-        # Training tab
-        training_tab = tk.Frame(self.notebook, bg=COLORS["bg_primary"])
-        self.notebook.add(training_tab, text="Training")
-
-        # Game info panel (in game tab)
-        info_panel = create_panel(game_tab, title="Game Info")
-        info_panel.pack(fill="x", pady=(0, 10))
-
-        info_content = tk.Frame(info_panel, bg=COLORS["bg_secondary"])
-        info_content.pack(fill="x", padx=15, pady=(0, 15))
-
-        # Turn indicator
-        turn_frame = tk.Frame(info_content, bg=COLORS["bg_secondary"])
-        turn_frame.pack(fill="x", pady=5)
-
-        tk.Label(
-            turn_frame,
-            text="Turn:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["body"],
-        ).pack(side="left")
-
-        self.turn_label = tk.Label(
-            turn_frame,
-            text="White",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["body_bold"],
+        self.flip_btn = create_styled_button(
+            left_btns,
+            "Flip",
+            command=self._flip_board,
+            style="outline",
         )
-        self.turn_label.pack(side="right")
+        self.flip_btn.pack(side="left", padx=(0, 10))
 
-        # Status
-        status_frame = tk.Frame(info_content, bg=COLORS["bg_secondary"])
-        status_frame.pack(fill="x", pady=5)
+        self.load_btn = create_styled_button(
+            left_btns,
+            "Load Network",
+            command=self._load_network_dialog,
+            style="outline",
+        )
+        self.load_btn.pack(side="left")
 
-        tk.Label(
-            status_frame,
-            text="Status:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["body"],
-        ).pack(side="left")
+        # Tooltips
+        create_tooltip(self.new_game_btn, "Start a new game (Ctrl+N)")
+        create_tooltip(self.back_btn, "Go back one move (Ctrl+Z / ←)")
+        create_tooltip(self.forward_btn, "Go forward (→)")
+        create_tooltip(self.flip_btn, "Flip board (F)")
+        create_tooltip(self.load_btn, "Load neural network")
+
+        # Right side - Status and network info
+        right_frame = tk.Frame(top_frame, bg=COLORS["bg_primary"])
+        right_frame.pack(side="right")
+
+        self.network_status = tk.Label(
+            right_frame,
+            text="No network loaded",
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        )
+        self.network_status.pack(side="right")
 
         self.status_label = tk.Label(
-            status_frame,
+            right_frame,
             text="Your turn",
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_primary"],
             fg=COLORS["success"],
             font=FONTS["body_bold"],
         )
-        self.status_label.pack(side="right")
+        self.status_label.pack(side="right", padx=(0, 20))
 
-        # Move count
-        move_frame = tk.Frame(info_content, bg=COLORS["bg_secondary"])
-        move_frame.pack(fill="x", pady=5)
+    def _create_left_panel(self, parent: tk.Widget) -> None:
+        """Create the left panel with player info and game info."""
+        left_panel = tk.Frame(parent, bg=COLORS["bg_primary"], width=200)
+        left_panel.pack(side="left", fill="y", padx=(0, 15))
+        left_panel.pack_propagate(False)
 
-        tk.Label(
-            move_frame,
-            text="Moves:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["body"],
-        ).pack(side="left")
-
-        self.move_label = tk.Label(
-            move_frame,
-            text="0",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["body_bold"],
+        # Black player info (top, opponent when playing white)
+        self.black_player_info = PlayerInfo(
+            left_panel,
+            color=chess.BLACK,
+            name="AI",
         )
-        self.move_label.pack(side="right")
+        self.black_player_info.pack(fill="x", pady=(0, 10))
 
-        # Material display
-        material_frame = tk.Frame(info_content, bg=COLORS["bg_secondary"])
-        material_frame.pack(fill="x", pady=(10, 5))
+        # Opening display
+        self.opening_display = OpeningDisplay(left_panel)
+        self.opening_display.pack(fill="x", pady=(0, 10))
 
-        tk.Label(
-            material_frame,
-            text="Material:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["body"],
-        ).pack(anchor="w")
+        # Phase indicator
+        self.phase_indicator = PhaseIndicator(left_panel)
+        self.phase_indicator.pack(fill="x", pady=(0, 10))
 
-        # White material
-        white_mat_frame = tk.Frame(material_frame, bg=COLORS["bg_secondary"])
-        white_mat_frame.pack(fill="x", pady=2)
+        # Spacer
+        spacer = tk.Frame(left_panel, bg=COLORS["bg_primary"])
+        spacer.pack(fill="both", expand=True)
 
-        tk.Label(
-            white_mat_frame,
-            text="White:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(10, 0))
-
-        self.white_material_label = tk.Label(
-            white_mat_frame,
-            text="39",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["mono"],
+        # White player info (bottom, you when playing white)
+        self.white_player_info = PlayerInfo(
+            left_panel,
+            color=chess.WHITE,
+            name="You",
         )
-        self.white_material_label.pack(side="right")
+        self.white_player_info.pack(fill="x", pady=(10, 0))
 
-        # Black material
-        black_mat_frame = tk.Frame(material_frame, bg=COLORS["bg_secondary"])
-        black_mat_frame.pack(fill="x", pady=2)
+        # Game mode selection (collapsed panel)
+        self._create_mode_panel(left_panel)
 
-        tk.Label(
-            black_mat_frame,
-            text="Black:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(10, 0))
-
-        self.black_material_label = tk.Label(
-            black_mat_frame,
-            text="39",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["mono"],
-        )
-        self.black_material_label.pack(side="right")
-
-        # Material advantage
-        adv_frame = tk.Frame(material_frame, bg=COLORS["bg_secondary"])
-        adv_frame.pack(fill="x", pady=2)
-
-        tk.Label(
-            adv_frame,
-            text="Advantage:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(10, 0))
-
-        self.material_advantage_label = tk.Label(
-            adv_frame,
-            text="=",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["accent"],
-            font=FONTS["mono"],
-        )
-        self.material_advantage_label.pack(side="right")
-
-        # AI thinking indicator (animated)
-        self.thinking_frame = tk.Frame(info_content, bg=COLORS["bg_secondary"])
-        self.thinking_frame.pack(fill="x", pady=10)
-
-        self.thinking_indicator = ThinkingIndicator(
-            self.thinking_frame,
-            text="AI thinking",
-            bg=COLORS["bg_secondary"],
-        )
-        self.thinking_indicator.pack()
-        self.thinking_indicator.pack_forget()  # Hidden by default
-
-        # Game mode selection
-        mode_panel = create_panel(game_tab, title="Game Mode")
-        mode_panel.pack(fill="x", pady=(0, 10))
+    def _create_mode_panel(self, parent: tk.Widget) -> None:
+        """Create the game mode selection panel."""
+        mode_panel = create_panel(parent, title="Game Mode")
+        mode_panel.pack(fill="x", pady=(10, 0))
 
         mode_content = tk.Frame(mode_panel, bg=COLORS["bg_secondary"])
-        mode_content.pack(fill="x", padx=15, pady=(0, 15))
+        mode_content.pack(fill="x", padx=10, pady=(0, 10))
 
         self.mode_var = tk.StringVar(value="human_vs_ai")
 
-        mode_human = tk.Radiobutton(
-            mode_content,
-            text="Human vs AI",
-            variable=self.mode_var,
-            value="human_vs_ai",
-            command=self._on_mode_change,
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            activebackground=COLORS["bg_secondary"],
-            activeforeground=COLORS["text_primary"],
-            font=FONTS["body"],
-        )
-        mode_human.pack(anchor="w", pady=2)
+        modes = [
+            ("Human vs AI", "human_vs_ai"),
+            ("AI vs AI", "ai_vs_ai"),
+            ("Human vs Human", "human_vs_human"),
+        ]
 
-        mode_ai = tk.Radiobutton(
-            mode_content,
-            text="AI vs AI",
-            variable=self.mode_var,
-            value="ai_vs_ai",
-            command=self._on_mode_change,
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            activebackground=COLORS["bg_secondary"],
-            activeforeground=COLORS["text_primary"],
-            font=FONTS["body"],
-        )
-        mode_ai.pack(anchor="w", pady=2)
+        for text, value in modes:
+            rb = tk.Radiobutton(
+                mode_content,
+                text=text,
+                variable=self.mode_var,
+                value=value,
+                command=self._on_mode_change,
+                bg=COLORS["bg_secondary"],
+                fg=COLORS["text_primary"],
+                selectcolor=COLORS["bg_tertiary"],
+                activebackground=COLORS["bg_secondary"],
+                activeforeground=COLORS["text_primary"],
+                font=FONTS["small"],
+            )
+            rb.pack(anchor="w")
 
-        mode_human_vs_human = tk.Radiobutton(
-            mode_content,
-            text="Human vs Human",
-            variable=self.mode_var,
-            value="human_vs_human",
-            command=self._on_mode_change,
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            activebackground=COLORS["bg_secondary"],
-            activeforeground=COLORS["text_primary"],
-            font=FONTS["body"],
-        )
-        mode_human_vs_human.pack(anchor="w", pady=2)
-
-        # Color selection (for human vs AI)
+        # Color selection
         self.color_frame = tk.Frame(mode_content, bg=COLORS["bg_secondary"])
-        self.color_frame.pack(fill="x", pady=(10, 0))
+        self.color_frame.pack(fill="x", pady=(5, 0))
 
         tk.Label(
             self.color_frame,
             text="Play as:",
             bg=COLORS["bg_secondary"],
-            fg=COLORS["text_secondary"],
+            fg=COLORS["text_muted"],
             font=FONTS["small"],
         ).pack(side="left")
 
         self.color_var = tk.StringVar(value="white")
 
-        color_white = tk.Radiobutton(
-            self.color_frame,
-            text="White",
-            variable=self.color_var,
-            value="white",
-            command=self._on_color_change,
-            bg=COLORS["bg_secondary"],
+        for text, value in [("White", "white"), ("Black", "black")]:
+            rb = tk.Radiobutton(
+                self.color_frame,
+                text=text,
+                variable=self.color_var,
+                value=value,
+                command=self._on_color_change,
+                bg=COLORS["bg_secondary"],
+                fg=COLORS["text_primary"],
+                selectcolor=COLORS["bg_tertiary"],
+                font=FONTS["small"],
+            )
+            rb.pack(side="left", padx=(5, 0))
+
+    def _create_center_panel(self, parent: tk.Widget) -> None:
+        """Create the center panel with board and eval bar."""
+        center_panel = tk.Frame(parent, bg=COLORS["bg_primary"])
+        center_panel.pack(side="left", fill="both")
+
+        # Board container (board + eval bar side by side)
+        board_container = tk.Frame(center_panel, bg=COLORS["bg_primary"])
+        board_container.pack()
+
+        # Chess board
+        self.board_widget = ChessBoardWidget(
+            board_container,
+            size=680,
+            on_move=self._on_human_move,
+        )
+        self.board_widget.pack(side="left")
+
+        # Evaluation bar (right of board)
+        self.eval_bar = EvalBar(
+            board_container,
+            height=680,
+            width=28,
+        )
+        self.eval_bar.pack(side="left", padx=(8, 0))
+
+        # Move list below board
+        move_list_frame = tk.Frame(center_panel, bg=COLORS["bg_primary"])
+        move_list_frame.pack(fill="x", pady=(10, 0))
+
+        self.move_list = MoveList(
+            move_list_frame,
+            width=716,
+            height=120,
+        )
+        self.move_list.pack()
+
+    def _create_right_panel(self, parent: tk.Widget) -> None:
+        """Create the right panel with analysis tools (no scroll, fills space)."""
+        right_panel = tk.Frame(parent, bg=COLORS["bg_primary"], width=300)
+        right_panel.pack(side="left", fill="both", expand=True, padx=(15, 0))
+
+        # Title
+        title_label = tk.Label(
+            right_panel,
+            text="Analysis",
+            font=FONTS["heading"],
             fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            font=FONTS["small"],
+            bg=COLORS["bg_primary"],
         )
-        color_white.pack(side="left", padx=(10, 5))
+        title_label.pack(anchor="w", pady=(0, 5))
 
-        color_black = tk.Radiobutton(
-            self.color_frame,
-            text="Black",
-            variable=self.color_var,
-            value="black",
-            command=self._on_color_change,
+        # AI Thinking indicator
+        self.thinking_frame = tk.Frame(right_panel, bg=COLORS["bg_primary"])
+        self.thinking_frame.pack(fill="x")
+
+        self.thinking_indicator = ThinkingIndicator(
+            self.thinking_frame,
+            text="AI thinking",
+            bg=COLORS["bg_primary"],
+        )
+        self.thinking_indicator.pack()
+        self.thinking_indicator.pack_forget()
+
+        # MCTS Panel
+        self.mcts_panel = MCTSPanel(right_panel, width=280, height=350)
+        self.mcts_panel.pack(fill="x", pady=(0, 5))
+
+        # Search Tree Panel
+        self.search_tree_panel = SearchTreePanel(right_panel, width=280, height=350)
+        self.search_tree_panel.pack(fill="x", pady=(0, 5))
+
+        # Eval Graph
+        self.eval_graph = EvalGraph(right_panel, width=280, height=100)
+        self.eval_graph.pack(fill="x", pady=(0, 5))
+
+        # Value Prediction (simple label below graph)
+        value_frame = tk.Frame(right_panel, bg=COLORS["bg_secondary"])
+        value_frame.pack(fill="x")
+
+        tk.Label(
+            value_frame,
+            text="Value:",
+            font=("Segoe UI", 10),
+            fg=COLORS["text_secondary"],
             bg=COLORS["bg_secondary"],
+        ).pack(side="left", padx=(10, 5), pady=5)
+
+        self.value_label = tk.Label(
+            value_frame,
+            text="0.00",
+            font=("Consolas", 12, "bold"),
             fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            font=FONTS["small"],
-        )
-        color_black.pack(side="left")
-
-        # Game controls
-        controls_frame = tk.Frame(game_tab, bg=COLORS["bg_primary"])
-        controls_frame.pack(fill="x", pady=(0, 10))
-
-        btn_row1 = tk.Frame(controls_frame, bg=COLORS["bg_primary"])
-        btn_row1.pack(fill="x", pady=(0, 5))
-
-        self.new_game_btn = create_styled_button(
-            btn_row1,
-            "New Game",
-            command=self._new_game,
-            style="accent",
-        )
-        self.new_game_btn.pack(side="left", expand=True, fill="x")
-
-        # Navigation controls (back/forward one move)
-        btn_row_analysis = tk.Frame(controls_frame, bg=COLORS["bg_primary"])
-        btn_row_analysis.pack(fill="x", pady=(5, 5))
-
-        self.back_btn = create_styled_button(
-            btn_row_analysis,
-            "< Back",
-            command=self._back_one_move,
-            style="outline",
-        )
-        self.back_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
-
-        self.forward_btn = create_styled_button(
-            btn_row_analysis,
-            "Forward >",
-            command=self._forward_one_move,
-            style="outline",
-        )
-        self.forward_btn.pack(side="left", expand=True, fill="x", padx=(5, 0))
-
-        btn_row2 = tk.Frame(controls_frame, bg=COLORS["bg_primary"])
-        btn_row2.pack(fill="x")
-
-        self.flip_btn = create_styled_button(
-            btn_row2,
-            "Flip Board",
-            command=self._flip_board,
-            style="outline",
-        )
-        self.flip_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
-
-        self.load_btn = create_styled_button(
-            btn_row2,
-            "Load Network",
-            command=self._load_network_dialog,
-            style="outline",
-        )
-        self.load_btn.pack(side="left", expand=True, fill="x", padx=(5, 0))
-
-        # Add tooltips to buttons
-        create_tooltip(self.new_game_btn, "Start a new game (Ctrl+N)")
-        create_tooltip(self.back_btn, "Go back one move (Ctrl+Z / Left arrow)")
-        create_tooltip(self.forward_btn, "Go forward one move (Right arrow)")
-        create_tooltip(self.flip_btn, "Flip the board orientation (F)")
-        create_tooltip(self.load_btn, "Load a trained neural network")
-
-        # Training panel (in Training tab)
-        self.training_panel = TrainingPanel(
-            training_tab,
-            on_start=self._start_training,
-            on_stop=self._stop_training,
-        )
-        self.training_panel.pack(fill="both", expand=True)
-
-        # Network status bar
-        status_bar = tk.Frame(main_frame, bg=COLORS["bg_secondary"])
-        status_bar.pack(fill="x", pady=(15, 0))
-
-        self.network_status = tk.Label(
-            status_bar,
-            text="No network loaded",
             bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
-            font=FONTS["small"],
-            padx=10,
-            pady=5,
         )
-        self.network_status.pack(side="left")
+        self.value_label.pack(side="left", pady=5)
+
+        # Training panel - hidden, kept for compatibility
+        self.training_panel = None
 
     def _load_network(self) -> None:
         """Load the neural network or pure MCTS player."""
+
         def get_history_length(network):
-            """Detect history_length from network's input planes."""
             planes = network.num_input_planes
             if planes == 18:
                 return 0
-            return (planes - 6) // 12 - 1  # 54 planes = 3 history
+            return (planes - 6) // 12 - 1
 
-        # Check for pure MCTS mode
         if self.use_pure_mcts:
             try:
                 from alphazero.arena import PureMCTSPlayer
@@ -564,13 +458,13 @@ class ChessGameApp:
                     name="PureMCTS",
                 )
                 self.network_status.configure(
-                    text=f"Pure MCTS ({self.num_simulations} simulations, no neural network)",
+                    text=f"Pure MCTS ({self.num_simulations} sims)",
                     fg=COLORS["accent"],
                 )
                 return
             except Exception as e:
                 self.network_status.configure(
-                    text=f"Error creating pure MCTS: {e}",
+                    text=f"Error: {e}",
                     fg=COLORS["error"],
                 )
                 return
@@ -580,7 +474,6 @@ class ChessGameApp:
                 from alphazero import DualHeadNetwork, MCTS
 
                 self.network = DualHeadNetwork.load(self.network_path)
-                # Auto-detect history_length from loaded network
                 self.history_length = get_history_length(self.network)
                 self.mcts = MCTS(
                     network=self.network,
@@ -594,11 +487,10 @@ class ChessGameApp:
                 )
             except Exception as e:
                 self.network_status.configure(
-                    text=f"Error loading network: {e}",
+                    text=f"Error: {e}",
                     fg=COLORS["error"],
                 )
         else:
-            # Create a new untrained network
             try:
                 from alphazero import DualHeadNetwork, MCTS
 
@@ -611,12 +503,12 @@ class ChessGameApp:
                     history_length=self.history_length,
                 )
                 self.network_status.configure(
-                    text="Using untrained network (random moves)",
+                    text="Untrained network (random)",
                     fg=COLORS["warning"],
                 )
             except Exception as e:
                 self.network_status.configure(
-                    text=f"Error creating network: {e}",
+                    text=f"Error: {e}",
                     fg=COLORS["error"],
                 )
 
@@ -626,7 +518,6 @@ class ChessGameApp:
             title="Load Network",
             filetypes=[("Network files", "*.pt"), ("All files", "*.*")],
         )
-
         if filepath:
             self.network_path = filepath
             self._load_network()
@@ -638,12 +529,15 @@ class ChessGameApp:
         if self.game_mode == "ai_vs_ai":
             self.color_frame.pack_forget()
             self.board_widget.set_interactive(False)
+            self._update_player_names("AI (White)", "AI (Black)")
         elif self.game_mode == "human_vs_human":
             self.color_frame.pack_forget()
             self.board_widget.set_interactive(True)
+            self._update_player_names("White", "Black")
         else:
-            self.color_frame.pack(fill="x", pady=(10, 0))
+            self.color_frame.pack(fill="x", pady=(5, 0))
             self.board_widget.set_interactive(True)
+            self._update_player_names_for_human_ai()
 
         self._new_game()
 
@@ -654,24 +548,34 @@ class ChessGameApp:
         )
         self.board_widget.set_player_color(self.human_color)
 
-        # Flip board if playing as black
         if self.human_color == chess.BLACK and not self.board_widget.flipped:
             self.board_widget.flip()
         elif self.human_color == chess.WHITE and self.board_widget.flipped:
             self.board_widget.flip()
 
+        self._update_player_names_for_human_ai()
         self._new_game()
 
-    def _new_game_with_confirm(self) -> None:
-        """Start a new game with confirmation if game is in progress."""
-        board = self.board_widget.get_board()
+    def _update_player_names(self, white_name: str, black_name: str) -> None:
+        """Update player info names."""
+        self.white_player_info.set_name(white_name)
+        self.black_player_info.set_name(black_name)
 
-        # Ask for confirmation if game is in progress
+    def _update_player_names_for_human_ai(self) -> None:
+        """Update player names for human vs AI mode."""
+        if self.human_color == chess.WHITE:
+            self._update_player_names("You", "AI")
+        else:
+            self._update_player_names("AI", "You")
+
+    def _new_game_with_confirm(self) -> None:
+        """Start a new game with confirmation."""
+        board = self.board_widget.get_board()
         if len(board.move_stack) > 0 and not board.is_game_over():
             create_confirmation_dialog(
                 self.root,
                 "New Game",
-                "Are you sure you want to start a new game? Current game will be lost.",
+                "Start new game? Current game will be lost.",
                 on_confirm=self._new_game,
             )
         else:
@@ -679,7 +583,6 @@ class ChessGameApp:
 
     def _new_game(self) -> None:
         """Start a new game."""
-        # Cancel any ongoing AI calculation
         self.ai_cancelled = True
         if self.ai_thread and self.ai_thread.is_alive():
             self.ai_thread.join(timeout=0.5)
@@ -687,23 +590,30 @@ class ChessGameApp:
         self.ai_cancelled = False
         self.ai_thinking = False
 
-        # Hide thinking indicator if visible
         self.thinking_indicator.stop()
         self.thinking_indicator.pack_forget()
 
-        # Clear navigation history
         self.undone_moves.clear()
+        self.eval_history.clear()
 
         self.board_widget.reset()
+
+        # Reset all analysis panels
+        self.mcts_panel.clear()
+        self.search_tree_panel.clear()
+        self.eval_bar.clear()
+        self.eval_graph.clear()
+        self.value_label.configure(text="0.00", fg=COLORS["text_primary"])
+        self.opening_display.clear()
+        self.move_list.clear()
+
         self._update_game_info()
 
         if self.game_mode == "human_vs_ai":
             self.board_widget.set_player_color(self.human_color)
-            # If AI plays white, make first move
             if self.human_color == chess.BLACK:
                 self._trigger_ai_move()
         elif self.game_mode == "human_vs_human":
-            # Both players are human, no color restriction
             self.board_widget.set_player_color(None)
         else:
             self.board_widget.set_player_color(None)
@@ -718,12 +628,7 @@ class ChessGameApp:
         self.board_widget._draw_board()
 
     def _back_one_move(self) -> None:
-        """
-        Go back to before your last move (for analysis/exploration).
-
-        In Human vs AI: undoes your move + AI's response so you can try different moves.
-        In AI vs AI / Human vs Human: undoes one move.
-        """
+        """Go back one move (or move pair in human vs AI)."""
         if self.ai_thinking or self.board_widget.is_animating:
             return
 
@@ -731,48 +636,42 @@ class ChessGameApp:
         if not board.move_stack:
             return
 
-        # Cancel AI if it's the AI's turn
         self.ai_cancelled = True
-
-        # Animation duration for back/forward (2x faster than normal)
         anim_duration = 100
 
         if self.game_mode == "human_vs_ai":
             if board.turn == self.human_color:
-                # It's your turn - AI already responded, undo both moves with animation
                 if len(board.move_stack) >= 2:
                     ai_move = board.peek()
                     self.undone_moves.append((board.move_stack[-2], ai_move))
 
-                    # Animate AI move in reverse first
                     def after_ai_undo():
-                        board.pop()  # Remove AI move
+                        board.pop()
                         human_move = board.peek()
 
-                        # Now animate human move in reverse
                         def after_human_undo():
-                            board.pop()  # Remove human move
+                            board.pop()
                             self.board_widget.set_board(board)
                             self.board_widget.set_last_move(
                                 board.peek() if board.move_stack else None
                             )
                             self._update_game_info()
-                            self.status_label.configure(
-                                text="Try a different move!",
-                                fg=COLORS["accent"],
-                            )
+                            self._update_eval_for_position()
 
                         self.board_widget.animate_move(
-                            human_move, duration_ms=anim_duration,
-                            on_complete=after_human_undo, reverse=True
+                            human_move,
+                            duration_ms=anim_duration,
+                            on_complete=after_human_undo,
+                            reverse=True,
                         )
 
                     self.board_widget.animate_move(
-                        ai_move, duration_ms=anim_duration,
-                        on_complete=after_ai_undo, reverse=True
+                        ai_move,
+                        duration_ms=anim_duration,
+                        on_complete=after_ai_undo,
+                        reverse=True,
                     )
             else:
-                # It's AI's turn - just undo your move
                 if len(board.move_stack) >= 1:
                     human_move = board.peek()
                     self.undone_moves.append((human_move, None))
@@ -784,17 +683,15 @@ class ChessGameApp:
                             board.peek() if board.move_stack else None
                         )
                         self._update_game_info()
-                        self.status_label.configure(
-                            text="Try a different move!",
-                            fg=COLORS["accent"],
-                        )
+                        self._update_eval_for_position()
 
                     self.board_widget.animate_move(
-                        human_move, duration_ms=anim_duration,
-                        on_complete=after_undo, reverse=True
+                        human_move,
+                        duration_ms=anim_duration,
+                        on_complete=after_undo,
+                        reverse=True,
                     )
         else:
-            # AI vs AI / Human vs Human - just undo one move with animation
             last_move = board.peek()
             self.undone_moves.append((last_move, None))
 
@@ -805,18 +702,17 @@ class ChessGameApp:
                     board.peek() if board.move_stack else None
                 )
                 self._update_game_info()
-                self.status_label.configure(
-                    text="Try a different move!",
-                    fg=COLORS["accent"],
-                )
+                self._update_eval_for_position()
 
             self.board_widget.animate_move(
-                last_move, duration_ms=anim_duration,
-                on_complete=after_undo, reverse=True
+                last_move,
+                duration_ms=anim_duration,
+                on_complete=after_undo,
+                reverse=True,
             )
 
     def _forward_one_move(self) -> None:
-        """Go forward (replay the undone moves)."""
+        """Go forward (replay undone moves)."""
         if self.ai_thinking or self.board_widget.is_animating:
             return
 
@@ -826,32 +722,25 @@ class ChessGameApp:
         board = self.board_widget.get_board()
         human_move, ai_move = self.undone_moves.pop()
 
-        # Check if the human move is still legal
         if human_move not in board.legal_moves:
             self.undone_moves.clear()
-            self.status_label.configure(
-                text="Move no longer valid",
-                fg=COLORS["warning"],
-            )
             return
 
-        # Animation duration for back/forward (2x faster than normal)
         anim_duration = 100
 
-        # Animate the human move first
         def after_human_move():
             board.push(human_move)
             self.board_widget.set_board(board)
 
-            # Play the AI move if there was one
             if ai_move and ai_move in board.legal_moves:
+
                 def after_ai_move():
                     board.push(ai_move)
                     self.board_widget.set_board(board)
                     self.board_widget.set_last_move(ai_move)
                     self._update_game_info()
+                    self._update_eval_for_position()
 
-                    # If we're at the end and it's AI's turn, trigger AI
                     if (
                         self.game_mode == "human_vs_ai"
                         and board.turn != self.human_color
@@ -861,28 +750,15 @@ class ChessGameApp:
                         self._trigger_ai_move()
 
                 self.board_widget.animate_move(
-                    ai_move, duration_ms=anim_duration,
-                    on_complete=after_ai_move
+                    ai_move, duration_ms=anim_duration, on_complete=after_ai_move
                 )
             else:
                 self.board_widget.set_last_move(human_move)
                 self._update_game_info()
-
-                # If there was supposed to be an AI move but it's not valid, trigger AI
-                if ai_move and self.game_mode == "human_vs_ai":
-                    self._trigger_ai_move()
-                # If we're at the end and it's AI's turn, trigger AI
-                elif (
-                    self.game_mode == "human_vs_ai"
-                    and board.turn != self.human_color
-                    and not board.is_game_over()
-                    and not self.undone_moves
-                ):
-                    self._trigger_ai_move()
+                self._update_eval_for_position()
 
         self.board_widget.animate_move(
-            human_move, duration_ms=anim_duration,
-            on_complete=after_human_move
+            human_move, duration_ms=anim_duration, on_complete=after_human_move
         )
 
     def _flip_board(self) -> None:
@@ -891,17 +767,17 @@ class ChessGameApp:
 
     def _on_human_move(self, move: chess.Move) -> None:
         """Handle human move."""
-        # Clear forward history when making a new move
         self.undone_moves.clear()
-
         self._update_game_info()
+
+        # Update evaluation
+        self._update_eval_after_move()
 
         board = self.board_widget.get_board()
         if board.is_game_over():
             self._show_game_over()
         elif self.game_mode == "human_vs_ai":
             self._trigger_ai_move()
-        # In human_vs_human mode, just wait for the next player's move
 
     def _trigger_ai_move(self) -> None:
         """Start AI move calculation in background thread."""
@@ -911,7 +787,6 @@ class ChessGameApp:
         self.ai_thinking = True
         self.ai_cancelled = False
 
-        # Show animated thinking indicator
         self.thinking_indicator.pack()
         self.thinking_indicator.start()
 
@@ -926,20 +801,35 @@ class ChessGameApp:
             if board.is_game_over():
                 return
 
+            root_value = 0.0
+            mcts_stats = None
+            tree_data = None
+
             if self.use_pure_mcts and self.pure_mcts_player is not None:
-                # Pure MCTS mode (no neural network)
-                # Verbose output is handled inside select_move if verbose=True
                 move = self.pure_mcts_player.select_move(board)
             else:
-                # Neural network MCTS mode
                 move = self.mcts.get_best_move(board, add_noise=False)
 
-                # Print search tree if verbose mode is enabled
+                # Capture MCTS statistics for display
+                mcts_stats = self.mcts.get_root_statistics(board)
+                root_value = self.mcts.get_root_value(board)
+                tree_data = self.mcts.get_search_tree_data(board, top_n=3, max_depth=3)
+
                 if self.verbose and not self.ai_cancelled:
                     self.mcts.print_search_tree(board, top_n=5, max_depth=3)
 
             if not self.ai_cancelled and move:
-                self.update_queue.put(("ai_move", move))
+                self.update_queue.put(
+                    (
+                        "ai_move",
+                        {
+                            "move": move,
+                            "mcts_stats": mcts_stats,
+                            "root_value": root_value,
+                            "tree_data": tree_data,
+                        },
+                    )
+                )
 
         except Exception as e:
             self.update_queue.put(("error", str(e)))
@@ -957,8 +847,8 @@ class ChessGameApp:
                 if update_type == "ai_move":
                     self._apply_ai_move(data)
                 elif update_type == "training":
-                    self.training_panel.update_progress(data)
-                    # Show moves on board during self-play
+                    if self.training_panel:
+                        self.training_panel.update_progress(data)
                     if isinstance(data, dict) and data.get("phase") == "move":
                         fen = data.get("fen")
                         if fen:
@@ -979,90 +869,131 @@ class ChessGameApp:
         except Exception:
             pass
 
-    def _apply_ai_move(self, move: chess.Move) -> None:
+    def _apply_ai_move(self, data: dict) -> None:
         """Apply AI move to the board with animation."""
         self.ai_thinking = False
 
-        # Hide thinking indicator
         self.thinking_indicator.stop()
         self.thinking_indicator.pack_forget()
 
+        move = data["move"]
+        mcts_stats = data.get("mcts_stats")
+        root_value = data.get("root_value", 0.0)
+        tree_data = data.get("tree_data")
+
         board = self.board_widget.get_board()
+
+        # Update MCTS panel with search statistics
+        if mcts_stats:
+            total_visits = sum(s["visits"] for s in mcts_stats)
+            self.mcts_panel.update_stats(board, mcts_stats, total_visits)
+
+        # Update Search Tree panel
+        if tree_data:
+            self.search_tree_panel.update_tree(tree_data)
+
+        # Update Value label
+        value_color = (
+            COLORS["q_value_positive"]
+            if root_value > 0.05
+            else (
+                COLORS["q_value_negative"]
+                if root_value < -0.05
+                else COLORS["text_primary"]
+            )
+        )
+        self.value_label.configure(text=f"{root_value:+.2f}", fg=value_color)
+
         if move in board.legal_moves:
-            # Animate the move, then apply it after animation completes
+
             def on_animation_complete():
                 board.push(move)
                 self.board_widget.set_board(board)
                 self.board_widget.set_last_move(move)
                 self._update_game_info()
 
+                # Update evaluation after AI move
+                self._update_eval_after_move(ai_value=root_value)
+
                 updated_board = self.board_widget.get_board()
                 if updated_board.is_game_over():
                     self._show_game_over()
                 elif self.game_mode == "ai_vs_ai":
-                    # Continue AI vs AI game
                     self.root.after(300, self._trigger_ai_move)
 
-            # Start animation (300ms duration)
-            self.board_widget.animate_move(move, duration_ms=300, on_complete=on_animation_complete)
+            self.board_widget.animate_move(
+                move, duration_ms=300, on_complete=on_animation_complete
+            )
         else:
             self._update_game_info()
 
-    def _calculate_material(self, board: chess.Board) -> tuple[int, int]:
-        """
-        Calculate material for each side.
+    def _update_eval_after_move(self, ai_value: float = None) -> None:
+        """Update evaluation displays after a move."""
+        # Only update eval graph after AI moves (when ai_value is provided)
+        if ai_value is None:
+            return
 
-        Returns:
-            Tuple of (white_material, black_material).
-        """
-        return get_material_count(board, chess.WHITE), get_material_count(board, chess.BLACK)
+        # Use AI's evaluation directly (matches Value Prediction display)
+        # Positive = AI thinks it's winning, Negative = AI thinks it's losing
+        display_eval = ai_value
+
+        # Update eval bar (scale from [-1,1] to [-10,10])
+        self.eval_bar.set_evaluation(display_eval * 10)
+
+        # Add to eval history and update graph
+        self.eval_history.append(display_eval)
+        self.eval_graph.add_evaluation(display_eval)
+
+    def _update_eval_for_position(self) -> None:
+        """Update evaluation for current position (after back/forward)."""
+        board = self.board_widget.get_board()
+        move_index = len(board.move_stack)
+
+        # Update eval bar and graph to current position
+        if move_index < len(self.eval_history):
+            # Trim eval history to current position
+            self.eval_history = self.eval_history[:move_index]
+            self.eval_graph.set_history(self.eval_history)
+
+        if self.eval_history:
+            self.eval_bar.set_evaluation(self.eval_history[-1] * 10)
+        else:
+            self.eval_bar.clear()
+
+        # Note: Network Output and MCTS panels stay showing the last AI thinking position
+
+        self.move_list.set_current_move(move_index)
 
     def _update_game_info(self) -> None:
-        """Update game information display."""
+        """Update all game information displays."""
         board = self.board_widget.get_board()
 
-        # Turn
-        turn_text = "White" if board.turn == chess.WHITE else "Black"
-        self.turn_label.configure(text=turn_text)
+        # Update player info widgets
+        self.white_player_info.update_from_board(board)
+        self.black_player_info.update_from_board(board)
 
-        # Move count
-        move_num = board.fullmove_number
-        self.move_label.configure(text=str(move_num))
+        # Update opening display
+        self.opening_display.update_opening(board)
 
-        # Material
-        white_mat, black_mat = self._calculate_material(board)
-        self.white_material_label.configure(text=str(white_mat))
-        self.black_material_label.configure(text=str(black_mat))
+        # Update phase indicator
+        self.phase_indicator.update_phase(board)
 
-        # Material advantage
-        diff = white_mat - black_mat
-        if diff > 0:
-            self.material_advantage_label.configure(
-                text=f"+{diff} White",
-                fg=COLORS["text_primary"],
-            )
-        elif diff < 0:
-            self.material_advantage_label.configure(
-                text=f"+{abs(diff)} Black",
-                fg=COLORS["text_secondary"],
-            )
-        else:
-            self.material_advantage_label.configure(
-                text="=",
-                fg=COLORS["accent"],
-            )
+        # Update move list
+        self.move_list.set_moves(board)
 
         # Status
         if board.is_checkmate():
             winner = "Black" if board.turn == chess.WHITE else "White"
             self.status_label.configure(
-                text=f"Checkmate! {winner} wins", fg=COLORS["accent"]
+                text=f"Checkmate! {winner} wins",
+                fg=COLORS["accent"],
             )
         elif board.is_stalemate():
             self.status_label.configure(text="Stalemate!", fg=COLORS["warning"])
         elif board.is_insufficient_material():
             self.status_label.configure(
-                text="Draw - Insufficient material", fg=COLORS["warning"]
+                text="Draw - Insufficient material",
+                fg=COLORS["warning"],
             )
         elif board.is_check():
             self.status_label.configure(text="Check!", fg=COLORS["error"])
@@ -1071,8 +1002,8 @@ class ChessGameApp:
         elif self.game_mode == "human_vs_ai" and board.turn == self.human_color:
             self.status_label.configure(text="Your turn", fg=COLORS["success"])
         elif self.game_mode == "human_vs_human":
-            turn_text = "White" if board.turn == chess.WHITE else "Black"
-            self.status_label.configure(text=f"{turn_text} to play", fg=COLORS["success"])
+            turn = "White" if board.turn == chess.WHITE else "Black"
+            self.status_label.configure(text=f"{turn} to play", fg=COLORS["success"])
         else:
             self.status_label.configure(text="Playing", fg=COLORS["text_secondary"])
 
@@ -1098,16 +1029,15 @@ class ChessGameApp:
 
     def _start_training(self) -> None:
         """Start self-play training."""
+        if not self.training_panel:
+            return
         if self.training_thread and self.training_thread.is_alive():
             return
 
         self.training_cancelled = False
-
-        # Get config from training panel
         self.training_iterations = self.training_panel.get_iterations()
         self.training_output_file = self.training_panel.get_output_file()
 
-        # Create trainer
         try:
             from alphazero import AlphaZeroTrainer, TrainingConfig
 
@@ -1133,7 +1063,8 @@ class ChessGameApp:
 
         except Exception as e:
             messagebox.showerror("Training Error", str(e))
-            self.training_panel.reset()
+            if self.training_panel:
+                self.training_panel.reset()
 
     def _run_training(self) -> None:
         """Run training loop in background thread."""
@@ -1143,12 +1074,10 @@ class ChessGameApp:
                 if not self.training_cancelled:
                     self.update_queue.put(("training", data))
 
-            # Run all iterations
             for i in range(self.training_iterations):
                 if self.training_cancelled:
                     break
 
-                # Update iteration in callback data
                 self.update_queue.put(
                     (
                         "training",
@@ -1162,7 +1091,6 @@ class ChessGameApp:
 
                 self.trainer.train_iteration(callback=callback)
 
-                # Signal iteration complete
                 self.update_queue.put(
                     (
                         "training",
@@ -1173,7 +1101,6 @@ class ChessGameApp:
                     )
                 )
 
-            # Save network to file
             if not self.training_cancelled:
                 self.network.save(self.training_output_file)
                 self.update_queue.put(
@@ -1186,7 +1113,6 @@ class ChessGameApp:
                     )
                 )
 
-            # Update MCTS with trained network (using play mode settings)
             from alphazero import MCTS
 
             self.mcts = MCTS(
@@ -1205,7 +1131,6 @@ class ChessGameApp:
 
     def run(self) -> None:
         """Run the application main loop."""
-        # Center window on screen
         self.root.update_idletasks()
         width = self.root.winfo_width()
         height = self.root.winfo_height()
@@ -1226,7 +1151,7 @@ def main():
         "--simulations", "-s", type=int, default=200, help="MCTS simulations per move"
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Print MCTS search tree after each AI move"
+        "--verbose", "-v", action="store_true", help="Print MCTS search tree"
     )
 
     args = parser.parse_args()

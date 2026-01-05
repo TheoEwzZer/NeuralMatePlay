@@ -801,6 +801,52 @@ class MCTS:
         node = self._get_or_create_node(board)
         return {move: child.visit_count for move, child in node.children.items()}
 
+    def get_root_statistics(self, board: chess.Board) -> list[dict]:
+        """
+        Get detailed statistics for all moves at root.
+
+        Used by the GUI MCTS panel to display search results.
+
+        Args:
+            board: Current position.
+
+        Returns:
+            List of dicts with keys: move, visits, q_value, prior
+            Sorted by visits descending.
+        """
+        node = self._get_or_create_node(board)
+        stats = []
+
+        for move, child in node.children.items():
+            stats.append({
+                "move": move,
+                "visits": child.visit_count,
+                # Negate Q-value: stored Q is from opponent's perspective,
+                # we want value from current player's perspective
+                "q_value": -child.q_value if child.visit_count > 0 else 0.0,
+                "prior": child.prior,
+                "total_value": child.total_value,
+            })
+
+        # Sort by visits descending
+        stats.sort(key=lambda x: x["visits"], reverse=True)
+        return stats
+
+    def get_root_value(self, board: chess.Board) -> float:
+        """
+        Get the value estimate at the root node.
+
+        Args:
+            board: Current position.
+
+        Returns:
+            Value from current player's perspective (-1 to +1).
+        """
+        node = self._get_or_create_node(board)
+        if node.visit_count > 0:
+            return node.q_value
+        return 0.0
+
     def get_search_tree_string(
         self,
         board: chess.Board,
@@ -877,6 +923,86 @@ class MCTS:
 
         lines.append("=" * 60)
         return "\n".join(lines)
+
+    def get_search_tree_data(
+        self,
+        board: chess.Board,
+        top_n: int = 3,
+        max_depth: int = 3,
+    ) -> list[dict]:
+        """
+        Get the search tree as a nested data structure for GUI display.
+
+        Args:
+            board: Current position.
+            top_n: Number of top moves to show at each level.
+            max_depth: Maximum depth to return.
+
+        Returns:
+            List of dicts, each with keys: san, visits, q_value, prior, children
+        """
+        root = self._get_or_create_node(board)
+
+        # Sort children by visit count
+        sorted_children = sorted(
+            root.children.items(),
+            key=lambda x: x[1].visit_count,
+            reverse=True,
+        )
+
+        result = []
+        for move, child in sorted_children[:top_n]:
+            if child.visit_count > 0:
+                node_data = self._build_tree_node_data(
+                    board, move, child, depth=0, max_depth=max_depth, top_n=top_n
+                )
+                result.append(node_data)
+
+        return result
+
+    def _build_tree_node_data(
+        self,
+        board: chess.Board,
+        move: chess.Move,
+        node: MCTSNode,
+        depth: int,
+        max_depth: int,
+        top_n: int,
+    ) -> dict:
+        """Build a tree node data dict recursively."""
+        san_move = board.san(move)
+        # Negate Q-value: stored Q is from opponent's perspective
+        display_q = -node.q_value if node.visit_count > 0 else 0.0
+
+        node_data = {
+            "san": san_move,
+            "visits": node.visit_count,
+            "q_value": display_q,
+            "prior": node.prior,
+            "children": [],
+        }
+
+        if depth < max_depth and node.children:
+            # Apply move to get next board state
+            next_board = board.copy()
+            next_board.push(move)
+
+            # Sort and add top children
+            sorted_children = sorted(
+                node.children.items(),
+                key=lambda x: x[1].visit_count,
+                reverse=True,
+            )
+
+            for child_move, child_node in sorted_children[:top_n]:
+                if child_node.visit_count > 0:
+                    child_data = self._build_tree_node_data(
+                        next_board, child_move, child_node,
+                        depth + 1, max_depth, top_n
+                    )
+                    node_data["children"].append(child_data)
+
+        return node_data
 
     def _format_tree_node(
         self,

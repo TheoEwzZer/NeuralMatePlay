@@ -56,6 +56,41 @@ COLORS = {
     # Progress bar
     "progress_bg": "#2a2a4e",
     "progress_fill": "#e94560",
+
+    # Evaluation bar (chess.com style)
+    "eval_white": "#ffffff",
+    "eval_black": "#1a1a1a",
+    "eval_winning": "#4ade80",
+    "eval_losing": "#f87171",
+    "eval_equal": "#888888",
+
+    # Player info
+    "player_active": "#3b82f6",
+    "player_active_glow": "#60a5fa",
+    "captured_bg": "#262640",
+
+    # Evaluation graph
+    "graph_bg": "#1e1e2e",
+    "graph_line": "#60a5fa",
+    "graph_line_alt": "#f472b6",
+    "graph_grid": "#333355",
+    "graph_zero": "#666688",
+    "graph_marker": "#fbbf24",
+
+    # MCTS panel
+    "visit_bar": "#8b5cf6",
+    "prior_bar": "#06b6d4",
+    "q_value_positive": "#4ade80",
+    "q_value_negative": "#f87171",
+
+    # Move list
+    "move_current": "#facc15",
+    "move_hover": "#4b5563",
+    "move_white_bg": "#2a2a3e",
+    "move_black_bg": "#1e1e2e",
+
+    # Opening display
+    "opening_eco": "#a78bfa",
 }
 
 # Font configurations
