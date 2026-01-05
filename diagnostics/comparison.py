@@ -19,7 +19,9 @@ from .core import Colors, TestResults, header, subheader, get_available_checkpoi
 from .tests import ALL_TESTS
 
 
-def run_all_tests_on_network(network, silent: bool = True, show_progress: bool = False) -> dict:
+def run_all_tests_on_network(
+    network, silent: bool = True, show_progress: bool = False
+) -> dict:
     """
     Run all tests on a single network and return scores.
     Network is loaded once, all tests run on it.
@@ -36,7 +38,11 @@ def run_all_tests_on_network(network, silent: bool = True, show_progress: bool =
 
     for i, (test_func, test_name, _) in enumerate(ALL_TESTS):
         if show_progress:
-            print(f"      [{i+1:>2}/{len(ALL_TESTS)}] {test_name:<22}", end=" ", flush=True)
+            print(
+                f"      [{i+1:>2}/{len(ALL_TESTS)}] {test_name:<22}",
+                end=" ",
+                flush=True,
+            )
 
         dummy_results = TestResults()
 
@@ -83,7 +89,9 @@ def compare_two_models(model1_path: str, model2_path: str, quick: bool = False):
     scores1 = run_all_tests_on_network(network1, silent=True, show_progress=True)
     elapsed1 = time.time() - start
     avg1 = np.mean(list(scores1.values()))
-    color1 = Colors.GREEN if avg1 >= 0.7 else (Colors.YELLOW if avg1 >= 0.4 else Colors.RED)
+    color1 = (
+        Colors.GREEN if avg1 >= 0.7 else (Colors.YELLOW if avg1 >= 0.4 else Colors.RED)
+    )
     print(f"      {'─'*35}")
     print(f"      Average: {color1}{avg1*100:.0f}%{Colors.ENDC} ({elapsed1:.1f}s)")
     del network1  # Free memory
@@ -100,7 +108,9 @@ def compare_two_models(model1_path: str, model2_path: str, quick: bool = False):
     scores2 = run_all_tests_on_network(network2, silent=True, show_progress=True)
     elapsed2 = time.time() - start
     avg2 = np.mean(list(scores2.values()))
-    color2 = Colors.GREEN if avg2 >= 0.7 else (Colors.YELLOW if avg2 >= 0.4 else Colors.RED)
+    color2 = (
+        Colors.GREEN if avg2 >= 0.7 else (Colors.YELLOW if avg2 >= 0.4 else Colors.RED)
+    )
     print(f"      {'─'*35}")
     print(f"      Average: {color2}{avg2*100:.0f}%{Colors.ENDC} ({elapsed2:.1f}s)")
     del network2  # Free memory
@@ -112,7 +122,7 @@ def compare_two_models(model1_path: str, model2_path: str, quick: bool = False):
         weights[test_name] = weight
         results[test_name] = [
             (name1, scores1.get(test_name, 0)),
-            (name2, scores2.get(test_name, 0))
+            (name2, scores2.get(test_name, 0)),
         ]
 
     # Summary table
@@ -227,7 +237,9 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
 
     if not checkpoints:
         type_name = "pretrain" if checkpoint_type == "pretrain" else "train"
-        print(f"  {Colors.RED}No {type_name} checkpoints found in {checkpoint_dir}!{Colors.ENDC}")
+        print(
+            f"  {Colors.RED}No {type_name} checkpoints found in {checkpoint_dir}!{Colors.ENDC}"
+        )
         return
 
     print(f"  Found {len(checkpoints)} checkpoint(s)")
@@ -246,7 +258,9 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
             network = DualHeadNetwork.load(path)
         except RuntimeError as e:
             if "size mismatch" in str(e):
-                print(f"    {Colors.YELLOW}Skipped (incompatible architecture){Colors.ENDC}")
+                print(
+                    f"    {Colors.YELLOW}Skipped (incompatible architecture){Colors.ENDC}"
+                )
                 continue
             raise
 
@@ -267,7 +281,9 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
         else:
             color = Colors.RED
         print(f"      {'─'*35}")
-        print(f"      Average: {color}{avg_score*100:.0f}%{Colors.ENDC} ({elapsed:.1f}s)")
+        print(
+            f"      Average: {color}{avg_score*100:.0f}%{Colors.ENDC} ({elapsed:.1f}s)"
+        )
 
         # Free memory
         del network

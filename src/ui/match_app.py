@@ -49,6 +49,7 @@ class MatchApp:
 
         # Names (extracted from paths, or special player names)
         import os
+
         def get_player_name(path):
             if path.lower() == "random":
                 return "Random"
@@ -56,6 +57,7 @@ class MatchApp:
                 return "PureMCTS"
             else:
                 return os.path.splitext(os.path.basename(path))[0]
+
         self.name1 = get_player_name(network1_path)
         self.name2 = get_player_name(network2_path)
 
@@ -107,19 +109,28 @@ class MatchApp:
 
         # Color indicator (canvas circle)
         self.p1_color_indicator = tk.Canvas(
-            p1_frame, width=20, height=20,
-            bg=COLORS["bg_tertiary"], highlightthickness=0
+            p1_frame,
+            width=20,
+            height=20,
+            bg=COLORS["bg_tertiary"],
+            highlightthickness=0,
         )
         self.p1_color_indicator.pack(side=tk.LEFT)
 
         tk.Label(
-            p1_frame, text=self.name1, font=FONTS["body_bold"],
-            fg=COLORS["text_primary"], bg=COLORS["bg_tertiary"]
+            p1_frame,
+            text=self.name1,
+            font=FONTS["body_bold"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_tertiary"],
         ).pack(side=tk.LEFT, padx=5)
 
         self.p1_score_label = tk.Label(
-            p1_frame, text="0", font=FONTS["body_bold"],
-            fg=COLORS["accent"], bg=COLORS["bg_tertiary"]
+            p1_frame,
+            text="0",
+            font=FONTS["body_bold"],
+            fg=COLORS["accent"],
+            bg=COLORS["bg_tertiary"],
         )
         self.p1_score_label.pack(side=tk.RIGHT)
 
@@ -129,19 +140,28 @@ class MatchApp:
 
         # Color indicator (canvas circle)
         self.p2_color_indicator = tk.Canvas(
-            p2_frame, width=20, height=20,
-            bg=COLORS["bg_tertiary"], highlightthickness=0
+            p2_frame,
+            width=20,
+            height=20,
+            bg=COLORS["bg_tertiary"],
+            highlightthickness=0,
         )
         self.p2_color_indicator.pack(side=tk.LEFT)
 
         tk.Label(
-            p2_frame, text=self.name2, font=FONTS["body_bold"],
-            fg=COLORS["text_primary"], bg=COLORS["bg_tertiary"]
+            p2_frame,
+            text=self.name2,
+            font=FONTS["body_bold"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_tertiary"],
         ).pack(side=tk.LEFT, padx=5)
 
         self.p2_score_label = tk.Label(
-            p2_frame, text="0", font=FONTS["body_bold"],
-            fg=COLORS["accent"], bg=COLORS["bg_tertiary"]
+            p2_frame,
+            text="0",
+            font=FONTS["body_bold"],
+            fg=COLORS["accent"],
+            bg=COLORS["bg_tertiary"],
         )
         self.p2_score_label.pack(side=tk.RIGHT)
 
@@ -150,13 +170,19 @@ class MatchApp:
         draws_frame.pack(fill=tk.X, pady=2)
 
         tk.Label(
-            draws_frame, text="Draws", font=FONTS["body"],
-            fg=COLORS["text_secondary"], bg=COLORS["bg_tertiary"]
+            draws_frame,
+            text="Draws",
+            font=FONTS["body"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_tertiary"],
         ).pack(side=tk.LEFT, padx=(28, 5))
 
         self.draws_label = tk.Label(
-            draws_frame, text="0", font=FONTS["body_bold"],
-            fg=COLORS["text_secondary"], bg=COLORS["bg_tertiary"]
+            draws_frame,
+            text="0",
+            font=FONTS["body_bold"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_tertiary"],
         )
         self.draws_label.pack(side=tk.RIGHT)
 
@@ -165,20 +191,29 @@ class MatchApp:
         game_frame.pack(fill=tk.X, padx=15, pady=15)
 
         self.game_label = tk.Label(
-            game_frame, text=f"Game 0/{self.num_games}",
-            font=FONTS["body_bold"], fg=COLORS["text_primary"], bg=COLORS["bg_secondary"]
+            game_frame,
+            text=f"Game 0/{self.num_games}",
+            font=FONTS["body_bold"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_secondary"],
         )
         self.game_label.pack()
 
         self.move_label = tk.Label(
-            game_frame, text="Move: 0",
-            font=FONTS["body"], fg=COLORS["text_secondary"], bg=COLORS["bg_secondary"]
+            game_frame,
+            text="Move: 0",
+            font=FONTS["body"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_secondary"],
         )
         self.move_label.pack()
 
         self.status_label = tk.Label(
-            game_frame, text="Ready",
-            font=FONTS["body"], fg=COLORS["warning"], bg=COLORS["bg_secondary"]
+            game_frame,
+            text="Ready",
+            font=FONTS["body"],
+            fg=COLORS["warning"],
+            bg=COLORS["bg_secondary"],
         )
         self.status_label.pack(pady=5)
 
@@ -187,8 +222,11 @@ class MatchApp:
         material_frame.pack(fill=tk.X, pady=5)
 
         self.material_label = tk.Label(
-            material_frame, text="Material: 39 - 39 (=)",
-            font=FONTS["mono"], fg=COLORS["text_secondary"], bg=COLORS["bg_secondary"]
+            material_frame,
+            text="Material: 39 - 39 (=)",
+            font=FONTS["mono"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_secondary"],
         )
         self.material_label.pack()
 
@@ -197,14 +235,23 @@ class MatchApp:
         log_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
 
         tk.Label(
-            log_frame, text="Game Log", font=FONTS["body_bold"],
-            fg=COLORS["text_primary"], bg=COLORS["bg_secondary"]
+            log_frame,
+            text="Game Log",
+            font=FONTS["body_bold"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_secondary"],
         ).pack(anchor=tk.W)
 
         self.log_text = tk.Text(
-            log_frame, height=12, width=50, font=("Consolas", 10),
-            bg=COLORS["bg_tertiary"], fg=COLORS["text_primary"],
-            relief=tk.FLAT, state=tk.DISABLED, wrap=tk.WORD
+            log_frame,
+            height=12,
+            width=50,
+            font=("Consolas", 10),
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
+            relief=tk.FLAT,
+            state=tk.DISABLED,
+            wrap=tk.WORD,
         )
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=5)
 
@@ -218,23 +265,43 @@ class MatchApp:
         controls_frame.pack(fill=tk.X, padx=15, pady=15)
 
         self.start_btn = tk.Button(
-            controls_frame, text="Start Match", font=FONTS["body"],
-            command=self._start_match, bg=COLORS["success"], fg="white",
-            relief=tk.FLAT, padx=15, pady=5
+            controls_frame,
+            text="Start Match",
+            font=FONTS["body"],
+            command=self._start_match,
+            bg=COLORS["success"],
+            fg="white",
+            relief=tk.FLAT,
+            padx=15,
+            pady=5,
         )
         self.start_btn.pack(side=tk.LEFT, padx=2)
 
         self.pause_btn = tk.Button(
-            controls_frame, text="Pause", font=FONTS["body"],
-            command=self._toggle_pause, bg=COLORS["warning"], fg="white",
-            relief=tk.FLAT, padx=15, pady=5, state=tk.DISABLED
+            controls_frame,
+            text="Pause",
+            font=FONTS["body"],
+            command=self._toggle_pause,
+            bg=COLORS["warning"],
+            fg="white",
+            relief=tk.FLAT,
+            padx=15,
+            pady=5,
+            state=tk.DISABLED,
         )
         self.pause_btn.pack(side=tk.LEFT, padx=2)
 
         self.stop_btn = tk.Button(
-            controls_frame, text="Stop", font=FONTS["body"],
-            command=self._stop_match, bg=COLORS["error"], fg="white",
-            relief=tk.FLAT, padx=15, pady=5, state=tk.DISABLED
+            controls_frame,
+            text="Stop",
+            font=FONTS["body"],
+            command=self._stop_match,
+            bg=COLORS["error"],
+            fg="white",
+            relief=tk.FLAT,
+            padx=15,
+            pady=5,
+            state=tk.DISABLED,
         )
         self.stop_btn.pack(side=tk.LEFT, padx=2)
 
@@ -248,16 +315,25 @@ class MatchApp:
         speed_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
 
         tk.Label(
-            speed_frame, text="Speed:", font=FONTS["body"],
-            fg=COLORS["text_secondary"], bg=COLORS["bg_secondary"]
+            speed_frame,
+            text="Speed:",
+            font=FONTS["body"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_secondary"],
         ).pack(side=tk.LEFT)
 
         self.speed_var = tk.DoubleVar(value=0.0)
         speed_scale = tk.Scale(
-            speed_frame, from_=0.0, to=1.0, resolution=0.1,
-            orient=tk.HORIZONTAL, variable=self.speed_var,
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
-            highlightthickness=0, length=150
+            speed_frame,
+            from_=0.0,
+            to=1.0,
+            resolution=0.1,
+            orient=tk.HORIZONTAL,
+            variable=self.speed_var,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            highlightthickness=0,
+            length=150,
         )
         speed_scale.pack(side=tk.LEFT, padx=10)
 
@@ -346,7 +422,9 @@ class MatchApp:
 
     def _calculate_material(self, board) -> tuple[int, int]:
         """Calculate material for each side."""
-        return get_material_count(board, chess.WHITE), get_material_count(board, chess.BLACK)
+        return get_material_count(board, chess.WHITE), get_material_count(
+            board, chess.BLACK
+        )
 
     def _update_material_display(self, board):
         """Update material display label."""
@@ -358,7 +436,9 @@ class MatchApp:
             adv_str = f"+{abs(diff)} B"
         else:
             adv_str = "="
-        self.material_label.configure(text=f"Material: {white_mat} - {black_mat} ({adv_str})")
+        self.material_label.configure(
+            text=f"Material: {white_mat} - {black_mat} ({adv_str})"
+        )
 
     def _process_queue(self):
         """Process updates from the match thread."""
@@ -394,8 +474,9 @@ class MatchApp:
 
                         # Animate with 300ms duration
                         self.board_widget.animate_move(
-                            last_move, duration_ms=300,
-                            on_complete=on_animation_complete
+                            last_move,
+                            duration_ms=300,
+                            on_complete=on_animation_complete,
                         )
                         # Exit loop to let animation complete before processing more
                         break
@@ -407,7 +488,9 @@ class MatchApp:
                 elif msg_type == "move":
                     self.move_label.configure(text=f"Move: {msg['move_num']}")
                 elif msg_type == "game_start":
-                    self.game_label.configure(text=f"Game {msg['game']}/{self.num_games}")
+                    self.game_label.configure(
+                        text=f"Game {msg['game']}/{self.num_games}"
+                    )
                     # Update visual color indicators
                     p1_color = msg.get("p1_color", "W")
                     p2_color = msg.get("p2_color", "B")
@@ -417,15 +500,21 @@ class MatchApp:
                     self._log(msg["log"])
                     self._update_scores()
                 elif msg_type == "match_end":
-                    self.status_label.configure(text="Match Complete", fg=COLORS["accent"])
+                    self.status_label.configure(
+                        text="Match Complete", fg=COLORS["accent"]
+                    )
                     self._log(f"\n{'='*30}")
-                    self._log(f"FINAL: {self.name1} {self.results['player1']} - {self.results['player2']} {self.name2}")
+                    self._log(
+                        f"FINAL: {self.name1} {self.results['player1']} - {self.results['player2']} {self.name2}"
+                    )
                     self._log(f"Draws: {self.results['draws']}")
                     self.start_btn.configure(state=tk.NORMAL)
                     self.pause_btn.configure(state=tk.DISABLED)
                     self.stop_btn.configure(state=tk.DISABLED)
                 elif msg_type == "status":
-                    self.status_label.configure(text=msg["text"], fg=msg.get("color", COLORS["text_primary"]))
+                    self.status_label.configure(
+                        text=msg["text"], fg=msg.get("color", COLORS["text_primary"])
+                    )
                 elif msg_type == "log":
                     self._log(msg["text"])
 
@@ -439,7 +528,12 @@ class MatchApp:
         """Run the match in background thread."""
         try:
             from alphazero import DualHeadResNet
-            from alphazero.arena import Arena, NetworkPlayer, RandomPlayer, PureMCTSPlayer
+            from alphazero.arena import (
+                Arena,
+                NetworkPlayer,
+                RandomPlayer,
+                PureMCTSPlayer,
+            )
             from alphazero.device import get_device
 
             device = get_device()
@@ -459,15 +553,24 @@ class MatchApp:
                 player1 = RandomPlayer(name="Random")
                 self.move_queue.put({"type": "log", "text": "Player 1: Random"})
             elif self.network1_path.lower() == "mcts":
-                player1 = PureMCTSPlayer(num_simulations=self.num_simulations, name="PureMCTS")
-                self.move_queue.put({"type": "log", "text": f"Player 1: Pure MCTS ({self.num_simulations} sims)"})
+                player1 = PureMCTSPlayer(
+                    num_simulations=self.num_simulations, name="PureMCTS"
+                )
+                self.move_queue.put(
+                    {
+                        "type": "log",
+                        "text": f"Player 1: Pure MCTS ({self.num_simulations} sims)",
+                    }
+                )
             else:
                 self.move_queue.put({"type": "log", "text": f"Loading {self.name1}..."})
                 network1 = DualHeadResNet.load(self.network1_path, device=device)
                 history_length = get_history_length(network1)
                 player1 = NetworkPlayer(
-                    network1, num_simulations=self.num_simulations, name=self.name1,
-                    history_length=history_length
+                    network1,
+                    num_simulations=self.num_simulations,
+                    name=self.name1,
+                    history_length=history_length,
                 )
 
             # Load player 2
@@ -475,24 +578,37 @@ class MatchApp:
                 player2 = RandomPlayer(name="Random")
                 self.move_queue.put({"type": "log", "text": "Player 2: Random"})
             elif self.network2_path.lower() == "mcts":
-                player2 = PureMCTSPlayer(num_simulations=self.num_simulations, name="PureMCTS")
-                self.move_queue.put({"type": "log", "text": f"Player 2: Pure MCTS ({self.num_simulations} sims)"})
+                player2 = PureMCTSPlayer(
+                    num_simulations=self.num_simulations, name="PureMCTS"
+                )
+                self.move_queue.put(
+                    {
+                        "type": "log",
+                        "text": f"Player 2: Pure MCTS ({self.num_simulations} sims)",
+                    }
+                )
             else:
                 self.move_queue.put({"type": "log", "text": f"Loading {self.name2}..."})
                 network2 = DualHeadResNet.load(self.network2_path, device=device)
                 hl2 = get_history_length(network2)
                 history_length = max(history_length, hl2)  # Use max of both
                 player2 = NetworkPlayer(
-                    network2, num_simulations=self.num_simulations, name=self.name2,
-                    history_length=hl2
+                    network2,
+                    num_simulations=self.num_simulations,
+                    name=self.name2,
+                    history_length=hl2,
                 )
 
             arena = Arena(
-                num_games=self.num_games, num_simulations=self.num_simulations,
-                max_moves=200, history_length=history_length
+                num_games=self.num_games,
+                num_simulations=self.num_simulations,
+                max_moves=200,
+                history_length=history_length,
             )
 
-            self.move_queue.put({"type": "log", "text": "Networks loaded. Starting match...\n"})
+            self.move_queue.put(
+                {"type": "log", "text": "Networks loaded. Starting match...\n"}
+            )
 
             for game_num in range(self.num_games):
                 if not self.running:
@@ -510,18 +626,22 @@ class MatchApp:
                     white_name, black_name = self.name2, self.name1
                     p1_color, p2_color = "B", "W"
 
-                self.move_queue.put({
-                    "type": "game_start",
-                    "game": self.current_game,
-                    "p1_color": p1_color,
-                    "p2_color": p2_color,
-                })
+                self.move_queue.put(
+                    {
+                        "type": "game_start",
+                        "game": self.current_game,
+                        "p1_color": p1_color,
+                        "p2_color": p2_color,
+                    }
+                )
 
                 # Play the game
                 board = chess.Board()
                 move_count = 0
 
-                self.move_queue.put({"type": "board", "board": board.copy(), "last_move": None})
+                self.move_queue.put(
+                    {"type": "board", "board": board.copy(), "last_move": None}
+                )
 
                 while not board.is_game_over() and move_count < 200 and self.running:
                     # Wait while paused
@@ -541,11 +661,13 @@ class MatchApp:
                     board.push(move)
                     move_count += 1
 
-                    self.move_queue.put({
-                        "type": "board",
-                        "board": board.copy(),
-                        "last_move": move,
-                    })
+                    self.move_queue.put(
+                        {
+                            "type": "board",
+                            "board": board.copy(),
+                            "last_move": move,
+                        }
+                    )
                     self.move_queue.put({"type": "move", "move_num": move_count})
 
                     # Delay between moves
@@ -610,7 +732,9 @@ class MatchApp:
                 self.move_queue.put({"type": "game_end", "log": log_msg})
 
                 # Console output
-                print(f"Game {self.current_game}/{self.num_games}: {white_name} (W) vs {black_name} (B) | {move_count} moves | {termination} | {winner_str}{material_info}")
+                print(
+                    f"Game {self.current_game}/{self.num_games}: {white_name} (W) vs {black_name} (B) | {move_count} moves | {termination} | {winner_str}{material_info}"
+                )
 
             # Match complete
             if self.running:
@@ -628,8 +752,11 @@ class MatchApp:
 
         except Exception as e:
             self.move_queue.put({"type": "log", "text": f"Error: {e}"})
-            self.move_queue.put({"type": "status", "text": "Error", "color": COLORS["error"]})
+            self.move_queue.put(
+                {"type": "status", "text": "Error", "color": COLORS["error"]}
+            )
             import traceback
+
             traceback.print_exc()
 
     def run(self):

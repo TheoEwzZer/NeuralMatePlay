@@ -34,7 +34,8 @@ Examples:
     )
 
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=str,
         default="models/network.pt",
         help="Output path for the network file (default: models/network.pt)",
@@ -69,7 +70,8 @@ Examples:
         help="Disable auxiliary phase prediction head",
     )
     parser.add_argument(
-        "-f", "--force",
+        "-f",
+        "--force",
         action="store_true",
         help="Overwrite existing file without asking",
     )

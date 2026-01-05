@@ -47,7 +47,9 @@ class PretrainingConfig:
     value_loss_weight: float = 5.0  # Weight for value loss to prevent collapse
     entropy_coefficient: float = 0.01  # Entropy bonus to encourage policy diversity
     prefetch_workers: int = 2  # Number of prefetch threads for chunk loading
-    gradient_accumulation_steps: int = 1  # Accumulate gradients over N steps (effective batch = batch_size * N)
+    gradient_accumulation_steps: int = (
+        1  # Accumulate gradients over N steps (effective batch = batch_size * N)
+    )
 
     def get_pgn_paths(self) -> List[str]:
         """Get all PGN paths as a list (handles both legacy and new format)."""
@@ -87,13 +89,23 @@ class TrainingConfig:
     history_length: int = 3  # Must match NetworkConfig.history_length
     veto_threshold: float = 0.35  # Min score vs old/pretrained to avoid veto
     checkpoint_interval: int = 1  # Save checkpoint every N iterations
-    pretrained_path: Optional[str] = None  # Path to pretrained model for arena comparison
+    pretrained_path: Optional[str] = (
+        None  # Path to pretrained model for arena comparison
+    )
     # Data mixing to prevent catastrophic forgetting
-    pretrain_mix_ratio: float = 0.0  # Ratio of pretrain data in each batch (0.4 = 40% pretrain, 60% self-play)
-    pretrain_chunks_dir: str = "data/chunks"  # Path to pretrain chunks (same as pretraining.chunks_dir)
-    pretrain_label_smoothing: float = 0.1  # Label smoothing for pretrain targets (0.1 = 10% smoothing)
+    pretrain_mix_ratio: float = (
+        0.0  # Ratio of pretrain data in each batch (0.4 = 40% pretrain, 60% self-play)
+    )
+    pretrain_chunks_dir: str = (
+        "data/chunks"  # Path to pretrain chunks (same as pretraining.chunks_dir)
+    )
+    pretrain_label_smoothing: float = (
+        0.1  # Label smoothing for pretrain targets (0.1 = 10% smoothing)
+    )
     pretrain_chunks_loaded: int = 15  # Number of pretrain chunks to keep in memory
-    kl_loss_weight: float = 0.0  # Weight for KL divergence loss to pretrained model (0.1 recommended)
+    kl_loss_weight: float = (
+        0.0  # Weight for KL divergence loss to pretrained model (0.1 recommended)
+    )
     # Adaptive KL divergence control
     kl_target: float = 0.15  # Target KL divergence threshold
     kl_weight_base: float = 0.1  # Base KL weight when KL < target
@@ -106,10 +118,14 @@ class TrainingConfig:
     veto_buffer_purge_ratio: float = 0.25  # Purge this ratio of buffer on veto
     veto_recovery_iterations: int = 3  # Iterations to boost pretrain mix after veto
     # Self-play quality
-    use_best_for_selfplay: bool = True  # Use best network for self-play (prevents buffer pollution)
+    use_best_for_selfplay: bool = (
+        True  # Use best network for self-play (prevents buffer pollution)
+    )
     # Veto escalation (prevents infinite rollback loops)
     veto_escalation_lr_factor: float = 0.5  # Reduce LR by this factor after 2+ vetoes
-    veto_exploration_ratio: float = 0.3  # Use current network for this ratio of games after 3+ vetoes
+    veto_exploration_ratio: float = (
+        0.3  # Use current network for this ratio of games after 3+ vetoes
+    )
     veto_critical_purge_ratio: float = 0.5  # Purge this ratio of buffer after 4+ vetoes
 
 

@@ -173,19 +173,28 @@ class PlayerInfo(tk.Frame):
         # Outer ring (active indicator)
         if self._is_active:
             canvas.create_oval(
-                0, 0, 36, 36,
+                0,
+                0,
+                36,
+                36,
                 fill=COLORS["accent"],
                 outline="",
             )
             canvas.create_oval(
-                3, 3, 33, 33,
+                3,
+                3,
+                33,
+                33,
                 fill=fill_color,
                 outline=outline_color,
                 width=1,
             )
         else:
             canvas.create_oval(
-                2, 2, 34, 34,
+                2,
+                2,
+                34,
+                34,
                 fill=fill_color,
                 outline=outline_color,
                 width=1,
@@ -194,7 +203,8 @@ class PlayerInfo(tk.Frame):
         # King piece icon
         king_char = "" if self._color == chess.WHITE else ""
         canvas.create_text(
-            18, 18,
+            18,
+            18,
             text=king_char,
             font=("Segoe UI Symbol", 16),
             fill=piece_color,

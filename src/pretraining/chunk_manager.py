@@ -76,7 +76,9 @@ class ChunkManager:
                         f"Resuming from chunk {self._chunk_count}, {self._games_processed} games already processed"
                     )
                     if self._processed_files:
-                        print(f"  Already processed files: {len(self._processed_files)}")
+                        print(
+                            f"  Already processed files: {len(self._processed_files)}"
+                        )
 
     def get_chunk_path(self, chunk_idx: int) -> str:
         """Get path for a specific chunk file."""
@@ -122,7 +124,9 @@ class ChunkManager:
         # Validate data before writing to prevent corrupted chunks
         if np.isnan(states).any() or np.isinf(states).any():
             nan_count = np.isnan(states).sum() + np.isinf(states).sum()
-            print(f"  WARNING: Skipping chunk {self._chunk_count} - {nan_count} NaN/Inf in states")
+            print(
+                f"  WARNING: Skipping chunk {self._chunk_count} - {nan_count} NaN/Inf in states"
+            )
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
@@ -131,7 +135,9 @@ class ChunkManager:
 
         if np.isnan(values).any() or np.isinf(values).any():
             nan_count = np.isnan(values).sum() + np.isinf(values).sum()
-            print(f"  WARNING: Skipping chunk {self._chunk_count} - {nan_count} NaN/Inf in values")
+            print(
+                f"  WARNING: Skipping chunk {self._chunk_count} - {nan_count} NaN/Inf in values"
+            )
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()

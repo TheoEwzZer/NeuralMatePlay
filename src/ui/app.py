@@ -937,7 +937,9 @@ class ChessGameApp:
 
         # Update Search Tree panel
         if tree_data:
-            self.search_tree_panel.update_tree(tree_data, tree_depth, tree_branching, mate_in)
+            self.search_tree_panel.update_tree(
+                tree_data, tree_depth, tree_branching, mate_in
+            )
 
         # Update Value label
         value_color = (

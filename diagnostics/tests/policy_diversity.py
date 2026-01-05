@@ -25,7 +25,7 @@ def test_policy_diversity(network, results: TestResults):
 
     # Calculate entropy (suppress warnings for edge cases)
     policy_clipped = np.clip(policy, 1e-10, 1.0)
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         entropy = -np.nansum(policy_clipped * np.log(policy_clipped))
     max_entropy = np.log(len(policy))
     normalized_entropy = entropy / max_entropy

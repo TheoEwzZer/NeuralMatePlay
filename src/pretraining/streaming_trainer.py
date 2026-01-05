@@ -44,17 +44,23 @@ class SafeGradScaler(GradScaler):
     - Provides reset_on_nan() to recover from NaN states
     """
 
-    def __init__(self, device_type: str = "cuda", init_scale: float = 2**10,
-                 growth_factor: float = 2.0, backoff_factor: float = 0.5,
-                 growth_interval: int = 2000, max_scale: float = 2**16,
-                 enabled: bool = True):
+    def __init__(
+        self,
+        device_type: str = "cuda",
+        init_scale: float = 2**10,
+        growth_factor: float = 2.0,
+        backoff_factor: float = 0.5,
+        growth_interval: int = 2000,
+        max_scale: float = 2**16,
+        enabled: bool = True,
+    ):
         super().__init__(
             device_type,
             init_scale=init_scale,
             growth_factor=growth_factor,
             backoff_factor=backoff_factor,
             growth_interval=growth_interval,
-            enabled=enabled
+            enabled=enabled,
         )
         self._max_scale = max_scale
         self._init_scale = init_scale
@@ -70,12 +76,12 @@ class SafeGradScaler(GradScaler):
         current_scale = self.get_scale()
         if current_scale > self._max_scale:
             # Use the internal tensor if available, otherwise set via state_dict
-            if hasattr(self, '_scale') and self._scale is not None:
+            if hasattr(self, "_scale") and self._scale is not None:
                 self._scale.fill_(self._max_scale)
             else:
                 # Fallback: reload state with capped scale
                 state = self.state_dict()
-                state['scale'] = torch.tensor(self._max_scale)
+                state["scale"] = torch.tensor(self._max_scale)
                 self.load_state_dict(state)
 
         self._total_batches += 1
@@ -87,16 +93,16 @@ class SafeGradScaler(GradScaler):
         safe_scale = self._init_scale / 2
 
         # Access internal scale tensor properly
-        if hasattr(self, '_scale') and self._scale is not None:
+        if hasattr(self, "_scale") and self._scale is not None:
             self._scale.fill_(safe_scale)
         else:
             # Fallback: reload state with reset scale
             state = self.state_dict()
-            state['scale'] = torch.tensor(safe_scale)
+            state["scale"] = torch.tensor(safe_scale)
             self.load_state_dict(state)
 
         # Reset internal growth tracker if it exists (PyTorch version dependent)
-        if hasattr(self, '_growth_tracker') and self._growth_tracker is not None:
+        if hasattr(self, "_growth_tracker") and self._growth_tracker is not None:
             self._growth_tracker = 0
 
     def get_nan_count(self) -> int:
@@ -181,13 +187,17 @@ class StreamingTrainer:
         # So we need a lower max_scale to prevent overflow during accumulation
         # Formula: max_scale = 2^15 / gradient_accumulation_steps
         safe_max_scale = 2**15 // max(1, gradient_accumulation_steps)
-        self.scaler = SafeGradScaler(
-            "cuda",
-            init_scale=2**8,  # Start lower at 256 (safer with grad accum)
-            growth_interval=2000,  # Grow every 2000 successful batches
-            max_scale=safe_max_scale,  # Dynamic cap based on grad accum
-            enabled=True
-        ) if self.use_amp else None
+        self.scaler = (
+            SafeGradScaler(
+                "cuda",
+                init_scale=2**8,  # Start lower at 256 (safer with grad accum)
+                growth_interval=2000,  # Grow every 2000 successful batches
+                max_scale=safe_max_scale,  # Dynamic cap based on grad accum
+                enabled=True,
+            )
+            if self.use_amp
+            else None
+        )
 
         # Setup optimizer
         self.optimizer = optim.AdamW(
@@ -272,7 +282,7 @@ class StreamingTrainer:
                 init_scale=2**8,  # Lower start (safer with grad accum)
                 growth_interval=2000,
                 max_scale=safe_max_scale,  # Dynamic cap based on grad accum
-                enabled=True
+                enabled=True,
             )
 
         # Load training state
@@ -331,14 +341,19 @@ class StreamingTrainer:
         )
 
         # Restore scheduler state if resuming
-        if hasattr(self, '_scheduler_state_to_restore') and self._scheduler_state_to_restore:
+        if (
+            hasattr(self, "_scheduler_state_to_restore")
+            and self._scheduler_state_to_restore
+        ):
             self.scheduler.load_state_dict(self._scheduler_state_to_restore)
-            old_lr = self.optimizer.param_groups[0]['lr']
+            old_lr = self.optimizer.param_groups[0]["lr"]
             # Force the new learning rate from config (override checkpoint)
             if old_lr != self.learning_rate:
                 for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = self.learning_rate
-                print(f"Restored scheduler state, LR overridden: {old_lr:.6f} → {self.learning_rate:.6f}")
+                    param_group["lr"] = self.learning_rate
+                print(
+                    f"Restored scheduler state, LR overridden: {old_lr:.6f} → {self.learning_rate:.6f}"
+                )
             else:
                 print(f"Restored scheduler state (LR: {old_lr:.6f})")
             self._scheduler_state_to_restore = None
@@ -370,7 +385,9 @@ class StreamingTrainer:
             if np.isnan(val_loss):
                 print("\n  CRITICAL: Validation loss is NaN, stopping training!")
                 print(f"  Last good checkpoint saved at epoch {self.best_count}")
-                print("  Recommendation: Resume from best checkpoint with lower learning rate")
+                print(
+                    "  Recommendation: Resume from best checkpoint with lower learning rate"
+                )
                 break
 
             # Update scheduler based on validation loss
@@ -437,7 +454,9 @@ class StreamingTrainer:
         epoch_start_time = time.time()
 
         # Use prefetching to load next chunk while GPU processes current chunk
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.prefetch_workers) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.prefetch_workers
+        ) as executor:
             prefetch_future = None
 
             for chunk_idx, chunk_path in enumerate(train_chunks):
@@ -525,8 +544,12 @@ class StreamingTrainer:
                     is_last_batch = batch_idx == n_batches - 1
 
                     # Skip batches with NaN/Inf inputs (corrupted data)
-                    if (torch.isnan(batch_states).any() or torch.isinf(batch_states).any() or
-                        torch.isnan(batch_values).any() or torch.isinf(batch_values).any()):
+                    if (
+                        torch.isnan(batch_states).any()
+                        or torch.isinf(batch_states).any()
+                        or torch.isnan(batch_values).any()
+                        or torch.isinf(batch_values).any()
+                    ):
                         continue
 
                     # Clamp values to [-1, 1] to prevent outliers causing large gradients
@@ -534,13 +557,19 @@ class StreamingTrainer:
 
                     if self.use_amp:
                         with autocast(device_type="cuda"):
-                            pred_policies, pred_values, pred_phases = self.network(batch_states)
+                            pred_policies, pred_values, pred_phases = self.network(
+                                batch_states
+                            )
 
                             # Clamp logits to prevent softmax overflow (|logit| > 88 causes overflow in float16)
-                            pred_policies_clamped = torch.clamp(pred_policies, min=-50, max=50)
+                            pred_policies_clamped = torch.clamp(
+                                pred_policies, min=-50, max=50
+                            )
 
                             policy_loss = nn.functional.cross_entropy(
-                                pred_policies_clamped, batch_policies, label_smoothing=0.2
+                                pred_policies_clamped,
+                                batch_policies,
+                                label_smoothing=0.2,
                             )
                             value_loss = nn.functional.mse_loss(
                                 pred_values, batch_values
@@ -549,16 +578,22 @@ class StreamingTrainer:
                             # Phase loss (auxiliary task)
                             if pred_phases is not None:
                                 # Clamp phase logits to prevent overflow in float16
-                                pred_phases_clamped = torch.clamp(pred_phases, min=-50, max=50)
+                                pred_phases_clamped = torch.clamp(
+                                    pred_phases, min=-50, max=50
+                                )
                                 phase_loss = nn.functional.cross_entropy(
-                                    pred_phases_clamped, batch_phases, label_smoothing=0.1
+                                    pred_phases_clamped,
+                                    batch_phases,
+                                    label_smoothing=0.1,
                                 )
                             else:
                                 phase_loss = torch.tensor(0.0, device=self.device)
 
                             # Compute entropy bonus for policy diversity (numerically stable)
                             # Use log_softmax which is more stable than softmax + log
-                            log_probs = nn.functional.log_softmax(pred_policies_clamped, dim=-1)
+                            log_probs = nn.functional.log_softmax(
+                                pred_policies_clamped, dim=-1
+                            )
                             probs = torch.exp(log_probs)
                             # Clamp log_probs to prevent -inf * 0 = NaN
                             log_probs_safe = torch.clamp(log_probs, min=-100)
@@ -568,14 +603,21 @@ class StreamingTrainer:
 
                             # Combined loss with entropy bonus (subtract to maximize entropy)
                             # Scale loss for gradient accumulation
-                            loss = (policy_loss + self.value_loss_weight * value_loss + self.phase_loss_weight * phase_loss - self.entropy_coefficient * entropy) / accum_steps
+                            loss = (
+                                policy_loss
+                                + self.value_loss_weight * value_loss
+                                + self.phase_loss_weight * phase_loss
+                                - self.entropy_coefficient * entropy
+                            ) / accum_steps
 
                             # Final safety check - clamp total loss
                             loss = torch.clamp(loss, min=-100, max=100)
 
                         # Skip backward if loss is NaN/Inf (prevents corrupting gradients)
                         if torch.isnan(loss) or torch.isinf(loss):
-                            print(f"\n  WARNING: Loss is NaN/Inf (scale={self.scaler.get_scale():.0f}), resetting scaler")
+                            print(
+                                f"\n  WARNING: Loss is NaN/Inf (scale={self.scaler.get_scale():.0f}), resetting scaler"
+                            )
                             self.optimizer.zero_grad()
                             self.scaler.reset_on_nan()
                             continue
@@ -591,13 +633,18 @@ class StreamingTrainer:
                             bad_param_name = None
                             for name, param in self.network.named_parameters():
                                 if param.grad is not None:
-                                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                    if (
+                                        torch.isnan(param.grad).any()
+                                        or torch.isinf(param.grad).any()
+                                    ):
                                         has_bad_grad = True
                                         bad_param_name = name
                                         break
 
                             if has_bad_grad:
-                                print(f"\n  WARNING: NaN/Inf gradient in {bad_param_name} (scale={self.scaler.get_scale():.0f}), resetting scaler")
+                                print(
+                                    f"\n  WARNING: NaN/Inf gradient in {bad_param_name} (scale={self.scaler.get_scale():.0f}), resetting scaler"
+                                )
                                 self.optimizer.zero_grad()
                                 self.scaler.reset_on_nan()
                                 self.scaler.update()
@@ -610,10 +657,14 @@ class StreamingTrainer:
                                 self.scaler.update()
                                 self.optimizer.zero_grad()
                     else:
-                        pred_policies, pred_values, pred_phases = self.network(batch_states)
+                        pred_policies, pred_values, pred_phases = self.network(
+                            batch_states
+                        )
 
                         # Clamp logits to prevent softmax overflow
-                        pred_policies_clamped = torch.clamp(pred_policies, min=-50, max=50)
+                        pred_policies_clamped = torch.clamp(
+                            pred_policies, min=-50, max=50
+                        )
 
                         policy_loss = nn.functional.cross_entropy(
                             pred_policies_clamped, batch_policies, label_smoothing=0.2
@@ -623,7 +674,9 @@ class StreamingTrainer:
                         # Phase loss (auxiliary task)
                         if pred_phases is not None:
                             # Clamp phase logits to prevent overflow
-                            pred_phases_clamped = torch.clamp(pred_phases, min=-50, max=50)
+                            pred_phases_clamped = torch.clamp(
+                                pred_phases, min=-50, max=50
+                            )
                             phase_loss = nn.functional.cross_entropy(
                                 pred_phases_clamped, batch_phases, label_smoothing=0.1
                             )
@@ -632,7 +685,9 @@ class StreamingTrainer:
 
                         # Compute entropy bonus for policy diversity (numerically stable)
                         # Use log_softmax which is more stable than softmax + log
-                        log_probs = nn.functional.log_softmax(pred_policies_clamped, dim=-1)
+                        log_probs = nn.functional.log_softmax(
+                            pred_policies_clamped, dim=-1
+                        )
                         probs = torch.exp(log_probs)
                         # Clamp log_probs to prevent -inf * 0 = NaN
                         log_probs_safe = torch.clamp(log_probs, min=-100)
@@ -642,14 +697,21 @@ class StreamingTrainer:
 
                         # Combined loss with entropy bonus (subtract to maximize entropy)
                         # Scale loss for gradient accumulation
-                        loss = (policy_loss + self.value_loss_weight * value_loss + self.phase_loss_weight * phase_loss - self.entropy_coefficient * entropy) / accum_steps
+                        loss = (
+                            policy_loss
+                            + self.value_loss_weight * value_loss
+                            + self.phase_loss_weight * phase_loss
+                            - self.entropy_coefficient * entropy
+                        ) / accum_steps
 
                         # Final safety check - clamp total loss
                         loss = torch.clamp(loss, min=-100, max=100)
 
                         # Skip backward if loss is NaN/Inf (prevents corrupting gradients)
                         if torch.isnan(loss) or torch.isinf(loss):
-                            print("\n  WARNING: Loss is NaN/Inf (no AMP), skipping batch")
+                            print(
+                                "\n  WARNING: Loss is NaN/Inf (no AMP), skipping batch"
+                            )
                             self.optimizer.zero_grad()
                             continue
 
@@ -662,13 +724,18 @@ class StreamingTrainer:
                             bad_param_name = None
                             for name, param in self.network.named_parameters():
                                 if param.grad is not None:
-                                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                    if (
+                                        torch.isnan(param.grad).any()
+                                        or torch.isinf(param.grad).any()
+                                    ):
                                         has_bad_grad = True
                                         bad_param_name = name
                                         break
 
                             if has_bad_grad:
-                                print(f"\n  WARNING: NaN/Inf gradient in {bad_param_name}, skipping batch")
+                                print(
+                                    f"\n  WARNING: NaN/Inf gradient in {bad_param_name}, skipping batch"
+                                )
                                 self.optimizer.zero_grad()
                             else:
                                 # Use tighter gradient clipping to prevent explosions
@@ -690,7 +757,9 @@ class StreamingTrainer:
                     if total_batches % 500 == 0:
                         value_std = pred_values.std().item()
                         if value_std < 0.1:
-                            print(f"\n  WARNING: Value head may be collapsing (std={value_std:.4f})")
+                            print(
+                                f"\n  WARNING: Value head may be collapsing (std={value_std:.4f})"
+                            )
 
                 # Progress update with average time per chunk
                 elapsed = time.time() - epoch_start_time
@@ -699,7 +768,11 @@ class StreamingTrainer:
                 eta_h = int(eta_seconds // 3600)
                 eta_min = int((eta_seconds % 3600) // 60)
                 eta_sec = int(eta_seconds % 60)
-                eta_str = f"{eta_h}h{eta_min:02d}m{eta_sec:02d}s" if eta_h > 0 else f"{eta_min}m{eta_sec:02d}s"
+                eta_str = (
+                    f"{eta_h}h{eta_min:02d}m{eta_sec:02d}s"
+                    if eta_h > 0
+                    else f"{eta_min}m{eta_sec:02d}s"
+                )
                 pct = (chunk_idx + 1) * 100 // len(train_chunks)
                 print(
                     f"\rEpoch {epoch+1}/{total_epochs} train {pct}% (chunk {chunk_idx+1}/{len(train_chunks)}) "
@@ -728,7 +801,9 @@ class StreamingTrainer:
 
         with torch.inference_mode():
             # Use prefetching to load next chunk while GPU processes current chunk
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.prefetch_workers) as executor:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.prefetch_workers
+            ) as executor:
                 prefetch_future = None
 
                 for chunk_idx, chunk_path in enumerate(self.val_chunks):
@@ -784,7 +859,9 @@ class StreamingTrainer:
                         batch_policies = torch.zeros(
                             batch_size_actual, MOVE_ENCODING_SIZE, device=self.device
                         )
-                        batch_policies.scatter_(1, batch_policy_indices.unsqueeze(1), 1.0)
+                        batch_policies.scatter_(
+                            1, batch_policy_indices.unsqueeze(1), 1.0
+                        )
 
                         pred_policies, pred_values, _ = self.network(batch_states)
                         policy_loss = nn.functional.cross_entropy(
@@ -805,11 +882,17 @@ class StreamingTrainer:
                     # Progress update with average time per chunk
                     elapsed = time.time() - val_start_time
                     avg_time_per_chunk = elapsed / (chunk_idx + 1)
-                    eta_seconds = avg_time_per_chunk * (len(self.val_chunks) - chunk_idx - 1)
+                    eta_seconds = avg_time_per_chunk * (
+                        len(self.val_chunks) - chunk_idx - 1
+                    )
                     eta_h = int(eta_seconds // 3600)
                     eta_min = int((eta_seconds % 3600) // 60)
                     eta_sec = int(eta_seconds % 60)
-                    eta_str = f"{eta_h}h{eta_min:02d}m{eta_sec:02d}s" if eta_h > 0 else f"{eta_min}m{eta_sec:02d}s"
+                    eta_str = (
+                        f"{eta_h}h{eta_min:02d}m{eta_sec:02d}s"
+                        if eta_h > 0
+                        else f"{eta_min}m{eta_sec:02d}s"
+                    )
                     pct = (chunk_idx + 1) * 100 // len(self.val_chunks)
                     print(
                         f"\rEpoch {epoch+1}/{total_epochs} val {pct}% (chunk {chunk_idx+1}/{len(self.val_chunks)}) "

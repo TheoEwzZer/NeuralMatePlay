@@ -92,16 +92,20 @@ class EvalGraph(tk.Canvas):
 
         # White advantage section (top half, light)
         self.create_rectangle(
-            plot_left, plot_top,
-            plot_right, center_y,
+            plot_left,
+            plot_top,
+            plot_right,
+            center_y,
             fill="#252535",
             outline="",
         )
 
         # Black advantage section (bottom half, dark)
         self.create_rectangle(
-            plot_left, center_y,
-            plot_right, plot_bottom,
+            plot_left,
+            center_y,
+            plot_right,
+            plot_bottom,
             fill="#1a1a28",
             outline="",
         )
@@ -120,7 +124,10 @@ class EvalGraph(tk.Canvas):
             line_width = 2 if eval_val == 0 else 1
 
             self.create_line(
-                plot_left, y, plot_right, y,
+                plot_left,
+                y,
+                plot_right,
+                y,
                 fill=color,
                 width=line_width,
                 dash=(2, 2) if eval_val != 0 else None,
@@ -128,8 +135,10 @@ class EvalGraph(tk.Canvas):
 
         # Border
         self.create_rectangle(
-            plot_left, plot_top,
-            plot_right, plot_bottom,
+            plot_left,
+            plot_top,
+            plot_right,
+            plot_bottom,
             outline=COLORS["border"],
             width=1,
         )
@@ -150,7 +159,8 @@ class EvalGraph(tk.Canvas):
             else:
                 text = f"{eval_val:+.1f}"
             self.create_text(
-                plot_left - 5, y,
+                plot_left - 5,
+                y,
                 text=text,
                 font=("Segoe UI", 8),
                 fill=COLORS["text_muted"],
@@ -159,7 +169,8 @@ class EvalGraph(tk.Canvas):
 
         # Title
         self.create_text(
-            self._width // 2, 8,
+            self._width // 2,
+            8,
             text="Evaluation",
             font=("Segoe UI", 9, "bold"),
             fill=COLORS["text_secondary"],
@@ -168,7 +179,8 @@ class EvalGraph(tk.Canvas):
         # X-axis label (move number)
         if len(self._eval_history) > 0:
             self.create_text(
-                self._width - 5, self._height - 5,
+                self._width - 5,
+                self._height - 5,
                 text=f"Move {len(self._eval_history)}",
                 font=("Segoe UI", 8),
                 fill=COLORS["text_muted"],
@@ -188,7 +200,11 @@ class EvalGraph(tk.Canvas):
         num_moves = len(self._eval_history)
 
         for i, eval_val in enumerate(self._eval_history):
-            x = plot_left + (i / max(1, num_moves - 1)) * plot_width if num_moves > 1 else plot_left + plot_width // 2
+            x = (
+                plot_left + (i / max(1, num_moves - 1)) * plot_width
+                if num_moves > 1
+                else plot_left + plot_width // 2
+            )
             y = self._eval_to_y(eval_val)
             points.append((x, y))
 
@@ -224,13 +240,18 @@ class EvalGraph(tk.Canvas):
         # Draw points
         for x, y in points:
             self.create_oval(
-                x - 2, y - 2, x + 2, y + 2,
+                x - 2,
+                y - 2,
+                x + 2,
+                y + 2,
                 fill=COLORS["graph_line"],
                 outline="",
                 tags="eval_point",
             )
 
-    def _draw_filled_regions(self, points: List[Tuple[float, float]], center_y: float) -> None:
+    def _draw_filled_regions(
+        self, points: List[Tuple[float, float]], center_y: float
+    ) -> None:
         """Draw filled regions above/below zero line."""
         if len(points) < 2:
             return
@@ -272,11 +293,18 @@ class EvalGraph(tk.Canvas):
         num_moves = len(self._eval_history)
 
         idx = self._current_move - 1
-        x = plot_left + (idx / max(1, num_moves - 1)) * plot_width if num_moves > 1 else plot_left + plot_width // 2
+        x = (
+            plot_left + (idx / max(1, num_moves - 1)) * plot_width
+            if num_moves > 1
+            else plot_left + plot_width // 2
+        )
 
         # Vertical line
         self.create_line(
-            x, plot_top, x, plot_bottom,
+            x,
+            plot_top,
+            x,
+            plot_bottom,
             fill=COLORS["graph_marker"],
             width=2,
             tags="marker",
@@ -285,7 +313,10 @@ class EvalGraph(tk.Canvas):
         # Highlighted point
         y = self._eval_to_y(self._eval_history[idx])
         self.create_oval(
-            x - 5, y - 5, x + 5, y + 5,
+            x - 5,
+            y - 5,
+            x + 5,
+            y + 5,
             fill=COLORS["graph_marker"],
             outline=COLORS["text_primary"],
             width=1,
@@ -296,7 +327,8 @@ class EvalGraph(tk.Canvas):
         eval_val = self._eval_history[idx]
         text = f"{eval_val:+.1f}"
         self.create_text(
-            x, plot_top - 5,
+            x,
+            plot_top - 5,
             text=text,
             font=("Segoe UI", 8, "bold"),
             fill=COLORS["graph_marker"],
@@ -356,7 +388,8 @@ class EvalGraph(tk.Canvas):
 
         # Create tooltip
         self._tooltip_id = self.create_text(
-            x, y - 15,
+            x,
+            y - 15,
             text=text,
             font=("Segoe UI", 8),
             fill=COLORS["text_primary"],
@@ -367,8 +400,10 @@ class EvalGraph(tk.Canvas):
         bbox = self.bbox(self._tooltip_id)
         if bbox:
             self.create_rectangle(
-                bbox[0] - 3, bbox[1] - 2,
-                bbox[2] + 3, bbox[3] + 2,
+                bbox[0] - 3,
+                bbox[1] - 2,
+                bbox[2] + 3,
+                bbox[3] + 2,
                 fill=COLORS["bg_tertiary"],
                 outline=COLORS["border"],
                 tags="tooltip_bg",

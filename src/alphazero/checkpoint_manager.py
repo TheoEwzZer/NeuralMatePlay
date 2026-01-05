@@ -94,9 +94,7 @@ class CheckpointManager:
             self._log(f"Saved {best_path.name} (improvement #{best_count})")
 
             # Always save numbered checkpoint for history
-            numbered_path = (
-                self.checkpoint_dir / f"{name}_best_{best_count}_network.pt"
-            )
+            numbered_path = self.checkpoint_dir / f"{name}_best_{best_count}_network.pt"
             self._save_network(network, numbered_path)
 
             if state:
@@ -140,7 +138,7 @@ class CheckpointManager:
 
         # Keep last 5
         sorted_counts = sorted(best_counts)
-        keep.update(sorted_counts[-self.keep_last_n:])
+        keep.update(sorted_counts[-self.keep_last_n :])
 
         # Delete the rest
         to_delete = set(best_counts) - keep

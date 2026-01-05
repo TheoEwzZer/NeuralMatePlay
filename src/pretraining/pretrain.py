@@ -25,6 +25,7 @@ from torch.utils.data import DataLoader, random_split
 from torch.amp import autocast, GradScaler
 
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alphazero import DualHeadNetwork, get_device, supports_mixed_precision
@@ -47,7 +48,7 @@ def expand_pgn_paths(paths: List[str]) -> List[str]:
     """
     expanded = []
     for path in paths:
-        if '*' in path or '?' in path:
+        if "*" in path or "?" in path:
             # Glob pattern - expand it
             matches = sorted(glob.glob(path))
             if not matches:
@@ -150,14 +151,20 @@ def pretrain(
             print(f"\nExtending chunks with {len(files_to_process)} new file(s)...")
             print(f"  Already processed: {len(processed_files)} file(s)")
         else:
-            print(f"\nNo chunks found, creating from {len(files_to_process)} PGN file(s)...")
+            print(
+                f"\nNo chunks found, creating from {len(files_to_process)} PGN file(s)..."
+            )
 
-        chunk_manager = ChunkManager(cfg.chunks_dir, chunk_size=cfg.chunk_size, verbose=True, resume=resume_mode)
+        chunk_manager = ChunkManager(
+            cfg.chunks_dir, chunk_size=cfg.chunk_size, verbose=True, resume=resume_mode
+        )
         total_position_count = 0
         total_games_count = chunk_manager._games_processed
 
         for file_idx, pgn_file in enumerate(files_to_process):
-            print(f"\n[File {file_idx + 1}/{len(files_to_process)}] Processing: {pgn_file}")
+            print(
+                f"\n[File {file_idx + 1}/{len(files_to_process)}] Processing: {pgn_file}"
+            )
 
             processor = PGNProcessor(
                 pgn_file,
@@ -194,12 +201,16 @@ def pretrain(
                 total_position_count += 1
 
                 if file_position_count % 50000 == 0:
-                    print(f"  {file_position_count:,} positions, {processor.games_processed} games, {processor.progress:.1%}")
+                    print(
+                        f"  {file_position_count:,} positions, {processor.games_processed} games, {processor.progress:.1%}"
+                    )
 
             # Track this file as processed
             processed_files.add(pgn_file)
             total_games_count += processor.games_processed
-            print(f"  Completed: {file_position_count:,} positions from {processor.games_processed} games")
+            print(
+                f"  Completed: {file_position_count:,} positions from {processor.games_processed} games"
+            )
 
             # Check global position limit
             if cfg.max_positions and total_position_count >= cfg.max_positions:
@@ -217,11 +228,15 @@ def pretrain(
         print(f"\nChunk info:")
         print(f"  Chunks: {metadata['num_chunks']}")
         print(f"  Total positions: {metadata['total_examples']:,}")
-        games_processed = metadata.get('games_processed', 0)
-        print(f"  Games processed: {games_processed:,}" if games_processed else "  Games processed: unknown")
+        games_processed = metadata.get("games_processed", 0)
+        print(
+            f"  Games processed: {games_processed:,}"
+            if games_processed
+            else "  Games processed: unknown"
+        )
 
         # Estimate memory for full load
-        mem_gb = metadata['total_examples'] * (54 * 8 * 8 * 4 + 6) / (1024**3)
+        mem_gb = metadata["total_examples"] * (54 * 8 * 8 * 4 + 6) / (1024**3)
         print(f"  Est. RAM needed: {mem_gb:.1f} GB")
 
         # Auto-enable streaming if too much data
@@ -300,13 +315,13 @@ def pretrain(
     # ReduceLROnPlateau - reduces LR when val loss stops improving
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        mode='min',
+        mode="min",
         factor=0.5,
         patience=3,
         min_lr=1e-6,
     )
 
-    scaler = GradScaler('cuda') if use_amp else None
+    scaler = GradScaler("cuda") if use_amp else None
 
     # Checkpoint manager
     checkpoint_dir = os.path.dirname(cfg.output_path) or "models"
@@ -353,7 +368,7 @@ def pretrain(
 
                 # Recreate scaler (don't load old state - causes "No inf checks" error)
                 if use_amp:
-                    scaler = GradScaler('cuda')
+                    scaler = GradScaler("cuda")
 
                 # Load training state
                 state = checkpoint.get("state")
@@ -370,12 +385,16 @@ def pretrain(
                     else:
                         # Old checkpoint without epoch - estimate from best_count
                         start_epoch = best_count
-                        print(f"(Old checkpoint format - estimating epoch from best_count)")
+                        print(
+                            f"(Old checkpoint format - estimating epoch from best_count)"
+                        )
 
                     # Restore scheduler state
                     if "scheduler_state" in state:
                         scheduler.load_state_dict(state["scheduler_state"])
-                        print(f"Restored scheduler state (LR: {optimizer.param_groups[0]['lr']:.6f})")
+                        print(
+                            f"Restored scheduler state (LR: {optimizer.param_groups[0]['lr']:.6f})"
+                        )
 
                     # Restore epochs without improvement
                     if "epochs_without_improvement" in state:
@@ -407,7 +426,11 @@ def pretrain(
             if pct != last_pct:
                 last_pct = pct
                 elapsed = int(time.time() - epoch_start)
-                print(f"\rEpoch {epoch+1}/{cfg.epochs} ({elapsed}s) train {pct}%   ", end="", flush=True)
+                print(
+                    f"\rEpoch {epoch+1}/{cfg.epochs} ({elapsed}s) train {pct}%   ",
+                    end="",
+                    flush=True,
+                )
 
             states = states.to(device)
             policies = policies.to(device)
@@ -416,7 +439,7 @@ def pretrain(
             optimizer.zero_grad()
 
             if use_amp:
-                with autocast(device_type='cuda'):
+                with autocast(device_type="cuda"):
                     pred_policies, pred_values, _ = network(states)
                     policy_loss = nn.functional.cross_entropy(
                         pred_policies, policies, label_smoothing=0.2
@@ -428,7 +451,11 @@ def pretrain(
                     probs = nn.functional.softmax(pred_policies, dim=-1)
                     entropy = -torch.sum(probs * log_probs, dim=-1).mean()
 
-                    loss = policy_loss + cfg.value_loss_weight * value_loss - cfg.entropy_coefficient * entropy
+                    loss = (
+                        policy_loss
+                        + cfg.value_loss_weight * value_loss
+                        - cfg.entropy_coefficient * entropy
+                    )
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -445,7 +472,11 @@ def pretrain(
                 probs = nn.functional.softmax(pred_policies, dim=-1)
                 entropy = -torch.sum(probs * log_probs, dim=-1).mean()
 
-                loss = policy_loss + cfg.value_loss_weight * value_loss - cfg.entropy_coefficient * entropy
+                loss = (
+                    policy_loss
+                    + cfg.value_loss_weight * value_loss
+                    - cfg.entropy_coefficient * entropy
+                )
 
                 loss.backward()
                 optimizer.step()
@@ -469,7 +500,11 @@ def pretrain(
                 if pct != last_pct:
                     last_pct = pct
                     elapsed = int(time.time() - epoch_start)
-                    print(f"\rEpoch {epoch+1}/{cfg.epochs} ({elapsed}s) val {pct}%   ", end="", flush=True)
+                    print(
+                        f"\rEpoch {epoch+1}/{cfg.epochs} ({elapsed}s) val {pct}%   ",
+                        end="",
+                        flush=True,
+                    )
 
                 states = states.to(device)
                 policies = policies.to(device)
@@ -499,12 +534,16 @@ def pretrain(
         epoch_time = time.time() - epoch_start
 
         # Get current LR
-        current_lr = optimizer.param_groups[0]['lr']
+        current_lr = optimizer.param_groups[0]["lr"]
 
         # === Print epoch summary ===
         print(f"\rEpoch {epoch+1}/{cfg.epochs} ({epoch_time:.1f}s)")
-        print(f"  Train - Loss: {avg_train_total:.4f} (P: {avg_train_policy:.4f}, V: {avg_train_value:.4f})")
-        print(f"  Val   - Loss: {avg_val_total:.4f} (P: {avg_val_policy:.4f}, V: {avg_val_value:.4f})")
+        print(
+            f"  Train - Loss: {avg_train_total:.4f} (P: {avg_train_policy:.4f}, V: {avg_train_value:.4f})"
+        )
+        print(
+            f"  Val   - Loss: {avg_val_total:.4f} (P: {avg_val_policy:.4f}, V: {avg_val_value:.4f})"
+        )
         print(f"  LR: {current_lr:.6f}")
 
         # === Save best model ===
@@ -535,9 +574,11 @@ def pretrain(
             best_path = f"{checkpoint_dir}/{checkpoint_name}_best_network.pt"
             print(f"Checkpoint saved: {best_path}")
 
-            is_milestone = (best_count == 1 or best_count % 5 == 0)
+            is_milestone = best_count == 1 or best_count % 5 == 0
             if is_milestone:
-                milestone_path = f"{checkpoint_dir}/{checkpoint_name}_best_{best_count}_network.pt"
+                milestone_path = (
+                    f"{checkpoint_dir}/{checkpoint_name}_best_{best_count}_network.pt"
+                )
                 print(f"Checkpoint saved: {milestone_path}")
                 print(f"  New best model saved! (milestone #{best_count})")
             else:
@@ -581,7 +622,8 @@ Examples:
     )
 
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         type=str,
         default="config/config.json",
         help="Path to JSON config file (default: config/config.json)",
@@ -599,19 +641,22 @@ Examples:
         help="Path(s) to PGN file(s). Supports multiple files and glob patterns (e.g., 'data/*.pgn')",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=str,
         default=None,
         help="Output path for trained network",
     )
     parser.add_argument(
-        "--epochs", "-e",
+        "--epochs",
+        "-e",
         type=int,
         default=None,
         help="Number of training epochs",
     )
     parser.add_argument(
-        "--batch-size", "-b",
+        "--batch-size",
+        "-b",
         type=int,
         default=None,
         help="Training batch size",
@@ -669,6 +714,7 @@ Examples:
     # Generate default config
     if args.generate_config:
         from config import generate_default_config
+
         print(generate_default_config())
         return 0
 
@@ -724,7 +770,12 @@ Examples:
         return 1
 
     try:
-        pretrain(cfg, config.network, streaming=not args.no_streaming, resume_from=args.resume_pretrained)
+        pretrain(
+            cfg,
+            config.network,
+            streaming=not args.no_streaming,
+            resume_from=args.resume_pretrained,
+        )
         return 0
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by user")

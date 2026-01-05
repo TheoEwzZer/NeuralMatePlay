@@ -58,7 +58,9 @@ def test_inference_speed(network, results: TestResults):
     results.add_diagnostic("inference", "single_avg_ms", single_avg * 1000)
     results.add_diagnostic("inference", "batch_avg_ms", batch_avg * 1000)
     results.add_diagnostic("inference", "per_sample_batch_ms", per_sample_batch * 1000)
-    results.add_diagnostic("inference", "batch_inferences_per_sec", 1 / per_sample_batch)
+    results.add_diagnostic(
+        "inference", "batch_inferences_per_sec", 1 / per_sample_batch
+    )
     results.add_diagnostic("inference", "batch_speedup", single_avg / per_sample_batch)
 
     # Benchmark assessment based on BATCH performance (used by MCTS)

@@ -15,12 +15,22 @@ import re
 try:
     import chess
 except ImportError:
-    raise ImportError("python-chess is required. Install with: pip install python-chess")
+    raise ImportError(
+        "python-chess is required. Install with: pip install python-chess"
+    )
 
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .styles import COLORS, FONTS, apply_theme, create_styled_button, create_styled_label, create_tooltip
+from .styles import (
+    COLORS,
+    FONTS,
+    apply_theme,
+    create_styled_button,
+    create_styled_label,
+    create_tooltip,
+)
 from .board_widget import ChessBoardWidget
 
 
@@ -179,14 +189,18 @@ class TrainingApp:
         iter_frame.pack(fill="x", padx=15, pady=5)
 
         tk.Label(
-            iter_frame, text="Iteration:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            iter_frame,
+            text="Iteration:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.iteration_label = tk.Label(
-            iter_frame, text="0 / 0",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            iter_frame,
+            text="0 / 0",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
             font=FONTS["body_bold"],
         )
         self.iteration_label.pack(side="right")
@@ -196,14 +210,18 @@ class TrainingApp:
         games_frame.pack(fill="x", padx=15, pady=5)
 
         tk.Label(
-            games_frame, text="Games:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            games_frame,
+            text="Games:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.games_label = tk.Label(
-            games_frame, text="0 / 0",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            games_frame,
+            text="0 / 0",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
             font=FONTS["body_bold"],
         )
         self.games_label.pack(side="right")
@@ -213,14 +231,18 @@ class TrainingApp:
         examples_frame.pack(fill="x", padx=15, pady=5)
 
         tk.Label(
-            examples_frame, text="Examples:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            examples_frame,
+            text="Examples:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.examples_label = tk.Label(
-            examples_frame, text="0",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            examples_frame,
+            text="0",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
             font=FONTS["body_bold"],
         )
         self.examples_label.pack(side="right")
@@ -230,14 +252,18 @@ class TrainingApp:
         buffer_frame.pack(fill="x", padx=15, pady=(5, 15))
 
         tk.Label(
-            buffer_frame, text="Buffer:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            buffer_frame,
+            text="Buffer:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.buffer_label = tk.Label(
-            buffer_frame, text="0",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            buffer_frame,
+            text="0",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
             font=FONTS["body_bold"],
         )
         self.buffer_label.pack(side="right")
@@ -259,14 +285,18 @@ class TrainingApp:
         loss_frame.pack(fill="x", padx=15, pady=5)
 
         tk.Label(
-            loss_frame, text="Loss:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            loss_frame,
+            text="Loss:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.loss_label = tk.Label(
-            loss_frame, text="-",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            loss_frame,
+            text="-",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
             font=FONTS["mono"],
         )
         self.loss_label.pack(side="right")
@@ -276,14 +306,18 @@ class TrainingApp:
         winrate_frame.pack(fill="x", padx=15, pady=5)
 
         tk.Label(
-            winrate_frame, text="W/B/D:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            winrate_frame,
+            text="W/B/D:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.winrate_label = tk.Label(
-            winrate_frame, text="- / - / -",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            winrate_frame,
+            text="- / - / -",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
             font=FONTS["mono"],
         )
         self.winrate_label.pack(side="right")
@@ -293,14 +327,18 @@ class TrainingApp:
         elo_frame.pack(fill="x", padx=15, pady=(5, 15))
 
         tk.Label(
-            elo_frame, text="Elo:",
-            bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],
+            elo_frame,
+            text="Elo:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
             font=FONTS["body"],
         ).pack(side="left")
 
         self.elo_label = tk.Label(
-            elo_frame, text="1500",
-            bg=COLORS["bg_secondary"], fg=COLORS["accent"],
+            elo_frame,
+            text="1500",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["accent"],
             font=FONTS["body_bold"],
         )
         self.elo_label.pack(side="right")
@@ -409,7 +447,9 @@ class TrainingApp:
 
             # Resume if requested
             if self.resume_checkpoint:
-                self.update_queue.put(("status", f"Resuming from {self.resume_checkpoint}..."))
+                self.update_queue.put(
+                    ("status", f"Resuming from {self.resume_checkpoint}...")
+                )
                 checkpoint_dir = config.checkpoint_path
 
                 if self.resume_checkpoint == "latest":
@@ -491,8 +531,7 @@ class TrainingApp:
 
                 elif update_type == "complete":
                     self.status_label.configure(
-                        text=f"Complete! Saved to {data}",
-                        fg=COLORS["success"]
+                        text=f"Complete! Saved to {data}", fg=COLORS["success"]
                     )
                     self.is_training = False
                     self.start_btn.configure(state="normal")
@@ -505,7 +544,9 @@ class TrainingApp:
                     self.stop_btn.configure(state="disabled")
 
                 elif update_type == "error":
-                    self.status_label.configure(text=f"Error: {data}", fg=COLORS["error"])
+                    self.status_label.configure(
+                        text=f"Error: {data}", fg=COLORS["error"]
+                    )
                     self.is_training = False
                     self.start_btn.configure(state="normal")
                     self.stop_btn.configure(state="disabled")
@@ -606,7 +647,9 @@ class TrainingApp:
             w = sp_stats.get("white_wins", 0)
             b = sp_stats.get("black_wins", 0)
             d = sp_stats.get("draws", 0)
-            print(f"\n  Iteration {iteration} complete: Loss={loss:.4f} | W:{w} B:{b} D:{d} | Buffer: {buffer_size}\n")
+            print(
+                f"\n  Iteration {iteration} complete: Loss={loss:.4f} | W:{w} B:{b} D:{d} | Buffer: {buffer_size}\n"
+            )
 
         elif phase == "arena_complete":
             if self.trainer:

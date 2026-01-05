@@ -155,9 +155,13 @@ class SearchTreePanel(tk.Frame):
         # Update title with depth, top_n, and mate info
         mate_str = f" - Mate in {mate_in}" if mate_in else ""
         if depth > 0 and top_n > 0:
-            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}")
+            self._title_label.config(
+                text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}"
+            )
         elif depth > 0:
-            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}")
+            self._title_label.config(
+                text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}"
+            )
         else:
             self._title_label.config(text=f"Search Tree{mate_str}")
         self._tree_data = tree_data

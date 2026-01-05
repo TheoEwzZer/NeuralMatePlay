@@ -119,13 +119,19 @@ class PhaseIndicator(tk.Frame):
         self._dot_canvas.delete("all")
         # Outer glow
         self._dot_canvas.create_oval(
-            1, 1, 11, 11,
+            1,
+            1,
+            11,
+            11,
             fill=color,
             outline="",
         )
         # Inner highlight
         self._dot_canvas.create_oval(
-            3, 3, 7, 7,
+            3,
+            3,
+            7,
+            7,
             fill=self._lighten_color(color),
             outline="",
         )

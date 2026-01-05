@@ -13,62 +13,51 @@ from typing import Optional, Callable
 # Color palette - Modern dark theme
 COLORS = {
     # Background colors
-    "bg_primary": "#1a1a2e",      # Main background
-    "bg_secondary": "#16213e",     # Panel background
-    "bg_tertiary": "#0f3460",      # Elevated elements
-
+    "bg_primary": "#1a1a2e",  # Main background
+    "bg_secondary": "#16213e",  # Panel background
+    "bg_tertiary": "#0f3460",  # Elevated elements
     # Chess board colors
-    "light_square": "#eeeed2",     # Light squares (cream)
-    "dark_square": "#769656",      # Dark squares (green)
-
+    "light_square": "#eeeed2",  # Light squares (cream)
+    "dark_square": "#769656",  # Dark squares (green)
     # Highlight colors
-    "selected": "#baca44",         # Selected square
-    "legal_move": "#646d40",       # Legal move indicator
-    "last_move": "#f6f669",        # Last move highlight
-    "check": "#e94560",            # King in check
-
+    "selected": "#baca44",  # Selected square
+    "legal_move": "#646d40",  # Legal move indicator
+    "last_move": "#f6f669",  # Last move highlight
+    "check": "#e94560",  # King in check
     # Accent colors
-    "accent": "#e94560",           # Primary accent (red-pink)
-    "accent_secondary": "#0ead69", # Secondary accent (green)
+    "accent": "#e94560",  # Primary accent (red-pink)
+    "accent_secondary": "#0ead69",  # Secondary accent (green)
     "accent_tertiary": "#4cc9f0",  # Tertiary accent (blue)
-
     # Text colors
-    "text_primary": "#ffffff",     # Primary text
-    "text_secondary": "#a0a0a0",   # Secondary text
-    "text_muted": "#666666",       # Muted text
-
+    "text_primary": "#ffffff",  # Primary text
+    "text_secondary": "#a0a0a0",  # Secondary text
+    "text_muted": "#666666",  # Muted text
     # Button colors
     "button_bg": "#0f3460",
     "button_hover": "#1a4a7a",
     "button_active": "#e94560",
     "button_disabled": "#2a2a3e",
-
     # Status colors
     "success": "#0ead69",
     "warning": "#ffc107",
     "error": "#e94560",
     "info": "#4cc9f0",
-
     # Border colors
     "border": "#2a2a4e",
     "border_light": "#3a3a5e",
-
     # Progress bar
     "progress_bg": "#2a2a4e",
     "progress_fill": "#e94560",
-
     # Evaluation bar (chess.com style)
     "eval_white": "#ffffff",
     "eval_black": "#1a1a1a",
     "eval_winning": "#4ade80",
     "eval_losing": "#f87171",
     "eval_equal": "#888888",
-
     # Player info
     "player_active": "#3b82f6",
     "player_active_glow": "#60a5fa",
     "captured_bg": "#262640",
-
     # Evaluation graph
     "graph_bg": "#1e1e2e",
     "graph_line": "#60a5fa",
@@ -76,19 +65,16 @@ COLORS = {
     "graph_grid": "#333355",
     "graph_zero": "#666688",
     "graph_marker": "#fbbf24",
-
     # MCTS panel
     "visit_bar": "#8b5cf6",
     "prior_bar": "#06b6d4",
     "q_value_positive": "#4ade80",
     "q_value_negative": "#f87171",
-
     # Move list
     "move_current": "#facc15",
     "move_hover": "#4b5563",
     "move_white_bg": "#2a2a3e",
     "move_black_bg": "#1e1e2e",
-
     # Opening display
     "opening_eco": "#a78bfa",
 }
@@ -103,7 +89,6 @@ FONTS = {
     "small": ("Segoe UI", 10),
     "mono": ("Consolas", 12),
     "mono_small": ("Consolas", 10),
-
     # Chess specific
     "piece": ("Segoe UI Symbol", 36),
     "piece_large": ("Segoe UI Symbol", 48),
@@ -118,18 +103,28 @@ PIECE_UNICODE = {
     "B": "\u2657",  # White Bishop
     "N": "\u2658",  # White Knight
     "P": "\u2659",  # White Pawn
-    "k": "\u265A",  # Black King
-    "q": "\u265B",  # Black Queen
-    "r": "\u265C",  # Black Rook
-    "b": "\u265D",  # Black Bishop
-    "n": "\u265E",  # Black Knight
-    "p": "\u265F",  # Black Pawn
+    "k": "\u265a",  # Black King
+    "q": "\u265b",  # Black Queen
+    "r": "\u265c",  # Black Rook
+    "b": "\u265d",  # Black Bishop
+    "n": "\u265e",  # Black Knight
+    "p": "\u265f",  # Black Pawn
 }
 
 # Alternative piece symbols (for better rendering on some systems)
 PIECE_UNICODE_ALT = {
-    "K": "♔", "Q": "♕", "R": "♖", "B": "♗", "N": "♘", "P": "♙",
-    "k": "♚", "q": "♛", "r": "♜", "b": "♝", "n": "♞", "p": "♟",
+    "K": "♔",
+    "Q": "♕",
+    "R": "♖",
+    "B": "♗",
+    "N": "♘",
+    "P": "♙",
+    "k": "♚",
+    "q": "♛",
+    "r": "♜",
+    "b": "♝",
+    "n": "♞",
+    "p": "♟",
 }
 
 # Status icons for accessibility (don't rely on color alone)
@@ -410,7 +405,10 @@ class ProgressBar(tk.Canvas):
         if self._value > 0:
             fill_width = int(self.width * self._value)
             self.create_rectangle(
-                0, 0, fill_width, self.height,
+                0,
+                0,
+                fill_width,
+                self.height,
                 fill=COLORS["progress_fill"],
                 outline="",
                 tags="progress",
@@ -471,6 +469,7 @@ class Spinner(tk.Canvas):
 
         # Draw arc segments with varying opacity
         import math
+
         for i in range(8):
             start_angle = (self._angle + i * 45) % 360
             # Vary the color intensity for each segment
@@ -483,7 +482,10 @@ class Spinner(tk.Canvas):
             y2 = cy + radius * math.sin(math.radians(start_angle + 30))
 
             self.create_line(
-                cx, cy, x1, y1,
+                cx,
+                cy,
+                x1,
+                y1,
                 fill=self.color if i == 7 else COLORS["text_muted"],
                 width=2,
                 tags="spinner",

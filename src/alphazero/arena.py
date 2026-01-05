@@ -23,6 +23,7 @@ from src.chess_encoding.board_utils import get_raw_material_diff
 @dataclass
 class MatchResult:
     """Result of a single match against one opponent."""
+
     opponent: str
     wins: int = 0
     losses: int = 0
@@ -39,6 +40,7 @@ class MatchResult:
 @dataclass
 class ArenaStats:
     """Complete arena evaluation results."""
+
     vs_random: Optional[MatchResult] = None
     vs_mcts: Optional[MatchResult] = None
     vs_best: Optional[MatchResult] = None
@@ -224,7 +226,9 @@ class PureMCTSPlayer(Player):
                     ucb = float("inf")
                 else:
                     q = total_values[move] / visit_counts[move]
-                    u = self._c_puct * math.sqrt(math.log(total_visits) / visit_counts[move])
+                    u = self._c_puct * math.sqrt(
+                        math.log(total_visits) / visit_counts[move]
+                    )
                     ucb = q + u
 
                 if ucb > best_ucb:
@@ -657,7 +661,9 @@ class Arena:
 
         # 1. vs Random - Sanity check
         if callback:
-            callback({"phase": "arena_match", "opponent": "Random", "status": "starting"})
+            callback(
+                {"phase": "arena_match", "opponent": "Random", "status": "starting"}
+            )
 
         random_player = RandomPlayer(name="Random")
         random_results = self.play_match(current_player, random_player, callback)
@@ -667,13 +673,16 @@ class Arena:
             wins=random_results["player1_wins"],
             losses=random_results["player2_wins"],
             draws=random_results["draws"],
-            score=(random_results["player1_wins"] + 0.5 * random_results["draws"]) / max(1, self.num_games),
+            score=(random_results["player1_wins"] + 0.5 * random_results["draws"])
+            / max(1, self.num_games),
             avg_time=random_results.get("avg_time", 0.0),
         )
 
         # 2. vs Pure MCTS - Intermediate strength check
         if callback:
-            callback({"phase": "arena_match", "opponent": "PureMCTS", "status": "starting"})
+            callback(
+                {"phase": "arena_match", "opponent": "PureMCTS", "status": "starting"}
+            )
 
         mcts_player = PureMCTSPlayer(
             num_simulations=self.num_simulations,
@@ -686,14 +695,21 @@ class Arena:
             wins=mcts_results["player1_wins"],
             losses=mcts_results["player2_wins"],
             draws=mcts_results["draws"],
-            score=(mcts_results["player1_wins"] + 0.5 * mcts_results["draws"]) / max(1, self.num_games),
+            score=(mcts_results["player1_wins"] + 0.5 * mcts_results["draws"])
+            / max(1, self.num_games),
             avg_time=mcts_results.get("avg_time", 0.0),
         )
 
         # 3. vs Best - Promotion check
         if best_network is not None:
             if callback:
-                callback({"phase": "arena_match", "opponent": f"Best #{best_iteration}", "status": "starting"})
+                callback(
+                    {
+                        "phase": "arena_match",
+                        "opponent": f"Best #{best_iteration}",
+                        "status": "starting",
+                    }
+                )
 
             best_player = NetworkPlayer(
                 best_network,
@@ -708,7 +724,8 @@ class Arena:
                 wins=best_results["player1_wins"],
                 losses=best_results["player2_wins"],
                 draws=best_results["draws"],
-                score=(best_results["player1_wins"] + 0.5 * best_results["draws"]) / max(1, self.num_games),
+                score=(best_results["player1_wins"] + 0.5 * best_results["draws"])
+                / max(1, self.num_games),
                 avg_time=best_results.get("avg_time", 0.0),
                 from_iteration=best_iteration,
             )
@@ -724,7 +741,13 @@ class Arena:
         # 4. vs Old - Catastrophic forgetting check
         if old_network is not None:
             if callback:
-                callback({"phase": "arena_match", "opponent": f"Old #{old_iteration}", "status": "starting"})
+                callback(
+                    {
+                        "phase": "arena_match",
+                        "opponent": f"Old #{old_iteration}",
+                        "status": "starting",
+                    }
+                )
 
             old_player = NetworkPlayer(
                 old_network,
@@ -739,7 +762,8 @@ class Arena:
                 wins=old_results["player1_wins"],
                 losses=old_results["player2_wins"],
                 draws=old_results["draws"],
-                score=(old_results["player1_wins"] + 0.5 * old_results["draws"]) / max(1, self.num_games),
+                score=(old_results["player1_wins"] + 0.5 * old_results["draws"])
+                / max(1, self.num_games),
                 avg_time=old_results.get("avg_time", 0.0),
                 from_iteration=old_iteration,
             )
@@ -753,7 +777,13 @@ class Arena:
         # 5. vs Pretrained - Progress tracking against initial model
         if pretrained_network is not None:
             if callback:
-                callback({"phase": "arena_match", "opponent": "Pretrained", "status": "starting"})
+                callback(
+                    {
+                        "phase": "arena_match",
+                        "opponent": "Pretrained",
+                        "status": "starting",
+                    }
+                )
 
             pretrained_player = NetworkPlayer(
                 pretrained_network,
@@ -761,14 +791,20 @@ class Arena:
                 name="Pretrained",
                 history_length=self.history_length,
             )
-            pretrained_results = self.play_match(current_player, pretrained_player, callback)
+            pretrained_results = self.play_match(
+                current_player, pretrained_player, callback
+            )
 
             stats.vs_pretrained = MatchResult(
                 opponent="Pretrained",
                 wins=pretrained_results["player1_wins"],
                 losses=pretrained_results["player2_wins"],
                 draws=pretrained_results["draws"],
-                score=(pretrained_results["player1_wins"] + 0.5 * pretrained_results["draws"]) / max(1, self.num_games),
+                score=(
+                    pretrained_results["player1_wins"]
+                    + 0.5 * pretrained_results["draws"]
+                )
+                / max(1, self.num_games),
                 avg_time=pretrained_results.get("avg_time", 0.0),
             )
 

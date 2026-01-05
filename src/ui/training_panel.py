@@ -12,8 +12,13 @@ import threading
 import queue
 
 from .styles import (
-    COLORS, FONTS, create_styled_button, create_styled_label, ProgressBar,
-    create_tooltip, STATUS_ICONS,
+    COLORS,
+    FONTS,
+    create_styled_button,
+    create_styled_label,
+    ProgressBar,
+    create_tooltip,
+    STATUS_ICONS,
 )
 
 
@@ -55,7 +60,8 @@ class TrainingPanel(tk.Frame):
         """Create panel widgets."""
         # Title
         title = create_styled_label(
-            self, "Self-Play Training",
+            self,
+            "Self-Play Training",
             style="heading",
             bg=COLORS["bg_secondary"],
         )
@@ -66,7 +72,8 @@ class TrainingPanel(tk.Frame):
         status_frame.pack(fill="x", padx=15, pady=5)
 
         self.status_label = create_styled_label(
-            status_frame, "Ready",
+            status_frame,
+            "Ready",
             style="body",
             bg=COLORS["bg_secondary"],
             fg=COLORS["text_secondary"],
@@ -75,7 +82,8 @@ class TrainingPanel(tk.Frame):
 
         self.status_indicator = tk.Canvas(
             status_frame,
-            width=12, height=12,
+            width=12,
+            height=12,
             bg=COLORS["bg_secondary"],
             highlightthickness=0,
         )
@@ -88,7 +96,8 @@ class TrainingPanel(tk.Frame):
 
         # Games progress
         games_label = create_styled_label(
-            progress_frame, "Games:",
+            progress_frame,
+            "Games:",
             style="small",
             bg=COLORS["bg_secondary"],
             fg=COLORS["text_secondary"],
@@ -99,7 +108,8 @@ class TrainingPanel(tk.Frame):
         self.games_progress.pack(fill="x", pady=(2, 5))
 
         self.games_text = create_styled_label(
-            progress_frame, "0 / 0",
+            progress_frame,
+            "0 / 0",
             style="small",
             bg=COLORS["bg_secondary"],
             fg=COLORS["text_muted"],
@@ -108,7 +118,8 @@ class TrainingPanel(tk.Frame):
 
         # Training progress
         train_label = create_styled_label(
-            progress_frame, "Training:",
+            progress_frame,
+            "Training:",
             style="small",
             bg=COLORS["bg_secondary"],
             fg=COLORS["text_secondary"],
@@ -119,7 +130,8 @@ class TrainingPanel(tk.Frame):
         self.train_progress.pack(fill="x", pady=(2, 5))
 
         self.train_text = create_styled_label(
-            progress_frame, "Epoch 0 / 0",
+            progress_frame,
+            "Epoch 0 / 0",
             style="small",
             bg=COLORS["bg_secondary"],
             fg=COLORS["text_muted"],
@@ -234,14 +246,16 @@ class TrainingPanel(tk.Frame):
         btn_frame.pack(fill="x", padx=15, pady=15)
 
         self.start_btn = create_styled_button(
-            btn_frame, "Start Training",
+            btn_frame,
+            "Start Training",
             command=self._on_start_clicked,
             style="accent",
         )
         self.start_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
         self.stop_btn = create_styled_button(
-            btn_frame, "Stop",
+            btn_frame,
+            "Stop",
             command=self._on_stop_clicked,
             style="outline",
         )
@@ -277,7 +291,10 @@ class TrainingPanel(tk.Frame):
         color = color_map.get(status, COLORS["text_muted"])
 
         self.status_indicator.create_oval(
-            2, 2, 10, 10,
+            2,
+            2,
+            10,
+            10,
             fill=color,
             outline="",
         )
@@ -315,8 +332,8 @@ class TrainingPanel(tk.Frame):
             return False
 
         # Ensure .pt extension
-        if not output_file.endswith('.pt'):
-            self.output_var.set(output_file + '.pt')
+        if not output_file.endswith(".pt"):
+            self.output_var.set(output_file + ".pt")
 
         self.validation_label.configure(text="")
         return True
@@ -415,14 +432,10 @@ class TrainingPanel(tk.Frame):
                 self.train_text.configure(text=f"Epoch {epoch} / {epochs}")
 
             if "policy_loss" in data:
-                self.stats["policy_loss"].configure(
-                    text=f"{data['policy_loss']:.4f}"
-                )
+                self.stats["policy_loss"].configure(text=f"{data['policy_loss']:.4f}")
 
             if "value_loss" in data:
-                self.stats["value_loss"].configure(
-                    text=f"{data['value_loss']:.4f}"
-                )
+                self.stats["value_loss"].configure(text=f"{data['value_loss']:.4f}")
 
         elif phase == "iteration_complete":
             iteration = data.get("iteration", 0)
@@ -469,7 +482,9 @@ class TrainingPanel(tk.Frame):
         self.train_text.configure(text="Epoch 0 / 0")
 
         for key in self.stats:
-            self.stats[key].configure(text="-" if key not in ["iteration", "examples"] else "0")
+            self.stats[key].configure(
+                text="-" if key not in ["iteration", "examples"] else "0"
+            )
 
     def get_iterations(self) -> int:
         """Get the number of training iterations."""
@@ -515,7 +530,9 @@ class TrainingConfigDialog(tk.Toplevel):
         main_frame.pack(padx=20, pady=20)
 
         # Title
-        title = create_styled_label(main_frame, "Training Configuration", style="heading")
+        title = create_styled_label(
+            main_frame, "Training Configuration", style="heading"
+        )
         title.pack(pady=(0, 15))
 
         # Config fields
@@ -533,7 +550,8 @@ class TrainingConfigDialog(tk.Toplevel):
 
         for i, (key, label_text, default) in enumerate(fields):
             label = create_styled_label(
-                fields_frame, label_text,
+                fields_frame,
+                label_text,
                 style="body",
             )
             label.grid(row=i, column=0, sticky="w", pady=5)
@@ -556,14 +574,16 @@ class TrainingConfigDialog(tk.Toplevel):
         btn_frame.pack(fill="x", pady=(20, 0))
 
         cancel_btn = create_styled_button(
-            btn_frame, "Cancel",
+            btn_frame,
+            "Cancel",
             command=self._on_cancel,
             style="outline",
         )
         cancel_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
         save_btn = create_styled_button(
-            btn_frame, "Save",
+            btn_frame,
+            "Save",
             command=self._on_save,
             style="accent",
         )

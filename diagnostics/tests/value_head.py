@@ -26,23 +26,18 @@ def test_value_head(network, results: TestResults):
         # === Starting positions ===
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "Start (WTM)", 0),
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1", "Start (BTM)", 0),
-
         # === White missing Knight (-3 material for White) ===
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKB1R w KQkq - 0 1", "W -N (WTM)", -3),
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKB1R b KQkq - 0 1", "W -N (BTM)", +3),
-
         # === Black missing Knight (+3 material for White) ===
         ("rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "B -N (WTM)", +3),
         ("rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1", "B -N (BTM)", -3),
-
         # === White missing Queen (-9 material for White) ===
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1", "W -Q (WTM)", -9),
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR b KQkq - 0 1", "W -Q (BTM)", +9),
-
         # === Black missing Queen (+9 material for White) ===
         ("rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "B -Q (WTM)", +9),
         ("rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1", "B -Q (BTM)", -9),
-
         # === Black missing Pawn (+1 material for White) ===
         ("rnbqkbnr/ppp1pppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "B -P (WTM)", +1),
         ("rnbqkbnr/ppp1pppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1", "B -P (BTM)", -1),
@@ -142,10 +137,14 @@ def test_value_head(network, results: TestResults):
     print(subheader("Perspective Bias Analysis"))
     if wtm_total > 0:
         wtm_pct = wtm_correct * 100 / wtm_total
-        print(f"  White to Move (WTM):   {wtm_correct}/{wtm_total} ({wtm_pct:.0f}%) correct, {wtm_wrong_sign} wrong sign")
+        print(
+            f"  White to Move (WTM):   {wtm_correct}/{wtm_total} ({wtm_pct:.0f}%) correct, {wtm_wrong_sign} wrong sign"
+        )
     if btm_total > 0:
         btm_pct = btm_correct * 100 / btm_total
-        print(f"  Black to Move (BTM):   {btm_correct}/{btm_total} ({btm_pct:.0f}%) correct, {btm_wrong_sign} wrong sign")
+        print(
+            f"  Black to Move (BTM):   {btm_correct}/{btm_total} ({btm_pct:.0f}%) correct, {btm_wrong_sign} wrong sign"
+        )
 
     # Detect perspective bias
     if wtm_total > 0 and btm_total > 0:
@@ -155,8 +154,12 @@ def test_value_head(network, results: TestResults):
 
         if abs(bias) > 0.3:
             if bias > 0:
-                print(f"\n  {Colors.RED}⚠️  PERSPECTIVE BIAS DETECTED: WTM {bias*100:+.0f}% better than BTM{Colors.ENDC}")
-                print(f"  {Colors.YELLOW}   → Network may not generalize well to Black's perspective{Colors.ENDC}")
+                print(
+                    f"\n  {Colors.RED}⚠️  PERSPECTIVE BIAS DETECTED: WTM {bias*100:+.0f}% better than BTM{Colors.ENDC}"
+                )
+                print(
+                    f"  {Colors.YELLOW}   → Network may not generalize well to Black's perspective{Colors.ENDC}"
+                )
                 results.add_issue(
                     "HIGH",
                     "value_head",
@@ -164,7 +167,9 @@ def test_value_head(network, results: TestResults):
                     "Network evaluates differently depending on who is to move",
                 )
             else:
-                print(f"\n  {Colors.RED}⚠️  PERSPECTIVE BIAS DETECTED: BTM {-bias*100:+.0f}% better than WTM{Colors.ENDC}")
+                print(
+                    f"\n  {Colors.RED}⚠️  PERSPECTIVE BIAS DETECTED: BTM {-bias*100:+.0f}% better than WTM{Colors.ENDC}"
+                )
                 results.add_issue(
                     "HIGH",
                     "value_head",
@@ -172,7 +177,9 @@ def test_value_head(network, results: TestResults):
                     "Network evaluates differently depending on who is to move",
                 )
         else:
-            print(f"\n  {Colors.GREEN}✓ No significant perspective bias detected{Colors.ENDC}")
+            print(
+                f"\n  {Colors.GREEN}✓ No significant perspective bias detected{Colors.ENDC}"
+            )
 
     results.add_diagnostic("material_eval", "correct_count", correct)
     results.add_diagnostic("material_eval", "wrong_sign_count", wrong_sign)

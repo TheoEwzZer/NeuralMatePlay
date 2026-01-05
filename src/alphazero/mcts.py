@@ -828,9 +828,7 @@ class MCTS:
                 break
 
             # Check for winning moves first (Q <= -0.9999 = guaranteed win)
-            winning = [
-                (m, c) for m, c in visited_children if c.q_value <= -0.9999
-            ]
+            winning = [(m, c) for m, c in visited_children if c.q_value <= -0.9999]
             if winning:
                 # Use Q-value first, then prior as tiebreaker (network's preference)
                 best_move, best_child = min(
@@ -1126,7 +1124,9 @@ class MCTS:
         actual_branching = self._compute_max_branching(root)
         mate_in = self.get_mate_in(board)
         mate_str = f" - Mate in {mate_in}" if mate_in else ""
-        lines.append(f"Search Tree (depth: {actual_depth}, top: {actual_branching}){mate_str}:")
+        lines.append(
+            f"Search Tree (depth: {actual_depth}, top: {actual_branching}){mate_str}:"
+        )
         lines.append("-" * 60)
 
         for move, child in sorted_children[: min(3, len(sorted_children))]:
