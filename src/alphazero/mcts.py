@@ -184,14 +184,18 @@ class MCTS:
                             policy[idx] = child.visit_count / total_visits
                         else:
                             # Temperature 0: deterministic selection by visits, then Q-value
-                            max_visits = max(c.visit_count for c in root.children.values())
+                            max_visits = max(
+                                c.visit_count for c in root.children.values()
+                            )
                             best_q = min(
-                                c.q_value for c in root.children.values()
+                                c.q_value
+                                for c in root.children.values()
                                 if c.visit_count == max_visits
                             )
                             policy[idx] = (
                                 1.0
-                                if child.visit_count == max_visits and child.q_value == best_q
+                                if child.visit_count == max_visits
+                                and child.q_value == best_q
                                 else 0.0
                             )
 
@@ -245,11 +249,13 @@ class MCTS:
             if root.children:
                 # Check for winning moves first
                 winning = [
-                    (m, c) for m, c in root.children.items()
+                    (m, c)
+                    for m, c in root.children.items()
                     if c.visit_count > 0 and c.q_value <= -0.9999
                 ]
                 if winning:
-                    move = min(winning, key=lambda x: x[1].q_value)[0]
+                    # Use Q-value first, then prior as tiebreaker (network's preference)
+                    move = min(winning, key=lambda x: (x[1].q_value, -x[1].prior))[0]
                 else:
                     move = max(root.children.items(), key=lambda x: x[1].visit_count)[0]
 
@@ -772,15 +778,18 @@ class MCTS:
 
             # Check for winning moves first (Q <= -0.9999 = guaranteed win)
             winning = [
-                (m, c) for m, c in node.children.items()
+                (m, c)
+                for m, c in node.children.items()
                 if c.visit_count > 0 and c.q_value <= -0.9999
             ]
             if winning:
-                best_move = min(winning, key=lambda x: x[1].q_value)[0]
+                # Use Q-value first, then prior as tiebreaker (network's preference)
+                best_move = min(winning, key=lambda x: (x[1].q_value, -x[1].prior))[0]
             else:
                 # Get most visited move (use Q-value as tiebreaker: lower = better for us)
                 best_move = max(
-                    node.children.items(), key=lambda x: (x[1].visit_count, -x[1].q_value)
+                    node.children.items(),
+                    key=lambda x: (x[1].visit_count, -x[1].q_value),
                 )[0]
             pv.append(best_move)
 
@@ -818,15 +827,17 @@ class MCTS:
         stats = []
 
         for move, child in node.children.items():
-            stats.append({
-                "move": move,
-                "visits": child.visit_count,
-                # Negate Q-value: stored Q is from opponent's perspective,
-                # we want value from current player's perspective
-                "q_value": -child.q_value if child.visit_count > 0 else 0.0,
-                "prior": child.prior,
-                "total_value": child.total_value,
-            })
+            stats.append(
+                {
+                    "move": move,
+                    "visits": child.visit_count,
+                    # Negate Q-value: stored Q is from opponent's perspective,
+                    # we want value from current player's perspective
+                    "q_value": -child.q_value if child.visit_count > 0 else 0.0,
+                    "prior": child.prior,
+                    "total_value": child.total_value,
+                }
+            )
 
         # Sort by visits descending
         stats.sort(key=lambda x: x["visits"], reverse=True)
@@ -846,6 +857,56 @@ class MCTS:
         if node.visit_count > 0:
             return node.q_value
         return 0.0
+
+    def get_tree_depth(self, board: chess.Board) -> int:
+        """
+        Get the actual maximum depth of the search tree.
+
+        Args:
+            board: Current position.
+
+        Returns:
+            Maximum depth reached in the tree (0 if no children).
+        """
+        node = self._get_or_create_node(board)
+        return self._compute_tree_depth(node)
+
+    def _compute_tree_depth(self, node: MCTSNode) -> int:
+        """Recursively compute max depth from a node."""
+        if not node.children:
+            return 0
+        max_child_depth = 0
+        for child in node.children.values():
+            if child.visit_count > 0:
+                child_depth = self._compute_tree_depth(child)
+                max_child_depth = max(max_child_depth, child_depth)
+        return 1 + max_child_depth
+
+    def get_max_branching_factor(self, board: chess.Board) -> int:
+        """
+        Get the maximum branching factor (max children) in the tree.
+
+        Args:
+            board: Current position.
+
+        Returns:
+            Maximum number of children at any node with visits > 0.
+        """
+        node = self._get_or_create_node(board)
+        return self._compute_max_branching(node)
+
+    def _compute_max_branching(self, node: MCTSNode) -> int:
+        """Recursively compute max branching factor."""
+        if not node.children:
+            return 0
+        # Count children with visits
+        visited_children = [c for c in node.children.values() if c.visit_count > 0]
+        current_branching = len(visited_children)
+        max_branching = current_branching
+        for child in visited_children:
+            child_max = self._compute_max_branching(child)
+            max_branching = max(max_branching, child_max)
+        return max_branching
 
     def get_search_tree_string(
         self,
@@ -879,7 +940,10 @@ class MCTS:
         # Sort children by visit count (use Q-value as tiebreaker: lower = better for us)
         sorted_children = sorted(
             root.children.items(),
-            key=lambda x: (x[1].visit_count, -x[1].q_value if x[1].visit_count > 0 else x[1].prior),
+            key=lambda x: (
+                x[1].visit_count,
+                -x[1].q_value if x[1].visit_count > 0 else x[1].prior,
+            ),
             reverse=True,
         )
 
@@ -913,7 +977,9 @@ class MCTS:
             lines.append("")
 
         # Show tree structure for top moves
-        lines.append("Search Tree (depth limited):")
+        actual_depth = self._compute_tree_depth(root)
+        actual_branching = self._compute_max_branching(root)
+        lines.append(f"Search Tree (depth: {actual_depth}, top: {actual_branching}):")
         lines.append("-" * 60)
 
         for move, child in sorted_children[: min(3, len(sorted_children))]:
@@ -997,8 +1063,7 @@ class MCTS:
             for child_move, child_node in sorted_children[:top_n]:
                 if child_node.visit_count > 0:
                     child_data = self._build_tree_node_data(
-                        next_board, child_move, child_node,
-                        depth + 1, max_depth, top_n
+                        next_board, child_move, child_node, depth + 1, max_depth, top_n
                     )
                     node_data["children"].append(child_data)
 

@@ -71,6 +71,7 @@ class TrainingConfig:
     temperature_moves: int = 30  # Use temperature=1 for first N moves
     dirichlet_alpha: float = 0.3
     dirichlet_epsilon: float = 0.25
+    c_puct: float = 1.5  # Exploration constant (higher = more exploration)
 
     # History
     history_length: int = DEFAULT_HISTORY_LENGTH
@@ -428,6 +429,7 @@ class AlphaZeroTrainer:
             selfplay_network,
             num_simulations=self.config.num_simulations,
             batch_size=self.config.mcts_batch_size,
+            c_puct=self.config.c_puct,
             dirichlet_alpha=self.config.dirichlet_alpha,
             dirichlet_epsilon=self.config.dirichlet_epsilon,
             history_length=self.config.history_length,

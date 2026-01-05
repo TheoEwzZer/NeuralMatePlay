@@ -25,7 +25,7 @@ class EvalBar(tk.Canvas):
         self,
         parent: tk.Widget,
         height: int = 720,
-        width: int = 28,
+        width: int = 35,
         **kwargs,
     ):
         bg = kwargs.pop("bg", COLORS["bg_secondary"])
@@ -59,7 +59,10 @@ class EvalBar(tk.Canvas):
 
         # Background (border effect)
         self.create_rectangle(
-            0, 0, w, h,
+            0,
+            0,
+            w,
+            h,
             fill=COLORS["border"],
             outline="",
         )
@@ -75,8 +78,10 @@ class EvalBar(tk.Canvas):
         white_height = int(bar_height * white_ratio)
         if white_height > 0:
             self.create_rectangle(
-                padding, padding,
-                padding + bar_width, padding + white_height,
+                padding,
+                padding,
+                padding + bar_width,
+                padding + white_height,
                 fill=COLORS["eval_white"],
                 outline="",
             )
@@ -85,8 +90,10 @@ class EvalBar(tk.Canvas):
         black_height = bar_height - white_height
         if black_height > 0:
             self.create_rectangle(
-                padding, padding + white_height,
-                padding + bar_width, padding + bar_height,
+                padding,
+                padding + white_height,
+                padding + bar_width,
+                padding + bar_height,
                 fill=COLORS["eval_black"],
                 outline="",
             )
@@ -94,7 +101,10 @@ class EvalBar(tk.Canvas):
         # Center line (equal position marker)
         center_y = h // 2
         self.create_line(
-            0, center_y, w, center_y,
+            0,
+            center_y,
+            w,
+            center_y,
             fill=COLORS["eval_equal"],
             width=1,
             dash=(2, 2),
@@ -129,15 +139,18 @@ class EvalBar(tk.Canvas):
 
         # Text background for readability
         self.create_rectangle(
-            2, y - 10,
-            w - 2, y + 10,
+            2,
+            y - 10,
+            w - 2,
+            y + 10,
             fill=bg_color,
             outline="",
             tags="eval_text",
         )
 
         self.create_text(
-            w // 2, y,
+            w // 2,
+            y,
             text=text,
             font=("Segoe UI", 9, "bold"),
             fill=fill,
@@ -175,8 +188,9 @@ class EvalBar(tk.Canvas):
 
         def animate_step():
             self._animated_eval += step_size
-            if (step_size > 0 and self._animated_eval >= target) or \
-               (step_size < 0 and self._animated_eval <= target):
+            if (step_size > 0 and self._animated_eval >= target) or (
+                step_size < 0 and self._animated_eval <= target
+            ):
                 self._animated_eval = target
                 self._draw_bar()
             else:
@@ -234,7 +248,10 @@ class EvalBarHorizontal(tk.Canvas):
 
         # Background
         self.create_rectangle(
-            0, 0, w, h,
+            0,
+            0,
+            w,
+            h,
             fill=COLORS["border"],
             outline="",
         )
@@ -247,8 +264,10 @@ class EvalBarHorizontal(tk.Canvas):
         black_width = int((w - 2 * padding) * (1 - white_ratio))
         if black_width > 0:
             self.create_rectangle(
-                padding, padding,
-                padding + black_width, h - padding,
+                padding,
+                padding,
+                padding + black_width,
+                h - padding,
                 fill=COLORS["eval_black"],
                 outline="",
             )
@@ -257,8 +276,10 @@ class EvalBarHorizontal(tk.Canvas):
         white_width = (w - 2 * padding) - black_width
         if white_width > 0:
             self.create_rectangle(
-                padding + black_width, padding,
-                w - padding, h - padding,
+                padding + black_width,
+                padding,
+                w - padding,
+                h - padding,
                 fill=COLORS["eval_white"],
                 outline="",
             )
@@ -266,7 +287,10 @@ class EvalBarHorizontal(tk.Canvas):
         # Center marker
         center_x = w // 2
         self.create_line(
-            center_x, 0, center_x, h,
+            center_x,
+            0,
+            center_x,
+            h,
             fill=COLORS["eval_equal"],
             width=1,
         )
@@ -278,7 +302,8 @@ class EvalBarHorizontal(tk.Canvas):
             text = f"{self._evaluation:+.1f}" if self._evaluation != 0 else "="
 
         self.create_text(
-            w // 2, h // 2,
+            w // 2,
+            h // 2,
             text=text,
             font=("Segoe UI", 8, "bold"),
             fill=COLORS["text_primary"],

@@ -13,6 +13,7 @@ from typing import Any, Optional, List
 import threading
 import queue
 import os
+import json
 
 try:
     import chess
@@ -104,6 +105,21 @@ class ChessGameApp:
         self.history_length = history_length
         self.verbose = verbose
         self.use_pure_mcts = network_path and network_path.lower() == "mcts"
+
+        # Load c_puct from config.json
+        self.c_puct = 1.5  # default
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "config",
+            "config.json",
+        )
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+                    self.c_puct = config.get("training", {}).get("c_puct", 1.5)
+            except Exception:
+                pass  # Use default on error
 
         # Game state
         self.game_mode = "human_vs_ai"
@@ -361,7 +377,7 @@ class ChessGameApp:
         self.eval_bar = EvalBar(
             board_container,
             height=680,
-            width=28,
+            width=35,
         )
         self.eval_bar.pack(side="left", padx=(8, 0))
 
@@ -480,6 +496,7 @@ class ChessGameApp:
                     num_simulations=self.num_simulations,
                     batch_size=self.mcts_batch_size,
                     history_length=self.history_length,
+                    c_puct=self.c_puct,
                 )
                 self.network_status.configure(
                     text=f"Loaded: {os.path.basename(self.network_path)}",
@@ -501,6 +518,7 @@ class ChessGameApp:
                     num_simulations=self.num_simulations,
                     batch_size=self.mcts_batch_size,
                     history_length=self.history_length,
+                    c_puct=self.c_puct,
                 )
                 self.network_status.configure(
                     text="Untrained network (random)",
@@ -804,6 +822,8 @@ class ChessGameApp:
             root_value = 0.0
             mcts_stats = None
             tree_data = None
+            tree_depth = 0
+            tree_branching = 0
 
             if self.use_pure_mcts and self.pure_mcts_player is not None:
                 move = self.pure_mcts_player.select_move(board)
@@ -813,10 +833,12 @@ class ChessGameApp:
                 # Capture MCTS statistics for display
                 mcts_stats = self.mcts.get_root_statistics(board)
                 root_value = self.mcts.get_root_value(board)
-                tree_data = self.mcts.get_search_tree_data(board, top_n=3, max_depth=3)
+                tree_data = self.mcts.get_search_tree_data(board, top_n=5, max_depth=5)
+                tree_depth = self.mcts.get_tree_depth(board)
+                tree_branching = self.mcts.get_max_branching_factor(board)
 
                 if self.verbose and not self.ai_cancelled:
-                    self.mcts.print_search_tree(board, top_n=5, max_depth=3)
+                    self.mcts.print_search_tree(board, top_n=20, max_depth=20)
 
             if not self.ai_cancelled and move:
                 self.update_queue.put(
@@ -827,6 +849,8 @@ class ChessGameApp:
                             "mcts_stats": mcts_stats,
                             "root_value": root_value,
                             "tree_data": tree_data,
+                            "tree_depth": tree_depth,
+                            "tree_branching": tree_branching,
                         },
                     )
                 )
@@ -880,6 +904,8 @@ class ChessGameApp:
         mcts_stats = data.get("mcts_stats")
         root_value = data.get("root_value", 0.0)
         tree_data = data.get("tree_data")
+        tree_depth = data.get("tree_depth", 0)
+        tree_branching = data.get("tree_branching", 0)
 
         board = self.board_widget.get_board()
 
@@ -890,7 +916,7 @@ class ChessGameApp:
 
         # Update Search Tree panel
         if tree_data:
-            self.search_tree_panel.update_tree(tree_data)
+            self.search_tree_panel.update_tree(tree_data, tree_depth, tree_branching)
 
         # Update Value label
         value_color = (
@@ -1120,6 +1146,7 @@ class ChessGameApp:
                 num_simulations=self.num_simulations,
                 batch_size=self.mcts_batch_size,
                 history_length=self.history_length,
+                c_puct=self.c_puct,
             )
 
         except Exception as e:

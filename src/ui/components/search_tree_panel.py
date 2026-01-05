@@ -53,14 +53,14 @@ class SearchTreePanel(tk.Frame):
         title_frame = tk.Frame(self, bg=bg)
         title_frame.pack(fill=tk.X, padx=10, pady=(8, 5))
 
-        title = tk.Label(
+        self._title_label = tk.Label(
             title_frame,
             text="Search Tree",
             font=("Segoe UI", 11, "bold"),
             fg=COLORS["text_primary"],
             bg=bg,
         )
-        title.pack(side=tk.LEFT)
+        self._title_label.pack(side=tk.LEFT)
 
         # Expand/Collapse all buttons
         btn_frame = tk.Frame(title_frame, bg=bg)
@@ -135,14 +135,25 @@ class SearchTreePanel(tk.Frame):
         """Handle mousewheel."""
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    def update_tree(self, tree_data: List[Dict[str, Any]]) -> None:
+    def update_tree(
+        self, tree_data: List[Dict[str, Any]], depth: int = 0, top_n: int = 0
+    ) -> None:
         """
         Update the tree display with new data.
 
         Args:
             tree_data: List of root nodes, each with keys:
                        san, visits, q_value, prior, children
+            depth: Actual max depth of the search tree.
+            top_n: Number of top moves shown per level.
         """
+        # Update title with depth and top_n
+        if depth > 0 and top_n > 0:
+            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n})")
+        elif depth > 0:
+            self._title_label.config(text=f"Search Tree (depth: {depth}, top: {top_n})")
+        else:
+            self._title_label.config(text="Search Tree")
         self._tree_data = tree_data
         # Keep first level expanded by default
         self._expanded = {node["san"] for node in tree_data}
