@@ -68,17 +68,9 @@ coverage.xml
 # Continuous Claude cache (local only)
 .claude/cache/
 
-# Training data (large files)
-data/*.pgn
-data/*.csv
-data/*.zst
-
-# Chunked data
-data/chunks/
+# Datas
+data/
 
 # Models
-models/
-models_save/
-
-# Checkpoints
-checkpoints/
+*.pkl
+*.pt
