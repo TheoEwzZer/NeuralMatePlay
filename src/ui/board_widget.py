@@ -231,14 +231,19 @@ class ChessBoardWidget(tk.Canvas):
         self._drag_scale_start_time: float | None = None
         self._drag_scale_duration: float = 0.1
         self._drag_scale_on_complete: callable = None
+        # Drag position animation state
+        self._drag_pos_start: tuple[int, int] | None = None
+        self._drag_pos_target: tuple[int, int] | None = None
+        self._drag_pos_anim_id: int | None = None
+        self._drag_pos_start_time: float | None = None
+        self._drag_pos_duration: float = 0.15
+        self._drag_pos_on_complete: callable = None
 
         # Interaction state
         self.interactive = True
         self.player_color: chess.Color | None = chess.WHITE  # None = both colors
 
         # Animation state
-        self._invalid_move_flash: int | None = None
-        self._flash_count = 0
         self._animation_id: int | None = None
         self._animating = False
         self._anim_rook: dict | None = None  # For castling animation
@@ -499,6 +504,54 @@ class ChessBoardWidget(tk.Canvas):
                 self._drag_scale_on_complete = None
                 callback()
 
+    def _start_drag_pos_animation(
+        self, target: tuple[int, int], on_complete: callable = None
+    ) -> None:
+        """Start a position animation for the dragged piece."""
+        import time
+
+        if self._drag_pos_anim_id:
+            self.after_cancel(self._drag_pos_anim_id)
+            self._drag_pos_anim_id = None
+        self._drag_pos_start = self.drag_pos
+        self._drag_pos_target = target
+        self._drag_pos_start_time = time.time()
+        self._drag_pos_on_complete = on_complete
+        self._animate_drag_pos()
+
+    def _animate_drag_pos(self) -> None:
+        """Animate the drag position towards target."""
+        import time
+
+        if self._drag_pos_start_time is None or self._drag_pos_start is None:
+            return
+
+        elapsed = time.time() - self._drag_pos_start_time
+        progress = min(elapsed / self._drag_pos_duration, 1.0)
+
+        # Ease-out cubic for smooth deceleration
+        eased = 1 - (1 - progress) ** 3
+
+        start_x, start_y = self._drag_pos_start
+        target_x, target_y = self._drag_pos_target
+        current_x = int(start_x + (target_x - start_x) * eased)
+        current_y = int(start_y + (target_y - start_y) * eased)
+        self.drag_pos = (current_x, current_y)
+        self._draw_board()
+
+        if progress < 1.0:
+            self._drag_pos_anim_id = self.after(16, self._animate_drag_pos)
+        else:
+            self.drag_pos = self._drag_pos_target
+            self._drag_pos_anim_id = None
+            self._drag_pos_start_time = None
+            self._drag_pos_start = None
+            self._drag_pos_target = None
+            if self._drag_pos_on_complete:
+                callback = self._drag_pos_on_complete
+                self._drag_pos_on_complete = None
+                callback()
+
     def _draw_piece(self, square: int) -> None:
         """Draw a piece on a square."""
         piece = self.board.piece_at(square)
@@ -698,7 +751,7 @@ class ChessBoardWidget(tk.Canvas):
 
         # Start scale-up animation when drag begins
         if not self.dragging:
-            self._start_drag_scale_animation(1.15)
+            self._start_drag_scale_animation(2)
 
         self.dragging = True
         self.drag_pos = (event.x, event.y)
@@ -719,46 +772,9 @@ class ChessBoardWidget(tk.Canvas):
 
         target_square = self._coords_to_square(event.x, event.y)
         move = self._find_move(self.drag_from, target_square)
-
-        # Determine final square and snap piece there
-        if move:
-            final_square = move.to_square
-        else:
-            final_square = self.drag_from
-
-        # Snap drag position to center of final square
-        fx, fy = self._square_to_coords(final_square)
-        self.drag_pos = (fx + self.square_size // 2, fy + self.square_size // 2)
         self._drag_hover_square = None
 
-        # Track where the shrink animation will play (hides board piece there)
-        self._shrink_at_square = final_square
-
-        # Process move/flash/redraw FIRST (before shrink animation)
-        if move:
-            # Apply the move immediately
-            self.selected_square = None
-            self.legal_moves = set()
-            self.drag_from = None
-            self.last_move = move
-            self.board.push(move)
-            if self.on_move:
-                self.on_move(move)
-        elif target_square != self.drag_from:
-            # Flash invalid move
-            self._flash_invalid_move(target_square)
-            self.selected_square = None
-            self.legal_moves = set()
-            self.drag_from = None
-        else:
-            # Same square - just clear selection
-            self.selected_square = None
-            self.legal_moves = set()
-            self.drag_from = None
-
-        self._draw_board()
-
-        # Now animate scale down
+        # Scale down callback (used after position animation if needed)
         def on_scale_complete():
             self.dragging = False
             self.drag_pos = None
@@ -767,7 +783,69 @@ class ChessBoardWidget(tk.Canvas):
             self._shrink_at_square = None
             self._draw_board()
 
-        self._start_drag_scale_animation(1.0, on_scale_complete)
+        if move:
+            # Valid move: snap to destination, process move, shrink
+            final_square = move.to_square
+            fx, fy = self._square_to_coords(final_square)
+            self.drag_pos = (fx + self.square_size // 2, fy + self.square_size // 2)
+            self._shrink_at_square = final_square
+
+            # Apply the move immediately
+            self.selected_square = None
+            self.legal_moves = set()
+            self.drag_from = None
+            self.last_move = move
+            self.board.push(move)
+            if self.on_move:
+                self.on_move(move)
+
+            self._draw_board()
+            self._start_drag_scale_animation(1.0, on_scale_complete)
+
+        elif target_square != self.drag_from:
+            # Invalid move: animate back AND shrink simultaneously
+            original_square = self.drag_from
+            ox, oy = self._square_to_coords(original_square)
+            target_pos = (ox + self.square_size // 2, oy + self.square_size // 2)
+
+            # Clear selection state
+            self.selected_square = None
+            self.legal_moves = set()
+            self.drag_from = None
+            self._shrink_at_square = original_square
+
+            # Track completion of both animations
+            anim_complete = {"pos": False, "scale": False}
+
+            def check_both_complete():
+                if anim_complete["pos"] and anim_complete["scale"]:
+                    self.dragging = False
+                    self.drag_pos = None
+                    self.drag_piece = None
+                    self._drag_scale = 1.0
+                    self._shrink_at_square = None
+                    self._draw_board()
+
+            def on_pos_done():
+                anim_complete["pos"] = True
+                check_both_complete()
+
+            def on_scale_done():
+                anim_complete["scale"] = True
+                check_both_complete()
+
+            # Start both animations simultaneously
+            self._start_drag_pos_animation(target_pos, on_pos_done)
+            self._start_drag_scale_animation(1.0, on_scale_done)
+
+        else:
+            # Same square: just shrink in place
+            self._shrink_at_square = self.drag_from
+            self.selected_square = None
+            self.legal_moves = set()
+            self.drag_from = None
+            self._draw_board()
+            self._start_drag_scale_animation(1.0, on_scale_complete)
 
     def _find_move(self, from_sq: int, to_sq: int) -> chess.Move | None:
         """Find a legal move from the given squares."""
@@ -876,42 +954,6 @@ class ChessBoardWidget(tk.Canvas):
         self.legal_moves = set()
         self.last_move = None
         self._draw_board()
-
-    def _flash_invalid_move(self, square: int) -> None:
-        """Flash a square red to indicate invalid move."""
-        if self._invalid_move_flash is not None:
-            self.after_cancel(self._invalid_move_flash)
-
-        self._flash_count = 0
-        self._do_flash(square)
-
-    def _do_flash(self, square: int) -> None:
-        """Perform one flash cycle."""
-        if self._flash_count >= 4:  # 2 complete flash cycles
-            self._invalid_move_flash = None
-            self._draw_board()
-            return
-
-        x, y = self._square_to_coords(square)
-
-        if self._flash_count % 2 == 0:
-            # Flash red
-            self.create_rectangle(
-                x,
-                y,
-                x + self.square_size,
-                y + self.square_size,
-                fill=COLORS["error"],
-                outline="",
-                tags="flash",
-            )
-        else:
-            # Restore normal
-            self.delete("flash")
-            self._draw_board()
-
-        self._flash_count += 1
-        self._invalid_move_flash = self.after(100, lambda: self._do_flash(square))
 
     def animate_move(
         self,
