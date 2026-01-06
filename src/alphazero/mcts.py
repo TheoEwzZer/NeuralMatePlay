@@ -1123,7 +1123,12 @@ class MCTS:
         actual_depth = self._compute_tree_depth(root)
         actual_branching = self._compute_max_branching(root)
         mate_in = self.get_mate_in(board)
-        mate_str = f" - Mate in {mate_in}" if mate_in else ""
+        if mate_in == 1:
+            mate_str = " - Mate"
+        elif mate_in:
+            mate_str = f" - Mate in {mate_in - 1}"
+        else:
+            mate_str = ""
         lines.append(
             f"Search Tree (depth: {actual_depth}, top: {actual_branching}){mate_str}:"
         )

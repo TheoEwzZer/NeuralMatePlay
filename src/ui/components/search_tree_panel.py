@@ -153,12 +153,14 @@ class SearchTreePanel(tk.Frame):
             mate_in: Number of moves to mate, or None if no forced mate.
         """
         # Update title with depth, top_n, and mate info
-        mate_str = f" - Mate in {mate_in}" if mate_in else ""
-        if depth > 0 and top_n > 0:
-            self._title_label.config(
-                text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}"
-            )
-        elif depth > 0:
+        if mate_in == 1:
+            mate_str = " - Mate"
+        elif mate_in:
+            mate_str = f" - Mate in {mate_in - 1}"
+        else:
+            mate_str = ""
+
+        if depth > 0:
             self._title_label.config(
                 text=f"Search Tree (depth: {depth}, top: {top_n}){mate_str}"
             )
