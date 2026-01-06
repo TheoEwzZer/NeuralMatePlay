@@ -20,7 +20,7 @@ COLORS = {
     "light_square": "#ebecd0",  # Light squares (cream)
     "dark_square": "#739552",  # Dark squares (green)
     # Highlight colors
-    "selected": "#baca44",  # Selected square
+    "selected": "#b9ca43",  # Selected square
     "legal_move": "#646d40",  # Legal move indicator
     "last_move": "#f6f669",  # Last move highlight
     "check": "#e94560",  # King in check
