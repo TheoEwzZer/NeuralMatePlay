@@ -1,5 +1,6 @@
 """
 Visual match application for watching two networks play against each other.
+With full MCTS analysis stats for both AIs.
 """
 
 import tkinter as tk
@@ -7,7 +8,7 @@ from tkinter import ttk
 import threading
 import queue
 import time
-from typing import Any
+from typing import Any, Optional
 
 try:
     import chess
@@ -16,11 +17,14 @@ except ImportError:
 
 from .board_widget import ChessBoardWidget
 from .styles import COLORS, FONTS, STATUS_ICONS, create_tooltip
+from .components.mcts_panel import MCTSPanel
+from .components.search_tree_panel import SearchTreePanel
+from .components.eval_graph import EvalGraph
 from src.chess_encoding.board_utils import get_material_count
 
 
 class MatchApp:
-    """Application for watching network vs network matches with visual board."""
+    """Application for watching network vs network matches with full MCTS stats."""
 
     def __init__(
         self,
@@ -40,6 +44,10 @@ class MatchApp:
         self.results = {"player1": 0, "player2": 0, "draws": 0}
         self.current_game = 0
         self.game_log = []
+
+        # Eval history for graphs (one per player perspective)
+        self.eval_history_p1 = []
+        self.eval_history_p2 = []
 
         # Threading
         self.move_queue = queue.Queue()
@@ -64,205 +72,175 @@ class MatchApp:
         self._setup_ui()
 
     def _setup_ui(self):
-        """Setup the main UI."""
+        """Setup the main UI with 3-column layout."""
         self.root = tk.Tk()
         self.root.title(f"NeuralMate Match: {self.name1} vs {self.name2}")
         self.root.configure(bg=COLORS["bg_primary"])
         self.root.resizable(True, True)
-        self.root.geometry("1400x850")  # Default size for 1080p
-        self.root.minsize(1100, 700)
+        self.root.geometry("1920x1080")
+        self.root.minsize(1600, 900)
 
-        # Main container
+        # Main container with 3 columns
         main_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
-        main_frame.pack(padx=40, pady=30, fill="both", expand=True)
+        main_frame.pack(padx=20, pady=20, fill="both", expand=True)
 
-        # Left side: Board (larger for 1080p)
-        board_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"])
-        board_frame.pack(side=tk.LEFT, padx=(0, 40))
+        # Configure grid columns
+        main_frame.columnconfigure(0, weight=1, minsize=450)  # Left stats
+        main_frame.columnconfigure(1, weight=0, minsize=750)  # Center board
+        main_frame.columnconfigure(2, weight=1, minsize=450)  # Right stats
+        main_frame.rowconfigure(0, weight=1)
 
-        self.board_widget = ChessBoardWidget(board_frame, size=720)
-        self.board_widget.interactive = False  # View only
-        self.board_widget.pack()
+        # Left panel: Player 1 stats
+        left_panel = tk.Frame(main_frame, bg=COLORS["bg_secondary"])
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self._create_stats_panel(left_panel, "player1", self.name1)
 
-        # Right side: Info panel (wider)
-        info_frame = tk.Frame(main_frame, bg=COLORS["bg_secondary"], width=450)
-        info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        info_frame.pack_propagate(False)
+        # Center panel: Board + Controls
+        center_panel = tk.Frame(main_frame, bg=COLORS["bg_primary"])
+        center_panel.grid(row=0, column=1, sticky="ns", padx=10)
+        self._create_center_panel(center_panel)
 
-        # Title
-        title = tk.Label(
-            info_frame,
-            text="Network Match",
+        # Right panel: Player 2 stats
+        right_panel = tk.Frame(main_frame, bg=COLORS["bg_secondary"])
+        right_panel.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        self._create_stats_panel(right_panel, "player2", self.name2)
+
+        # Bind close event
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _create_stats_panel(self, parent: tk.Frame, player_id: str, name: str):
+        """Create a stats panel for one player."""
+        # Header with name and score
+        header_frame = tk.Frame(parent, bg=COLORS["bg_tertiary"])
+        header_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        # Color indicator
+        color_indicator = tk.Canvas(
+            header_frame,
+            width=24,
+            height=24,
+            bg=COLORS["bg_tertiary"],
+            highlightthickness=0,
+        )
+        color_indicator.pack(side=tk.LEFT, padx=(10, 5))
+        setattr(self, f"{player_id}_color_indicator", color_indicator)
+
+        # Name
+        name_label = tk.Label(
+            header_frame,
+            text=name,
             font=FONTS["title"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_tertiary"],
+        )
+        name_label.pack(side=tk.LEFT, padx=5)
+
+        # Score (W-D-L format)
+        score_label = tk.Label(
+            header_frame,
+            text="W:0 D:0 L:0",
+            font=FONTS["body_bold"],
+            fg=COLORS["accent"],
+            bg=COLORS["bg_tertiary"],
+        )
+        score_label.pack(side=tk.RIGHT, padx=10)
+        setattr(self, f"{player_id}_score_label", score_label)
+
+        # MCTS Analysis Panel
+        mcts_frame = tk.Frame(parent, bg=COLORS["bg_secondary"])
+        mcts_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        mcts_panel = MCTSPanel(mcts_frame)
+        mcts_panel.pack(fill=tk.X)
+        setattr(self, f"{player_id}_mcts_panel", mcts_panel)
+
+        # Search Tree Panel
+        tree_frame = tk.Frame(parent, bg=COLORS["bg_secondary"])
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        search_tree = SearchTreePanel(tree_frame)
+        search_tree.pack(fill=tk.BOTH, expand=True)
+        setattr(self, f"{player_id}_search_tree", search_tree)
+
+        # Eval Graph
+        eval_frame = tk.Frame(parent, bg=COLORS["bg_secondary"])
+        eval_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        eval_graph = EvalGraph(eval_frame, height=120)
+        eval_graph.pack(fill=tk.X)
+        setattr(self, f"{player_id}_eval_graph", eval_graph)
+
+        # Value label
+        value_frame = tk.Frame(parent, bg=COLORS["bg_secondary"])
+        value_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        value_label = tk.Label(
+            value_frame,
+            text="Value: --",
+            font=FONTS["mono"],
             fg=COLORS["text_primary"],
             bg=COLORS["bg_secondary"],
         )
-        title.pack(pady=(15, 10))
+        value_label.pack()
+        setattr(self, f"{player_id}_value_label", value_label)
 
-        # Players frame
-        players_frame = tk.Frame(info_frame, bg=COLORS["bg_secondary"])
-        players_frame.pack(fill=tk.X, padx=15, pady=5)
+    def _create_center_panel(self, parent: tk.Frame):
+        """Create the center panel with board and controls."""
+        # Board
+        board_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
+        board_frame.pack(pady=(0, 10))
 
-        # Player 1
-        p1_frame = tk.Frame(players_frame, bg=COLORS["bg_tertiary"], padx=10, pady=8)
-        p1_frame.pack(fill=tk.X, pady=2)
-
-        # Color indicator (canvas circle)
-        self.p1_color_indicator = tk.Canvas(
-            p1_frame,
-            width=20,
-            height=20,
-            bg=COLORS["bg_tertiary"],
-            highlightthickness=0,
-        )
-        self.p1_color_indicator.pack(side=tk.LEFT)
-
-        tk.Label(
-            p1_frame,
-            text=self.name1,
-            font=FONTS["body_bold"],
-            fg=COLORS["text_primary"],
-            bg=COLORS["bg_tertiary"],
-        ).pack(side=tk.LEFT, padx=5)
-
-        self.p1_score_label = tk.Label(
-            p1_frame,
-            text="0",
-            font=FONTS["body_bold"],
-            fg=COLORS["accent"],
-            bg=COLORS["bg_tertiary"],
-        )
-        self.p1_score_label.pack(side=tk.RIGHT)
-
-        # Player 2
-        p2_frame = tk.Frame(players_frame, bg=COLORS["bg_tertiary"], padx=10, pady=8)
-        p2_frame.pack(fill=tk.X, pady=2)
-
-        # Color indicator (canvas circle)
-        self.p2_color_indicator = tk.Canvas(
-            p2_frame,
-            width=20,
-            height=20,
-            bg=COLORS["bg_tertiary"],
-            highlightthickness=0,
-        )
-        self.p2_color_indicator.pack(side=tk.LEFT)
-
-        tk.Label(
-            p2_frame,
-            text=self.name2,
-            font=FONTS["body_bold"],
-            fg=COLORS["text_primary"],
-            bg=COLORS["bg_tertiary"],
-        ).pack(side=tk.LEFT, padx=5)
-
-        self.p2_score_label = tk.Label(
-            p2_frame,
-            text="0",
-            font=FONTS["body_bold"],
-            fg=COLORS["accent"],
-            bg=COLORS["bg_tertiary"],
-        )
-        self.p2_score_label.pack(side=tk.RIGHT)
-
-        # Draws
-        draws_frame = tk.Frame(players_frame, bg=COLORS["bg_tertiary"], padx=10, pady=8)
-        draws_frame.pack(fill=tk.X, pady=2)
-
-        tk.Label(
-            draws_frame,
-            text="Draws",
-            font=FONTS["body"],
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_tertiary"],
-        ).pack(side=tk.LEFT, padx=(28, 5))
-
-        self.draws_label = tk.Label(
-            draws_frame,
-            text="0",
-            font=FONTS["body_bold"],
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_tertiary"],
-        )
-        self.draws_label.pack(side=tk.RIGHT)
+        self.board_widget = ChessBoardWidget(board_frame, size=700)
+        self.board_widget.interactive = False
+        self.board_widget.pack()
 
         # Game info
-        game_frame = tk.Frame(info_frame, bg=COLORS["bg_secondary"])
-        game_frame.pack(fill=tk.X, padx=15, pady=15)
+        info_frame = tk.Frame(parent, bg=COLORS["bg_tertiary"], padx=15, pady=10)
+        info_frame.pack(fill=tk.X, pady=5)
 
+        # Game counter
         self.game_label = tk.Label(
-            game_frame,
+            info_frame,
             text=f"Game 0/{self.num_games}",
             font=FONTS["body_bold"],
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_tertiary"],
         )
         self.game_label.pack()
 
+        # Move counter
         self.move_label = tk.Label(
-            game_frame,
+            info_frame,
             text="Move: 0",
             font=FONTS["body"],
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_tertiary"],
         )
         self.move_label.pack()
 
+        # Status
         self.status_label = tk.Label(
-            game_frame,
+            info_frame,
             text="Ready",
-            font=FONTS["body"],
+            font=FONTS["body_bold"],
             fg=COLORS["warning"],
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_tertiary"],
         )
         self.status_label.pack(pady=5)
 
         # Material display
-        material_frame = tk.Frame(game_frame, bg=COLORS["bg_secondary"])
-        material_frame.pack(fill=tk.X, pady=5)
-
         self.material_label = tk.Label(
-            material_frame,
+            info_frame,
             text="Material: 39 - 39 (=)",
             font=FONTS["mono"],
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_tertiary"],
         )
         self.material_label.pack()
 
-        # Game log
-        log_frame = tk.Frame(info_frame, bg=COLORS["bg_secondary"])
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
-
-        tk.Label(
-            log_frame,
-            text="Game Log",
-            font=FONTS["body_bold"],
-            fg=COLORS["text_primary"],
-            bg=COLORS["bg_secondary"],
-        ).pack(anchor=tk.W)
-
-        self.log_text = tk.Text(
-            log_frame,
-            height=12,
-            width=50,
-            font=("Consolas", 10),
-            bg=COLORS["bg_tertiary"],
-            fg=COLORS["text_primary"],
-            relief=tk.FLAT,
-            state=tk.DISABLED,
-            wrap=tk.WORD,
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True, pady=5)
-
-        # Add scrollbar
-        log_scroll = tk.Scrollbar(log_frame, command=self.log_text.yview)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-
         # Controls
-        controls_frame = tk.Frame(info_frame, bg=COLORS["bg_secondary"])
-        controls_frame.pack(fill=tk.X, padx=15, pady=15)
+        controls_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
+        controls_frame.pack(fill=tk.X, pady=10)
 
         self.start_btn = tk.Button(
             controls_frame,
@@ -272,10 +250,10 @@ class MatchApp:
             bg=COLORS["success"],
             fg="white",
             relief=tk.FLAT,
-            padx=15,
-            pady=5,
+            padx=20,
+            pady=8,
         )
-        self.start_btn.pack(side=tk.LEFT, padx=2)
+        self.start_btn.pack(side=tk.LEFT, padx=5)
 
         self.pause_btn = tk.Button(
             controls_frame,
@@ -285,11 +263,11 @@ class MatchApp:
             bg=COLORS["warning"],
             fg="white",
             relief=tk.FLAT,
-            padx=15,
-            pady=5,
+            padx=20,
+            pady=8,
             state=tk.DISABLED,
         )
-        self.pause_btn.pack(side=tk.LEFT, padx=2)
+        self.pause_btn.pack(side=tk.LEFT, padx=5)
 
         self.stop_btn = tk.Button(
             controls_frame,
@@ -299,87 +277,150 @@ class MatchApp:
             bg=COLORS["error"],
             fg="white",
             relief=tk.FLAT,
-            padx=15,
-            pady=5,
+            padx=20,
+            pady=8,
             state=tk.DISABLED,
         )
-        self.stop_btn.pack(side=tk.LEFT, padx=2)
-
-        # Add tooltips
-        create_tooltip(self.start_btn, "Start the match between networks")
-        create_tooltip(self.pause_btn, "Pause/Resume the match")
-        create_tooltip(self.stop_btn, "Stop the match")
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
 
         # Speed control
-        speed_frame = tk.Frame(info_frame, bg=COLORS["bg_secondary"])
-        speed_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
+        speed_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
+        speed_frame.pack(fill=tk.X, pady=5)
 
         tk.Label(
             speed_frame,
-            text="Speed:",
+            text="Delay:",
             font=FONTS["body"],
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_primary"],
         ).pack(side=tk.LEFT)
 
         self.speed_var = tk.DoubleVar(value=0.0)
         speed_scale = tk.Scale(
             speed_frame,
             from_=0.0,
-            to=1.0,
+            to=2.0,
             resolution=0.1,
             orient=tk.HORIZONTAL,
             variable=self.speed_var,
-            bg=COLORS["bg_secondary"],
+            bg=COLORS["bg_primary"],
             fg=COLORS["text_primary"],
             highlightthickness=0,
-            length=150,
+            length=200,
         )
         speed_scale.pack(side=tk.LEFT, padx=10)
 
-        # Bind close event
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        tk.Label(
+            speed_frame,
+            text="sec",
+            font=FONTS["body"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_primary"],
+        ).pack(side=tk.LEFT)
 
-    def _log(self, message: str):
-        """Add message to log."""
-        self.log_text.configure(state=tk.NORMAL)
-        self.log_text.insert(tk.END, message + "\n")
-        self.log_text.see(tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+        # Tooltips
+        create_tooltip(self.start_btn, "Start the match between networks")
+        create_tooltip(self.pause_btn, "Pause/Resume the match")
+        create_tooltip(self.stop_btn, "Stop the match")
+
+    def _update_color_indicator(self, player_id: str, color: str):
+        """Update the color indicator for a player."""
+        indicator = getattr(self, f"{player_id}_color_indicator")
+        indicator.delete("all")
+
+        if color == "W":
+            indicator.create_oval(3, 3, 21, 21, fill="white", outline="black", width=1)
+        else:
+            indicator.create_oval(3, 3, 21, 21, fill="black", outline="white", width=1)
 
     def _update_scores(self):
-        """Update score labels."""
-        self.p1_score_label.configure(text=str(self.results["player1"]))
-        self.p2_score_label.configure(text=str(self.results["player2"]))
-        self.draws_label.configure(text=str(self.results["draws"]))
+        """Update score labels for both players."""
+        w1, l1 = self.results["player1"], self.results["player2"]
+        w2, l2 = self.results["player2"], self.results["player1"]
+        d = self.results["draws"]
 
-    def _update_color_indicators(self, p1_color: str, p2_color: str):
-        """Update the visual color indicators for each player."""
-        # Clear previous indicators
-        self.p1_color_indicator.delete("all")
-        self.p2_color_indicator.delete("all")
+        self.player1_score_label.configure(text=f"W:{w1} D:{d} L:{l1}")
+        self.player2_score_label.configure(text=f"W:{w2} D:{d} L:{l2}")
 
-        # Draw player 1 color indicator
-        if p1_color == "W":
-            # White circle with black border
-            self.p1_color_indicator.create_oval(
-                3, 3, 17, 17, fill="white", outline="black", width=1
+    def _update_stats_panel(self, player_id: str, stats: dict, board: chess.Board):
+        """Update the stats panel for a player."""
+        if not stats:
+            return
+
+        # Get components
+        mcts_panel = getattr(self, f"{player_id}_mcts_panel")
+        search_tree = getattr(self, f"{player_id}_search_tree")
+        eval_graph = getattr(self, f"{player_id}_eval_graph")
+        value_label = getattr(self, f"{player_id}_value_label")
+
+        # Update MCTS panel
+        mcts_stats = stats.get("mcts_stats")
+        total_visits = stats.get("total_visits", 0)
+        if mcts_stats:
+            mcts_panel.update_stats(board, mcts_stats, total_visits)
+
+        # Update search tree
+        tree_data = stats.get("tree_data")
+        tree_depth = stats.get("tree_depth", 0)
+        tree_branching = stats.get("tree_branching", 0)
+        mate_in = stats.get("mate_in")
+        if tree_data:
+            search_tree.update_tree(tree_data, tree_depth, tree_branching, mate_in)
+
+        # Update value label
+        root_value = stats.get("root_value")
+        if root_value is not None:
+            color = (
+                COLORS["q_value_positive"]
+                if root_value >= 0
+                else COLORS["q_value_negative"]
             )
+            value_label.configure(text=f"Value: {root_value:+.3f}", fg=color)
+
+            # Add to eval history and update graph
+            if player_id == "player1":
+                self.eval_history_p1.append(root_value)
+                eval_graph.set_history(self.eval_history_p1)
+            else:
+                self.eval_history_p2.append(root_value)
+                eval_graph.set_history(self.eval_history_p2)
+
+    def _clear_stats_panels(self):
+        """Clear all stats panels for a new game."""
+        for player_id in ["player1", "player2"]:
+            mcts_panel = getattr(self, f"{player_id}_mcts_panel")
+            search_tree = getattr(self, f"{player_id}_search_tree")
+            eval_graph = getattr(self, f"{player_id}_eval_graph")
+            value_label = getattr(self, f"{player_id}_value_label")
+
+            mcts_panel.clear()
+            search_tree.clear()
+            eval_graph.clear()
+            value_label.configure(text="Value: --", fg=COLORS["text_primary"])
+
+        # Clear eval histories
+        self.eval_history_p1 = []
+        self.eval_history_p2 = []
+
+    def _calculate_material(self, board) -> tuple:
+        """Calculate material for each side."""
+        return get_material_count(board, chess.WHITE), get_material_count(
+            board, chess.BLACK
+        )
+
+    def _update_material_display(self, board):
+        """Update material display label."""
+        white_mat, black_mat = self._calculate_material(board)
+        diff = white_mat - black_mat
+        if diff > 0:
+            adv_str = f"+{diff} W"
+        elif diff < 0:
+            adv_str = f"+{abs(diff)} B"
         else:
-            # Black circle with white border
-            self.p1_color_indicator.create_oval(
-                3, 3, 17, 17, fill="black", outline="white", width=1
-            )
-
-        # Draw player 2 color indicator
-        if p2_color == "W":
-            self.p2_color_indicator.create_oval(
-                3, 3, 17, 17, fill="white", outline="black", width=1
-            )
-        else:
-            self.p2_color_indicator.create_oval(
-                3, 3, 17, 17, fill="black", outline="white", width=1
-            )
+            adv_str = "="
+        self.material_label.configure(
+            text=f"Material: {white_mat} - {black_mat} ({adv_str})"
+        )
 
     def _start_match(self):
         """Start the match in a background thread."""
@@ -410,7 +451,6 @@ class MatchApp:
         """Stop the match."""
         self.running = False
         self.status_label.configure(text="Stopped", fg=COLORS["error"])
-        self._log("Match stopped by user")
         self.start_btn.configure(state=tk.NORMAL)
         self.pause_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.DISABLED)
@@ -419,26 +459,6 @@ class MatchApp:
         """Handle window close."""
         self.running = False
         self.root.destroy()
-
-    def _calculate_material(self, board) -> tuple[int, int]:
-        """Calculate material for each side."""
-        return get_material_count(board, chess.WHITE), get_material_count(
-            board, chess.BLACK
-        )
-
-    def _update_material_display(self, board):
-        """Update material display label."""
-        white_mat, black_mat = self._calculate_material(board)
-        diff = white_mat - black_mat
-        if diff > 0:
-            adv_str = f"+{diff} W"
-        elif diff < 0:
-            adv_str = f"+{abs(diff)} B"
-        else:
-            adv_str = "="
-        self.material_label.configure(
-            text=f"Material: {white_mat} - {black_mat} ({adv_str})"
-        )
 
     def _process_queue(self):
         """Process updates from the match thread."""
@@ -457,12 +477,11 @@ class MatchApp:
                     last_move = msg.get("last_move")
 
                     if last_move is not None:
-                        # Animate the move: first show board BEFORE the move
+                        # Animate the move
                         board_before = board.copy()
-                        board_before.pop()  # Undo to get state before move
+                        board_before.pop()
                         self.board_widget.set_board(board_before)
 
-                        # Store final state for after animation
                         final_board = board
                         final_move = last_move
 
@@ -472,51 +491,51 @@ class MatchApp:
                             self.board_widget._draw_board()
                             self._update_material_display(final_board)
 
-                        # Animate with 300ms duration
                         self.board_widget.animate_move(
                             last_move,
                             duration_ms=300,
                             on_complete=on_animation_complete,
                         )
-                        # Exit loop to let animation complete before processing more
                         break
                     else:
-                        # No move to animate (initial position)
                         self.board_widget.set_board(board)
                         self.board_widget._draw_board()
                         self._update_material_display(board)
+
                 elif msg_type == "move":
                     self.move_label.configure(text=f"Move: {msg['move_num']}")
+
                 elif msg_type == "game_start":
                     self.game_label.configure(
                         text=f"Game {msg['game']}/{self.num_games}"
                     )
-                    # Update visual color indicators
-                    p1_color = msg.get("p1_color", "W")
-                    p2_color = msg.get("p2_color", "B")
-                    self._update_color_indicators(p1_color, p2_color)
+                    self._update_color_indicator("player1", msg.get("p1_color", "W"))
+                    self._update_color_indicator("player2", msg.get("p2_color", "B"))
                     self.status_label.configure(text="Playing...", fg=COLORS["success"])
+                    self._clear_stats_panels()
+
                 elif msg_type == "game_end":
-                    self._log(msg["log"])
                     self._update_scores()
+
                 elif msg_type == "match_end":
                     self.status_label.configure(
                         text="Match Complete", fg=COLORS["accent"]
                     )
-                    self._log(f"\n{'='*30}")
-                    self._log(
-                        f"FINAL: {self.name1} {self.results['player1']} - {self.results['player2']} {self.name2}"
-                    )
-                    self._log(f"Draws: {self.results['draws']}")
                     self.start_btn.configure(state=tk.NORMAL)
                     self.pause_btn.configure(state=tk.DISABLED)
                     self.stop_btn.configure(state=tk.DISABLED)
+
                 elif msg_type == "status":
                     self.status_label.configure(
                         text=msg["text"], fg=msg.get("color", COLORS["text_primary"])
                     )
-                elif msg_type == "log":
-                    self._log(msg["text"])
+
+                elif msg_type == "ai_stats":
+                    # Update stats panel for the player who just moved
+                    player_id = msg["player_id"]
+                    stats = msg["stats"]
+                    board = msg["board"]
+                    self._update_stats_panel(player_id, stats, board)
 
         except queue.Empty:
             pass
@@ -527,9 +546,8 @@ class MatchApp:
     def _run_match(self):
         """Run the match in background thread."""
         try:
-            from alphazero import DualHeadResNet
+            from alphazero import DualHeadNetwork
             from alphazero.arena import (
-                Arena,
                 NetworkPlayer,
                 RandomPlayer,
                 PureMCTSPlayer,
@@ -538,33 +556,31 @@ class MatchApp:
 
             device = get_device()
 
-            self.move_queue.put({"type": "log", "text": f"Device: {device}"})
+            self.move_queue.put(
+                {
+                    "type": "status",
+                    "text": f"Loading on {device}...",
+                    "color": COLORS["warning"],
+                }
+            )
 
             # Helper to get history_length from network
             def get_history_length(network):
                 planes = network.num_input_planes
                 if planes == 18:
                     return 0
-                return (planes - 6) // 12 - 1  # 54 planes = 3 history
+                return (planes - 6) // 12 - 1
 
             # Load player 1
             history_length = 0
             if self.network1_path.lower() == "random":
                 player1 = RandomPlayer(name="Random")
-                self.move_queue.put({"type": "log", "text": "Player 1: Random"})
             elif self.network1_path.lower() == "mcts":
                 player1 = PureMCTSPlayer(
                     num_simulations=self.num_simulations, name="PureMCTS"
                 )
-                self.move_queue.put(
-                    {
-                        "type": "log",
-                        "text": f"Player 1: Pure MCTS ({self.num_simulations} sims)",
-                    }
-                )
             else:
-                self.move_queue.put({"type": "log", "text": f"Loading {self.name1}..."})
-                network1 = DualHeadResNet.load(self.network1_path, device=device)
+                network1 = DualHeadNetwork.load(self.network1_path, device=device)
                 history_length = get_history_length(network1)
                 player1 = NetworkPlayer(
                     network1,
@@ -576,22 +592,14 @@ class MatchApp:
             # Load player 2
             if self.network2_path.lower() == "random":
                 player2 = RandomPlayer(name="Random")
-                self.move_queue.put({"type": "log", "text": "Player 2: Random"})
             elif self.network2_path.lower() == "mcts":
                 player2 = PureMCTSPlayer(
                     num_simulations=self.num_simulations, name="PureMCTS"
                 )
-                self.move_queue.put(
-                    {
-                        "type": "log",
-                        "text": f"Player 2: Pure MCTS ({self.num_simulations} sims)",
-                    }
-                )
             else:
-                self.move_queue.put({"type": "log", "text": f"Loading {self.name2}..."})
-                network2 = DualHeadResNet.load(self.network2_path, device=device)
+                network2 = DualHeadNetwork.load(self.network2_path, device=device)
                 hl2 = get_history_length(network2)
-                history_length = max(history_length, hl2)  # Use max of both
+                history_length = max(history_length, hl2)
                 player2 = NetworkPlayer(
                     network2,
                     num_simulations=self.num_simulations,
@@ -599,15 +607,12 @@ class MatchApp:
                     history_length=hl2,
                 )
 
-            arena = Arena(
-                num_games=self.num_games,
-                num_simulations=self.num_simulations,
-                max_moves=200,
-                history_length=history_length,
-            )
-
             self.move_queue.put(
-                {"type": "log", "text": "Networks loaded. Starting match...\n"}
+                {
+                    "type": "status",
+                    "text": "Networks loaded",
+                    "color": COLORS["success"],
+                }
             )
 
             for game_num in range(self.num_games):
@@ -620,11 +625,17 @@ class MatchApp:
                 if game_num % 2 == 0:
                     white, black = player1, player2
                     white_name, black_name = self.name1, self.name2
+                    white_id, black_id = "player1", "player2"
                     p1_color, p2_color = "W", "B"
                 else:
                     white, black = player2, player1
                     white_name, black_name = self.name2, self.name1
+                    white_id, black_id = "player2", "player1"
                     p1_color, p2_color = "B", "W"
+
+                # Reset players
+                white.reset()
+                black.reset()
 
                 self.move_queue.put(
                     {
@@ -651,12 +662,31 @@ class MatchApp:
                     if not self.running:
                         break
 
+                    # Get current player info
+                    if board.turn == chess.WHITE:
+                        current_player = white
+                        current_id = white_id
+                    else:
+                        current_player = black
+                        current_id = black_id
+
                     # Get move
-                    current_player = white if board.turn == chess.WHITE else black
                     move = current_player.select_move(board)
 
                     if move is None:
                         break
+
+                    # Send stats if available (NetworkPlayer has get_last_stats)
+                    if hasattr(current_player, "get_last_stats"):
+                        stats = current_player.get_last_stats()
+                        self.move_queue.put(
+                            {
+                                "type": "ai_stats",
+                                "player_id": current_id,
+                                "stats": stats,
+                                "board": board.copy(),
+                            }
+                        )
 
                     board.push(move)
                     move_count += 1
@@ -685,16 +715,16 @@ class MatchApp:
                     termination = "stalemate"
                 elif board.is_insufficient_material():
                     winner = "draw"
-                    termination = "insufficient_material"
+                    termination = "insufficient"
                 elif board.can_claim_fifty_moves():
                     winner = "draw"
-                    termination = "fifty_moves"
+                    termination = "50 moves"
                 elif board.can_claim_threefold_repetition():
                     winner = "draw"
-                    termination = "threefold_repetition"
+                    termination = "repetition"
                 elif move_count >= 200:
                     winner = "draw"
-                    termination = "max_moves"
+                    termination = "max moves"
                 else:
                     winner = "draw"
                     termination = "unknown"
@@ -716,24 +746,13 @@ class MatchApp:
                     self.results["draws"] += 1
                     winner_str = "Draw"
 
-                # Calculate material advantage for draws
-                material_info = ""
-                if winner_str == "Draw":
-                    white_mat, black_mat = self._calculate_material(board)
-                    diff = white_mat - black_mat
-                    if diff > 0:
-                        material_info = f" [W+{diff}]"
-                    elif diff < 0:
-                        material_info = f" [B+{abs(diff)}]"
-                    else:
-                        material_info = " [=]"
-
-                log_msg = f"G{self.current_game}: {winner_str} ({termination}, {move_count} moves){material_info}"
-                self.move_queue.put({"type": "game_end", "log": log_msg})
+                self.move_queue.put({"type": "game_end"})
 
                 # Console output
                 print(
-                    f"Game {self.current_game}/{self.num_games}: {white_name} (W) vs {black_name} (B) | {move_count} moves | {termination} | {winner_str}{material_info}"
+                    f"Game {self.current_game}/{self.num_games}: "
+                    f"{white_name} (W) vs {black_name} (B) | "
+                    f"{move_count} moves | {termination} | {winner_str}"
                 )
 
             # Match complete
@@ -741,7 +760,7 @@ class MatchApp:
                 self.move_queue.put({"type": "match_end"})
                 self.running = False
 
-                # Print final summary to console
+                # Print final summary
                 print("\n" + "=" * 60)
                 print("MATCH RESULTS")
                 print("=" * 60)
@@ -751,9 +770,8 @@ class MatchApp:
                 print("=" * 60)
 
         except Exception as e:
-            self.move_queue.put({"type": "log", "text": f"Error: {e}"})
             self.move_queue.put(
-                {"type": "status", "text": "Error", "color": COLORS["error"]}
+                {"type": "status", "text": f"Error: {e}", "color": COLORS["error"]}
             )
             import traceback
 
@@ -761,6 +779,4 @@ class MatchApp:
 
     def run(self):
         """Run the application."""
-        # Auto-start the match after UI is ready
-        self.root.after(500, self._start_match)
         self.root.mainloop()

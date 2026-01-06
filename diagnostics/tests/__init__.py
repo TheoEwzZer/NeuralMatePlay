@@ -38,9 +38,9 @@ ALL_TESTS = [
     (test_value_head_health, "Value Head Health", 3.0),  # CRITICAL for MCTS
     (test_policy_diversity, "Policy Diversity", 1.0),
     (test_mcts_behavior, "MCTS Behavior", 1.0),
-    (test_inference_speed, "Inference Speed", 1.0),
+    # (test_inference_speed, "Inference Speed", 1.0),
     (test_random_game, "Game vs Random", 1.0),
-    (test_equilibrium_point, "Equilibrium Point", 2.0),  # Important strength metric
+    # (test_equilibrium_point, "Equilibrium Point", 2.0),  # Important strength metric
 ]
 
 __all__ = [

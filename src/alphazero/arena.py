@@ -125,17 +125,60 @@ class NetworkPlayer(Player):
         )
         self._mcts.temperature = temperature
 
+        # Stats storage for UI display
+        self.last_mcts_stats: Optional[List[Dict[str, Any]]] = None
+        self.last_tree_data: Optional[List[Dict]] = None
+        self.last_root_value: Optional[float] = None
+        self.last_tree_depth: int = 0
+        self.last_tree_branching: int = 0
+        self.last_mate_in: Optional[int] = None
+
     @property
     def name(self) -> str:
         return self._name
 
     def select_move(self, board: chess.Board) -> Optional[chess.Move]:
-        """Select move using MCTS."""
-        return self._mcts.get_best_move(board, add_noise=False)
+        """Select move using MCTS and capture stats."""
+        move = self._mcts.get_best_move(board, add_noise=False)
+
+        # Capture stats after search (before advancing root)
+        self.last_mcts_stats = self._mcts.get_root_statistics(board)
+        self.last_tree_data = self._mcts.get_search_tree_data(
+            board, top_n=5, max_depth=5
+        )
+        self.last_root_value = self._mcts.get_root_value(board)
+        self.last_tree_depth = self._mcts.get_tree_depth(board)
+        self.last_tree_branching = self._mcts.get_max_branching_factor(board)
+        self.last_mate_in = self._mcts.get_mate_in(board)
+
+        return move
+
+    def get_last_stats(self) -> Dict[str, Any]:
+        """Get all stats from the last search."""
+        total_visits = 0
+        if self.last_mcts_stats:
+            total_visits = sum(s.get("visits", 0) for s in self.last_mcts_stats)
+
+        return {
+            "mcts_stats": self.last_mcts_stats,
+            "tree_data": self.last_tree_data,
+            "root_value": self.last_root_value,
+            "tree_depth": self.last_tree_depth,
+            "tree_branching": self.last_tree_branching,
+            "mate_in": self.last_mate_in,
+            "total_visits": total_visits,
+        }
 
     def reset(self) -> None:
         """Clear MCTS cache for new game."""
         self._mcts.clear_cache()
+        # Clear stats
+        self.last_mcts_stats = None
+        self.last_tree_data = None
+        self.last_root_value = None
+        self.last_tree_depth = 0
+        self.last_tree_branching = 0
+        self.last_mate_in = None
 
 
 class RandomPlayer(Player):

@@ -78,11 +78,47 @@ def test_free_capture(network, results: TestResults):
         top_indices = np.argsort(policy)[::-1][:10]
         top_probs = [policy[idx] for idx in top_indices]
 
-        print(f"\n  Value head evaluation: {value:+.4f}")
+        # Value head: should be POSITIVE (white has free material to capture)
+        # Higher = more confident white is winning. Expected: +0.3 to +0.9 depending on piece value
+        value_assessment = ""
+        if value > 0.3:
+            value_assessment = (
+                f"{Colors.GREEN}(Good: correctly sees advantage){Colors.ENDC}"
+            )
+        elif value > 0:
+            value_assessment = (
+                f"{Colors.YELLOW}(Weak: sees small advantage only){Colors.ENDC}"
+            )
+        else:
+            value_assessment = (
+                f"{Colors.RED}(Bad: should be positive with free material){Colors.ENDC}"
+            )
+        print(f"\n  Value head evaluation: {value:+.4f} {value_assessment}")
+        print(
+            "    → Expected: positive (+0.3 to +0.9), higher for more valuable pieces"
+        )
+
         with np.errstate(divide="ignore", invalid="ignore"):
             policy_safe = np.maximum(policy, 1e-10)
             entropy = -np.nansum(policy_safe * np.log(policy_safe))
-        print(f"  Policy entropy: {entropy:.4f}")
+
+        # Policy entropy: should be LOW (network should be confident about the capture)
+        # Low entropy (~0-2) = confident, High entropy (>4) = uncertain/spread out
+        entropy_assessment = ""
+        if entropy < 2.0:
+            entropy_assessment = f"{Colors.GREEN}(Good: confident/focused){Colors.ENDC}"
+        elif entropy < 3.5:
+            entropy_assessment = (
+                f"{Colors.YELLOW}(Moderate: somewhat spread){Colors.ENDC}"
+            )
+        else:
+            entropy_assessment = (
+                f"{Colors.RED}(High: too uncertain for obvious capture){Colors.ENDC}"
+            )
+        print(f"  Policy entropy: {entropy:.4f} {entropy_assessment}")
+        print(
+            f"    → Expected: low (<2.0) for obvious captures, lower = more confident"
+        )
 
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Type':<15}")
         print("  " + "-" * 45)

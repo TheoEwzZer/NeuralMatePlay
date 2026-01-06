@@ -108,8 +108,8 @@ def test_equilibrium_point(network, results: TestResults):
 
         start_time = time.time()
 
-        for game_idx in range(games_per_level):
-            winner, material, moves = play_quick_game(network_player, mcts_player)
+        for _ in range(games_per_level):
+            winner, material, _ = play_quick_game(network_player, mcts_player)
 
             if winner == "network":
                 wins += 1
@@ -152,6 +152,13 @@ def test_equilibrium_point(network, results: TestResults):
             f"  vs MCTS({mcts_sims:>4} sims): {wins}W-{draws}D-{losses}L "
             f"({win_rate*100:5.1f}%) mat={avg_material:+.1f} {status}"
         )
+
+        # Early exit: stop testing if network loses at this level
+        if win_rate < 0.4:
+            print(
+                f"\n  {info('Early stop:')} Network lost at {mcts_sims} sims, skipping higher levels"
+            )
+            break
 
     print()
 
