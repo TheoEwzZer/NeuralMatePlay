@@ -223,6 +223,7 @@ class ChessBoardWidget(tk.Canvas):
         self.drag_piece: str | None = None
         self.drag_from: int | None = None
         self.drag_pos: tuple[int, int] | None = None
+        self._drag_hover_square: int | None = None
 
         # Interaction state
         self.interactive = True
@@ -398,13 +399,29 @@ class ChessBoardWidget(tk.Canvas):
                         outline="",
                     )
 
+        # Draw drag hover indicator (inner border)
+        if self.dragging and square == self._drag_hover_square:
+            border_width = 4
+            hover_color = "#ffffff" if is_light else "#c8c8c8"
+            self.create_rectangle(
+                x + border_width / 2,
+                y + border_width / 2,
+                x + self.square_size - border_width / 2,
+                y + self.square_size - border_width / 2,
+                fill="",
+                outline=hover_color,
+                width=border_width,
+            )
+
     def _load_piece_images(self) -> None:
         """Load and resize piece images from assets directory."""
         for symbol, filename in _SYMBOL_TO_FILE.items():
             file_path = _ASSETS_DIR / f"{filename}.png"
             if file_path.exists():
                 img = Image.open(file_path).convert("RGBA")
-                img = img.resize((self.square_size, self.square_size), Image.Resampling.LANCZOS)
+                img = img.resize(
+                    (self.square_size, self.square_size), Image.Resampling.LANCZOS
+                )
                 self._piece_images[symbol] = ImageTk.PhotoImage(img)
 
     def _get_piece_image(self, symbol: str) -> Any:
@@ -609,6 +626,8 @@ class ChessBoardWidget(tk.Canvas):
 
         self.dragging = True
         self.drag_pos = (event.x, event.y)
+        # Track hover square for visual feedback
+        self._drag_hover_square = self._coords_to_square(event.x, event.y)
         self._draw_board()
 
     def _on_release(self, event: tk.Event) -> None:
@@ -631,6 +650,7 @@ class ChessBoardWidget(tk.Canvas):
 
         self.dragging = False
         self.drag_pos = None
+        self._drag_hover_square = None
 
     def _find_move(self, from_sq: int, to_sq: int) -> chess.Move | None:
         """Find a legal move from the given squares."""
