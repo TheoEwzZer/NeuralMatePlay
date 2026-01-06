@@ -71,6 +71,12 @@ def main():
         help="Compare two specific model files (e.g., --models model1.pt model2.pt)",
     )
     parser.add_argument(
+        "--model",
+        "-s",
+        metavar="MODEL",
+        help="Test a single specific model file (e.g., --model path/to/model.pt)",
+    )
+    parser.add_argument(
         "--quick", "-q", action="store_true", help="Quick comparison (fewer tests)"
     )
     parser.add_argument(
@@ -99,6 +105,32 @@ def main():
             print(f"{Colors.RED}[ERROR] Model not found: {model2}{Colors.ENDC}")
             return
         compare_two_models(model1, model2, quick=args.quick)
+        return
+
+    # Single model mode
+    if args.model:
+        if not os.path.exists(args.model):
+            print(f"{Colors.RED}[ERROR] Model not found: {args.model}{Colors.ENDC}")
+            return
+        print(f"  Model: {args.model}")
+        network = load_network_from_path(args.model)
+        if network is None:
+            return
+        # Extract iteration from filename if possible, otherwise use 0
+        basename = os.path.basename(args.model)
+        iteration = 0
+        if "iteration_" in basename:
+            try:
+                iteration = int(basename.split("iteration_")[1].split("_")[0])
+            except (ValueError, IndexError):
+                pass
+        elif "pretrained_best_" in basename:
+            try:
+                iteration = int(basename.split("pretrained_best_")[1].split("_")[0])
+            except (ValueError, IndexError):
+                pass
+        results = run_all_tests(network, iteration)
+        results.print_summary()
         return
 
     print(f"  Checkpoint directory: {args.checkpoint_dir}")
