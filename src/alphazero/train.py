@@ -320,8 +320,8 @@ class TrainingGUI:
             return
         self.canvas.delete("all")
         size = 65
-        light = "#eeeed2"
-        dark = "#769656"
+        light = "#ebecd0"
+        dark = "#739552"
         for r in range(8):
             for c in range(8):
                 color = light if (r + c) % 2 == 0 else dark

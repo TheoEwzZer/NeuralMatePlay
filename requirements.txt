@@ -5,7 +5,6 @@ python-chess>=1.9.0
 
 # Optional but recommended
 h5py>=3.8.0        # HDF5 caching for pretraining
-cairosvg>=2.7.0    # SVG rendering for chess pieces
 pillow>=10.0.0     # Image processing for UI
 
 # Note: tkinter is usually included with Python

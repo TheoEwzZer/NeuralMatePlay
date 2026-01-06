@@ -375,8 +375,8 @@ def show_gui(
             "text_muted": "#666666",
             "accent": "#e94560",
             "border": "#2a2a4e",
-            "light_square": "#eeeed2",
-            "dark_square": "#769656",
+            "light_square": "#ebecd0",
+            "dark_square": "#739552",
         }
         FONTS = {
             "title": ("Segoe UI", 24, "bold"),

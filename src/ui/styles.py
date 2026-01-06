@@ -17,8 +17,8 @@ COLORS = {
     "bg_secondary": "#16213e",  # Panel background
     "bg_tertiary": "#0f3460",  # Elevated elements
     # Chess board colors
-    "light_square": "#eeeed2",  # Light squares (cream)
-    "dark_square": "#769656",  # Dark squares (green)
+    "light_square": "#ebecd0",  # Light squares (cream)
+    "dark_square": "#739552",  # Dark squares (green)
     # Highlight colors
     "selected": "#baca44",  # Selected square
     "legal_move": "#646d40",  # Legal move indicator
@@ -90,9 +90,7 @@ FONTS = {
     "mono": ("Consolas", 12),
     "mono_small": ("Consolas", 10),
     # Chess specific
-    "piece": ("Segoe UI Symbol", 36),
-    "piece_large": ("Segoe UI Symbol", 48),
-    "coordinates": ("Segoe UI", 10),
+    "coordinates": ("Segoe UI", 13),
 }
 
 # Chess piece Unicode characters

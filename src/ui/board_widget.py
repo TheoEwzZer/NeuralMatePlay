@@ -2,7 +2,7 @@
 Interactive chess board widget for Tkinter.
 
 Provides a canvas-based chess board with:
-- Piece rendering using chess.svg (high quality) or Unicode fallback
+- Piece rendering using downloaded PNG images or Unicode fallback
 - Click-to-move and drag-and-drop support
 - Move highlighting (legal moves, last move, check)
 - Coordinate labels
@@ -10,25 +10,42 @@ Provides a canvas-based chess board with:
 
 import tkinter as tk
 from typing import Callable, Any
-from io import BytesIO
+from pathlib import Path
 
 try:
     import chess
-    import chess.svg
 except ImportError:
     raise ImportError(
         "python-chess is required. Install with: pip install python-chess"
     )
 
-# Try to import SVG rendering libraries
-_USE_SVG = False
+# Try to import PIL for image handling
+_USE_IMAGES = False
 try:
-    import cairosvg
     from PIL import Image, ImageTk
 
-    _USE_SVG = True
+    _USE_IMAGES = True
 except ImportError:
     pass  # Fall back to Unicode
+
+# Piece assets directory
+_ASSETS_DIR = Path(__file__).parent.parent.parent / "assets" / "pieces"
+
+# Map chess symbols to asset filenames
+_SYMBOL_TO_FILE = {
+    "K": "wk",
+    "Q": "wq",
+    "R": "wr",
+    "B": "wb",
+    "N": "wn",
+    "P": "wp",
+    "k": "bk",
+    "q": "bq",
+    "r": "br",
+    "b": "bb",
+    "n": "bn",
+    "p": "bp",
+}
 
 from .styles import COLORS, FONTS, PIECE_UNICODE, PIECE_UNICODE_ALT
 
@@ -218,18 +235,18 @@ class ChessBoardWidget(tk.Canvas):
         self._animating = False
         self._anim_rook: dict | None = None  # For castling animation
 
-        # Piece image cache (for SVG rendering)
-        self._piece_cache: dict[tuple[str, int], Any] = {}
-        self._use_svg = _USE_SVG
+        # Piece image cache
+        self._piece_images: dict[str, Any] = {}
+        self._use_images = _USE_IMAGES
 
         # Bind events
         self.bind("<Button-1>", self._on_click)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
 
-        # Pre-cache piece images
-        if self._use_svg:
-            self._cache_pieces()
+        # Load piece images
+        if self._use_images:
+            self._load_piece_images()
 
         # Initial draw
         self._draw_board()
@@ -381,42 +398,18 @@ class ChessBoardWidget(tk.Canvas):
                         outline="",
                     )
 
-    def _cache_pieces(self) -> None:
-        """Pre-cache all piece images at current size."""
-        if not self._use_svg:
-            return
-
-        piece_size = int(self.square_size * 0.85)  # Slightly smaller than square
-
-        for symbol in "KQRBNPkqrbnp":
-            piece = chess.Piece.from_symbol(symbol)
-            svg_data = chess.svg.piece(piece, size=piece_size)
-
-            # Convert SVG to PNG bytes
-            png_data = cairosvg.svg2png(bytestring=svg_data.encode("utf-8"))
-
-            # Convert to PhotoImage
-            image = Image.open(BytesIO(png_data))
-            photo = ImageTk.PhotoImage(image)
-
-            # Cache it
-            self._piece_cache[(symbol, piece_size)] = photo
+    def _load_piece_images(self) -> None:
+        """Load and resize piece images from assets directory."""
+        for symbol, filename in _SYMBOL_TO_FILE.items():
+            file_path = _ASSETS_DIR / f"{filename}.png"
+            if file_path.exists():
+                img = Image.open(file_path).convert("RGBA")
+                img = img.resize((self.square_size, self.square_size), Image.Resampling.LANCZOS)
+                self._piece_images[symbol] = ImageTk.PhotoImage(img)
 
     def _get_piece_image(self, symbol: str) -> Any:
-        """Get cached piece image."""
-        piece_size = int(self.square_size * 0.85)
-        key = (symbol, piece_size)
-
-        if key not in self._piece_cache:
-            # Generate if not cached
-            piece = chess.Piece.from_symbol(symbol)
-            svg_data = chess.svg.piece(piece, size=piece_size)
-            png_data = cairosvg.svg2png(bytestring=svg_data.encode("utf-8"))
-            image = Image.open(BytesIO(png_data))
-            photo = ImageTk.PhotoImage(image)
-            self._piece_cache[key] = photo
-
-        return self._piece_cache[key]
+        """Get piece image."""
+        return self._piece_images.get(symbol)
 
     def _draw_piece(self, square: int) -> None:
         """Draw a piece on a square."""
@@ -428,10 +421,13 @@ class ChessBoardWidget(tk.Canvas):
         cx = x + self.square_size // 2
         cy = y + self.square_size // 2
 
-        if self._use_svg:
-            # Use high-quality SVG rendering
+        if self._use_images:
+            # Use downloaded PNG images
             image = self._get_piece_image(piece.symbol())
-            self.create_image(cx, cy, image=image, anchor="center")
+            if image:
+                self.create_image(cx, cy, image=image, anchor="center")
+            else:
+                self._draw_piece_unicode(cx, cy, piece)
         else:
             # Fallback to Unicode
             self._draw_piece_unicode(cx, cy, piece)
@@ -477,58 +473,58 @@ class ChessBoardWidget(tk.Canvas):
 
         x, y = self.drag_pos
 
-        if self._use_svg:
-            # Use SVG piece image
+        if self._use_images:
+            # Use downloaded PNG image
             image = self._get_piece_image(self.drag_piece)
-            self.create_image(x, y, image=image, anchor="center")
-        else:
-            # Fallback to Unicode
-            unicode_char = PIECE_UNICODE.get(self.drag_piece, "?")
+            if image:
+                self.create_image(x, y, image=image, anchor="center")
+                return
 
-            is_white = self.drag_piece.isupper()
-            fill_color = "#ffffff" if is_white else "#000000"
-            outline_color = "#000000" if is_white else "#ffffff"
+        # Fallback to Unicode
+        unicode_char = PIECE_UNICODE.get(self.drag_piece, "?")
 
-            font = ("Segoe UI Symbol", self.square_size // 2)
+        is_white = self.drag_piece.isupper()
+        fill_color = "#ffffff" if is_white else "#000000"
+        outline_color = "#000000" if is_white else "#ffffff"
 
-            # Shadow/outline
-            for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
-                self.create_text(
-                    x + dx,
-                    y + dy,
-                    text=unicode_char,
-                    font=font,
-                    fill=outline_color,
-                )
+        font = ("Segoe UI Symbol", self.square_size // 2)
 
+        # Shadow/outline
+        for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
             self.create_text(
-                x,
-                y,
+                x + dx,
+                y + dy,
                 text=unicode_char,
                 font=font,
-                fill=fill_color,
+                fill=outline_color,
             )
+
+        self.create_text(
+            x,
+            y,
+            text=unicode_char,
+            font=font,
+            fill=fill_color,
+        )
 
     def _draw_coordinates(self) -> None:
         """Draw file and rank labels with improved visibility."""
-        font = FONTS["coordinates"]
         bold_font = (FONTS["coordinates"][0], FONTS["coordinates"][1], "bold")
-        margin = 4
 
         for i in range(8):
             # File labels (a-h) - bottom row
             file_label = chr(ord("a") + (7 - i if self.flipped else i))
-            x = i * self.square_size + self.square_size - margin - 5
-            y = self.size - margin - 3
+            x = i * self.square_size + self.square_size - 3
+            y = self.size - 1
 
             # Use high contrast colors for better readability
             is_light = (i + 0) % 2 == 1
             if is_light:
                 # Light square: use dark text with light outline
-                text_color = "#4a6741"  # Darker green for contrast
+                text_color = "#739552"  # Darker green for contrast
             else:
                 # Dark square: use light text
-                text_color = "#f0f0d0"  # Light cream for contrast
+                text_color = "#ebecd0"  # Light cream for contrast
 
             # Draw text (shadow effect removed for Tkinter compatibility)
             self.create_text(
@@ -537,14 +533,14 @@ class ChessBoardWidget(tk.Canvas):
 
             # Rank labels (1-8) - left column
             rank_label = str(i + 1 if self.flipped else 8 - i)
-            x = margin + 2
-            y = i * self.square_size + margin + 3
+            x = 2
+            y = i * self.square_size
 
             is_light = (0 + (7 - i)) % 2 == 1
             if is_light:
-                text_color = "#4a6741"
+                text_color = "#739552"
             else:
-                text_color = "#f0f0d0"
+                text_color = "#ebecd0"
 
             # Draw text (shadow effect removed for Tkinter compatibility)
             self.create_text(
@@ -933,40 +929,42 @@ class ChessBoardWidget(tk.Canvas):
 
     def _draw_animated_piece(self, symbol: str, x: float, y: float) -> None:
         """Draw a piece at the given position during animation."""
-        if self._use_svg:
+        if self._use_images:
             image = self._get_piece_image(symbol)
-            self.create_image(
-                x,
-                y,
-                image=image,
-                anchor="center",
-                tags="animated_piece",
-            )
-        else:
-            # Unicode fallback
-            unicode_char = PIECE_UNICODE.get(symbol, "?")
-            is_white = symbol.isupper()
-            fill_color = "#ffffff" if is_white else "#000000"
-            outline_color = "#000000" if is_white else "#ffffff"
-            font = ("Segoe UI Symbol", self.square_size // 2)
-
-            for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
-                self.create_text(
-                    x + dx,
-                    y + dy,
-                    text=unicode_char,
-                    font=font,
-                    fill=outline_color,
+            if image:
+                self.create_image(
+                    x,
+                    y,
+                    image=image,
+                    anchor="center",
                     tags="animated_piece",
                 )
+                return
+
+        # Unicode fallback
+        unicode_char = PIECE_UNICODE.get(symbol, "?")
+        is_white = symbol.isupper()
+        fill_color = "#ffffff" if is_white else "#000000"
+        outline_color = "#000000" if is_white else "#ffffff"
+        font = ("Segoe UI Symbol", self.square_size // 2)
+
+        for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
             self.create_text(
-                x,
-                y,
+                x + dx,
+                y + dy,
                 text=unicode_char,
                 font=font,
-                fill=fill_color,
+                fill=outline_color,
                 tags="animated_piece",
             )
+        self.create_text(
+            x,
+            y,
+            text=unicode_char,
+            font=font,
+            fill=fill_color,
+            tags="animated_piece",
+        )
 
     def _draw_board_without_squares(self, exclude_squares: list[int]) -> None:
         """Redraw the board but skip drawing pieces at excluded squares."""
