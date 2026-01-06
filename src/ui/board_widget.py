@@ -642,11 +642,16 @@ class ChessBoardWidget(tk.Canvas):
             if move:
                 self._make_move(move)
             else:
+                # Reset drag state before redrawing so piece returns to center
+                self.dragging = False
+                self.drag_pos = None
+                self._drag_hover_square = None
                 # Flash invalid move indicator if piece was dropped on different square
                 if target_square != self.drag_from:
                     self._flash_invalid_move(target_square)
                 else:
                     self._draw_board()
+                return
 
         self.dragging = False
         self.drag_pos = None
