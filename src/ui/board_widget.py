@@ -346,7 +346,7 @@ class ChessBoardWidget(tk.Canvas):
 
         # Highlight selected square
         if square == self.selected_square:
-            color = COLORS["selected"]
+            color = COLORS["selected_light"] if is_light else COLORS["selected_dark"]
 
         # Highlight last move
         elif self.last_move and (
@@ -402,7 +402,7 @@ class ChessBoardWidget(tk.Canvas):
         # Draw drag hover indicator (inner border)
         if self.dragging and square == self._drag_hover_square:
             border_width = 4
-            hover_color = "#ffffff" if is_light else "#c8c8c8"
+            hover_color = COLORS["hover_light"] if is_light else COLORS["hover_dark"]
             self.create_rectangle(
                 x + border_width / 2,
                 y + border_width / 2,
