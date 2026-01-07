@@ -630,11 +630,21 @@ Examples:
     if args.epochs:
         cfg.epochs_per_iteration = args.epochs
 
+    # Detect device
+    import torch
+    if torch.cuda.is_available():
+        device_name = torch.cuda.get_device_name(0)
+        device_str = f"GPU ({device_name})"
+    else:
+        device_str = "CPU"
+
     # Print config
     print("\n[Configuration]")
+    print(f"  Device: {device_str}")
     print(f"  Iterations: {cfg.iterations}")
     print(f"  Games per iteration: {cfg.games_per_iteration}")
     print(f"  MCTS simulations: {cfg.num_simulations}")
+    print(f"  MCTS batch size: {cfg.mcts_batch_size}")
     print(f"  Batch size: {cfg.batch_size}")
     print(f"  Learning rate: {cfg.learning_rate}")
     print(f"  Checkpoint path: {cfg.checkpoint_path}")

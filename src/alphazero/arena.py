@@ -101,7 +101,7 @@ class NetworkPlayer(Player):
         name: str = "Network",
         history_length: int = DEFAULT_HISTORY_LENGTH,
         temperature: float = 0.1,
-        batch_size: int = 16,
+        batch_size: int = 8,
     ):
         """
         Initialize network player.

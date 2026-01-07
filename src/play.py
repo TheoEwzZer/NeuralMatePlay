@@ -167,7 +167,7 @@ def run_gui(
 def run_cli(
     network_path: str = None,
     num_simulations: int = 200,
-    batch_size: int = 16,
+    batch_size: int = 8,
 ) -> int:
     """Run in command-line mode."""
     import chess

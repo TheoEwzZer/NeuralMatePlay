@@ -66,7 +66,7 @@ class TrainingConfig:
     iterations: int = 100
     games_per_iteration: int = 100
     num_simulations: int = 100
-    mcts_batch_size: int = 16  # Batch size for MCTS GPU inference
+    mcts_batch_size: int = 8  # Batch size for MCTS GPU inference
     batch_size: int = 256
     learning_rate: float = 0.01
     lr_decay: float = 0.95
