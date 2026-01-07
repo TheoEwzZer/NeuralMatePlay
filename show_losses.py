@@ -42,11 +42,16 @@ def main():
         print(f"Directory not found: {checkpoint_dir}")
         return
 
-    # Find all state.pkl files
+    # Find all state.pkl files (support both regular and "saved_" prefixed files)
     if args.type == "pretrained":
-        pattern = "pretrained_best_*_state.pkl"
+        patterns = ["pretrained_best_*_state.pkl", "saved_pretrained_best_*_state.pkl"]
     else:
-        pattern = "iteration_*_state.pkl"
+        patterns = ["iteration_*_state.pkl", "saved_iteration_*_state.pkl"]
+
+    # Collect files from all patterns
+    state_files_set = set()
+    for pattern in patterns:
+        state_files_set.update(checkpoint_dir.glob(pattern))
 
     # Sort by checkpoint number
     def get_checkpoint_num(path):
@@ -56,10 +61,10 @@ def main():
         except (ValueError, IndexError):
             return 0
 
-    state_files = sorted(checkpoint_dir.glob(pattern), key=get_checkpoint_num)
+    state_files = sorted(state_files_set, key=get_checkpoint_num)
 
     if not state_files:
-        print(f"No state files found matching {pattern} in {checkpoint_dir}")
+        print(f"No state files found matching {patterns} in {checkpoint_dir}")
         return
 
     # Print header
