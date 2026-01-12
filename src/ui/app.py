@@ -460,9 +460,8 @@ class ChessGameApp:
 
         def get_history_length(network):
             planes = network.num_input_planes
-            if planes == 18:
-                return 0
-            return (planes - 6) // 12 - 1
+            # 68 planes = (history_length + 1) * 12 + 20
+            return (planes - 20) // 12 - 1
 
         if self.use_pure_mcts:
             try:
@@ -497,6 +496,10 @@ class ChessGameApp:
                     batch_size=self.mcts_batch_size,
                     history_length=self.history_length,
                     c_puct=self.c_puct,
+                    # WDL-aware settings
+                    contempt=0.5,
+                    uncertainty_weight=0.2,
+                    draw_sibling_fpu=True,
                 )
                 self.network_status.configure(
                     text=f"Loaded: {os.path.basename(self.network_path)}",
@@ -519,6 +522,10 @@ class ChessGameApp:
                     batch_size=self.mcts_batch_size,
                     history_length=self.history_length,
                     c_puct=self.c_puct,
+                    # WDL-aware settings
+                    contempt=0.5,
+                    uncertainty_weight=0.2,
+                    draw_sibling_fpu=True,
                 )
                 self.network_status.configure(
                     text="Untrained network (random)",
@@ -1174,6 +1181,10 @@ class ChessGameApp:
                 batch_size=self.mcts_batch_size,
                 history_length=self.history_length,
                 c_puct=self.c_puct,
+                # WDL-aware settings
+                contempt=0.5,
+                uncertainty_weight=0.2,
+                draw_sibling_fpu=True,
             )
 
         except Exception as e:

@@ -30,7 +30,7 @@ def load_network(path: str) -> DualHeadNetwork:
         network = DualHeadNetwork(
             num_filters=config.get("num_filters", 192),
             num_residual_blocks=config.get("num_residual_blocks", 12),
-            num_input_planes=config.get("num_input_planes", 60),
+            num_input_planes=68,
         )
     else:
         network = DualHeadNetwork()

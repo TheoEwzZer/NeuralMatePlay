@@ -11,7 +11,7 @@ NeuralMate2 est un moteur d'échecs par reinforcement learning qui combine :
 
 ## Innovations par rapport à AlphaZero Classique
 
-### 1. Architecture Réseau : SE-ResNet + Attention
+### 1. Architecture Réseau : SE-ResNet + Attention + WDL
 
 **Problème AlphaZero classique** : Les convolutions standard ont une réceptivité locale limitée.
 
@@ -21,25 +21,25 @@ NeuralMate2 est un moteur d'échecs par reinforcement learning qui combine :
 - **Spatial Attention** dans les blocs finaux : Vision globale du plateau
 - **Group Normalization** au lieu de Batch Norm : Stable avec petits batches
 - **GELU activation** : Gradients plus lisses que ReLU
+- **WDL Head** : Sortie Win/Draw/Loss au lieu d'un scalaire
 
 ```
-Input (60 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attention × 2]
+Input (68 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attention × 2]
     ↑                                                           ↓
     │                                             ┌─────────────┴─────────────┐
     │                                             ↓                           ↓
- 4 positions                               Policy Head                 Value Head
- (T, T-1, T-2, T-3)                        (4672 moves)               (score -1/+1)
-                                                 │
-                                           Phase Head
-                                      (opening/middle/end)
+ 4 positions                               Policy Head                  WDL Head
+ (T, T-1, T-2, T-3)                        (4672 moves)            (Win/Draw/Loss)
+ + 8 semantic planes
 ```
 
-**Pourquoi 60 planes (4 positions d'historique) ?**
+**Pourquoi 68 planes ?**
 
+- 48 planes d'historique (4 positions × 12 pièces)
+- 12 planes de métadonnées (roque, en passant, répétitions, etc.)
+- 8 planes sémantiques NNUE-style (attaquants roi, mobilité, pions passés, etc.)
 - Détection des répétitions (règle des 3 coups)
-- Meilleure compréhension du flux de la partie
-- Gain estimé : +50-100 ELO vs 18 planes
-- Coût mémoire acceptable pour RTX 3060
+- Gain estimé : +100-150 ELO vs architecture classique
 
 ### 2. MCTS Amélioré : PUCT + Transpositions
 
@@ -58,14 +58,8 @@ Input (60 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attent
 - Lecture par blocs de 20000 positions (chunks HDF5)
 - Filtrage ELO ≥ 2200
 - Skip des 12 premiers coups (évite théorie d'ouverture)
-- Extraction position → (coup joué, résultat, phase)
+- Extraction position → (coup joué, WDL)
 - Streaming trainer pour gros datasets
-
-**Phase Prediction** :
-
-- Head auxiliaire prédit opening/middlegame/endgame
-- Loss auxiliaire : 0.1 × phase_loss
-- Améliore la compréhension contextuelle
 
 ### 4. Training Optimisé RTX 3060
 
@@ -83,13 +77,13 @@ Input (60 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attent
 src/
 ├── alphazero/
 │   ├── __init__.py              # Exports publics
-│   ├── network.py               # DualHeadNetwork (SE-ResNet + Attention + Phase Head)
+│   ├── network.py               # DualHeadNetwork (SE-ResNet + WDL)
 │   ├── mcts.py                  # MCTS avec virtual losses et transpositions
 │   ├── trainer.py               # AlphaZeroTrainer + TrainingConfig
 │   ├── train.py                 # Point d'entrée CLI pour self-play training
 │   ├── arena.py                 # Évaluation : NetworkPlayer, RandomPlayer
 │   ├── move_encoding.py         # Encodage/décodage des coups (4672 classes)
-│   ├── spatial_encoding.py      # Encodage du plateau (60 planes)
+│   ├── spatial_encoding.py      # Encodage du plateau (68 planes)
 │   ├── replay_buffer.py         # Buffer circulaire avec sampling prioritaire
 │   ├── device.py                # Gestion GPU/CPU et device selection
 │   └── checkpoint_manager.py    # Gestion des checkpoints et versioning
@@ -120,13 +114,13 @@ src/
 
 ---
 
-## Encodage du Plateau (60 planes par défaut)
+## Encodage du Plateau (68 planes)
 
-L'encodage utilise **60 planes** avec 4 positions (actuelle + 3 historiques) pour une meilleure compréhension contextuelle.
+L'encodage utilise **68 planes** : 4 positions d'historique + métadonnées + features sémantiques NNUE-style.
 
-**Formule** : `(history_length + 1) × 12 + 12 = (3 + 1) × 12 + 12 = 60 planes`
+**Formule** : `(history_length + 1) × 12 + 20 = (3 + 1) × 12 + 20 = 68 planes`
 
-### Structure des 60 Planes
+### Structure des 68 Planes
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -162,6 +156,17 @@ L'encodage utilise **60 planes** avec 4 positions (actuelle + 3 historiques) pou
 │ Plane 55     : Case en passant (si applicable)                  │
 │ Planes 56-57 : Répétition (1 si position vue 1×, 2×)            │
 │ Planes 58-59 : Cartes d'attaque (cases attaquées)               │
+├─────────────────────────────────────────────────────────────────┤
+│ FEATURES SÉMANTIQUES NNUE-STYLE - 8 planes                      │
+├─────────────────────────────────────────────────────────────────┤
+│ Plane 60     : Attaquants du roi adverse                        │
+│ Plane 61     : Défenseurs de mon roi                            │
+│ Plane 62     : Mobilité des cavaliers                           │
+│ Plane 63     : Mobilité des fous                                │
+│ Plane 64     : Pions passés                                     │
+│ Plane 65     : Pions isolés                                     │
+│ Plane 66     : Cases faibles (non défendues)                    │
+│ Plane 67     : Contrôle du centre (d4, d5, e4, e5)              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -216,19 +221,54 @@ Les promotions en dame sont encodées comme mouvements queen-like normaux.
 
 ---
 
+## WDL Head (Win/Draw/Loss)
+
+Le réseau utilise une **WDL Head** au lieu d'une sortie scalaire :
+
+### Architecture
+
+```
+Backbone features → Conv(192→8) → Flatten → FC(512→512) → FC(512→3) → Softmax
+                                                                         ↓
+                                                            [P(Win), P(Draw), P(Loss)]
+```
+
+### Avantages
+
+- **Meilleure calibration** des positions de nulle (+100-150 Elo)
+- **Information plus riche** que scalaire unique
+- **Utilisé par Leela Chess Zero** avec succès prouvé
+
+### Calcul de la Value
+
+```python
+# Value reconstruite pour MCTS
+value = P(Win) - P(Loss)  # dans [-1, 1]
+```
+
+### Loss Function
+
+```python
+# CrossEntropy au lieu de MSE
+wdl_loss = CrossEntropy(wdl_logits, wdl_target)
+# wdl_target: [1,0,0]=win, [0,1,0]=draw, [0,0,1]=loss
+```
+
+---
+
 ## Hyperparamètres Recommandés
 
 ### Réseau
 
-| Paramètre        | Valeur  | Justification                             |
-| ---------------- | ------- | ----------------------------------------- |
-| **Input planes** | **60**  | 4 positions (T, T-1, T-2, T-3) + metadata |
-| Residual blocks  | 12      | Bon ratio performance/vitesse             |
-| Filters          | 192     | Optimal pour RTX 3060                     |
-| SE reduction     | 8       | Standard pour SE-ResNet                   |
-| Attention heads  | 4       | Multi-head attention spatiale             |
-| History length   | 3       | Détection répétitions + contexte          |
-| Phase head       | enabled | Prédit opening/middle/endgame             |
+| Paramètre        | Valeur  | Justification                                |
+| ---------------- | ------- | -------------------------------------------- |
+| **Input planes** | **68**  | 48 history + 12 metadata + 8 semantic        |
+| Residual blocks  | 12      | Bon ratio performance/vitesse                |
+| Filters          | 192     | Optimal pour RTX 3060                        |
+| SE reduction     | 8       | Standard pour SE-ResNet                      |
+| Attention heads  | 4       | Multi-head attention spatiale                |
+| History length   | 3       | Détection répétitions + contexte (fixe)      |
+| WDL Head         | enabled | Win/Draw/Loss (obligatoire)                  |
 
 ### MCTS
 
@@ -265,7 +305,7 @@ Les promotions en dame sont encodées comme mouvements queen-like normaux.
 | Epochs            | 5               | Évite l'overfitting        |
 | Batch size        | 640             | RTX 3060 optimisé          |
 | LR                | 0.0001          | Plus doux que self-play    |
-| Value loss weight | 2.0             | Évite collapse de value    |
+| WDL loss weight   | 5.0             | Poids WDL vs policy        |
 | Entropy coef      | 0.01            | Encourage diversité policy |
 | Gradient accum    | 2 steps         | Batch effectif = 1280      |
 | Patience          | 5 epochs        | Early stopping             |
@@ -284,7 +324,7 @@ Les promotions en dame sont encodées comme mouvements queen-like normaux.
 │        ↓                                                        │
 │  Streaming Trainer (prefetch async)                             │
 │        ↓                                                        │
-│  DualHeadNetwork.train() sur (position, policy, value, phase)   │
+│  DualHeadNetwork.train() sur (position, policy, WDL)            │
 │        ↓                                                        │
 │  Checkpoint: pretrained_model.pt                                │
 └─────────────────────────────────────────────────────────────────┘

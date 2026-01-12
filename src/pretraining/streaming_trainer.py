@@ -30,6 +30,26 @@ from alphazero.checkpoint_manager import CheckpointManager
 from alphazero.move_encoding import MOVE_ENCODING_SIZE
 
 
+def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
+    """
+    Convert scalar values to WDL class targets.
+
+    Args:
+        values: Tensor of shape (batch,) with values in {-1, 0, 1}
+                1.0 = win, 0.0 = draw, -1.0 = loss
+
+    Returns:
+        Tensor of shape (batch,) with class indices:
+        0 = win, 1 = draw, 2 = loss
+    """
+    # Convert: 1.0 -> 0, 0.0 -> 1, -1.0 -> 2
+    # Formula: class = 1 - value (for discrete values)
+    # But values might be continuous, so we use rounding
+    wdl_targets = torch.round(1.0 - values).long()
+    # Clamp to valid range [0, 2]
+    return torch.clamp(wdl_targets, min=0, max=2)
+
+
 class SafeGradScaler(GradScaler):
     """
     GradScaler with maximum scale cap to prevent overflow in float16.
@@ -142,7 +162,6 @@ class StreamingTrainer:
         entropy_coefficient: float = 0.01,
         prefetch_workers: int = 2,
         gradient_accumulation_steps: int = 1,
-        phase_loss_weight: float = 0.1,
     ):
         """
         Initialize streaming trainer.
@@ -162,12 +181,10 @@ class StreamingTrainer:
             entropy_coefficient: Coefficient for entropy bonus to encourage policy diversity.
             prefetch_workers: Number of background threads for chunk prefetching (default 2).
             gradient_accumulation_steps: Accumulate gradients over N steps before optimizer update.
-            phase_loss_weight: Weight for phase prediction loss (default 0.1).
         """
         self.network = network
         self.value_loss_weight = value_loss_weight
         self.entropy_coefficient = entropy_coefficient
-        self.phase_loss_weight = phase_loss_weight
         self.prefetch_workers = prefetch_workers
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.chunks_dir = chunks_dir
@@ -289,7 +306,12 @@ class StreamingTrainer:
         state = checkpoint.get("state")
         if state:
             if "optimizer_state" in state:
-                self.optimizer.load_state_dict(state["optimizer_state"])
+                try:
+                    self.optimizer.load_state_dict(state["optimizer_state"])
+                except (ValueError, RuntimeError) as e:
+                    # Optimizer state mismatch (e.g., network architecture changed)
+                    print(f"  Warning: Could not load optimizer state ({e})")
+                    print("  Using fresh optimizer (this is normal after architecture changes)")
             if "best_val_loss" in state:
                 self.best_val_loss = state["best_val_loss"]
             if "best_count" in state:
@@ -469,7 +491,6 @@ class StreamingTrainer:
                     states = chunk["states"]
                     policy_indices = chunk["policy_indices"]
                     values = chunk["values"]
-                    phases = chunk["phases"]
                 except MemoryError:
                     # Memory fragmentation - force cleanup and retry
                     gc.collect()
@@ -479,7 +500,6 @@ class StreamingTrainer:
                     states = chunk["states"]
                     policy_indices = chunk["policy_indices"]
                     values = chunk["values"]
-                    phases = chunk["phases"]
 
                 # Start prefetching next chunk in background
                 if chunk_idx + 1 < len(train_chunks):
@@ -494,7 +514,6 @@ class StreamingTrainer:
                 states = states[indices]
                 policy_indices = policy_indices[indices]
                 values = values[indices]
-                phases = phases[indices]
 
                 # Create mini-batches with gradient accumulation
                 n_batches = len(states) // self.batch_size
@@ -532,13 +551,6 @@ class StreamingTrainer:
                     )
                     batch_policies.scatter_(1, batch_policy_indices.unsqueeze(1), 1.0)
 
-                    # Phases for auxiliary task (0=opening, 1=middlegame, 2=endgame)
-                    batch_phases = (
-                        torch.from_numpy(phases[start:end])
-                        .long()
-                        .to(self.device, non_blocking=True)
-                    )
-
                     # Check if this is the last batch in accumulation cycle or chunk
                     is_accumulation_step = (batch_idx + 1) % accum_steps == 0
                     is_last_batch = batch_idx == n_batches - 1
@@ -557,7 +569,7 @@ class StreamingTrainer:
 
                     if self.use_amp:
                         with autocast(device_type="cuda"):
-                            pred_policies, pred_values, pred_phases = self.network(
+                            pred_policies, pred_values, wdl_logits = self.network(
                                 batch_states
                             )
 
@@ -571,23 +583,15 @@ class StreamingTrainer:
                                 batch_policies,
                                 label_smoothing=0.2,
                             )
-                            value_loss = nn.functional.mse_loss(
-                                pred_values, batch_values
-                            )
 
-                            # Phase loss (auxiliary task)
-                            if pred_phases is not None:
-                                # Clamp phase logits to prevent overflow in float16
-                                pred_phases_clamped = torch.clamp(
-                                    pred_phases, min=-50, max=50
-                                )
-                                phase_loss = nn.functional.cross_entropy(
-                                    pred_phases_clamped,
-                                    batch_phases,
-                                    label_smoothing=0.1,
-                                )
-                            else:
-                                phase_loss = torch.tensor(0.0, device=self.device)
+                            # Value loss: WDL cross-entropy
+                            wdl_targets = values_to_wdl_targets(batch_values)
+                            wdl_logits_clamped = torch.clamp(wdl_logits, min=-50, max=50)
+                            value_loss = nn.functional.cross_entropy(
+                                wdl_logits_clamped,
+                                wdl_targets,
+                                label_smoothing=0.1,
+                            )
 
                             # Compute entropy bonus for policy diversity (numerically stable)
                             # Use log_softmax which is more stable than softmax + log
@@ -606,7 +610,6 @@ class StreamingTrainer:
                             loss = (
                                 policy_loss
                                 + self.value_loss_weight * value_loss
-                                + self.phase_loss_weight * phase_loss
                                 - self.entropy_coefficient * entropy
                             ) / accum_steps
 
@@ -657,7 +660,7 @@ class StreamingTrainer:
                                 self.scaler.update()
                                 self.optimizer.zero_grad()
                     else:
-                        pred_policies, pred_values, pred_phases = self.network(
+                        pred_policies, pred_values, wdl_logits = self.network(
                             batch_states
                         )
 
@@ -669,19 +672,13 @@ class StreamingTrainer:
                         policy_loss = nn.functional.cross_entropy(
                             pred_policies_clamped, batch_policies, label_smoothing=0.2
                         )
-                        value_loss = nn.functional.mse_loss(pred_values, batch_values)
 
-                        # Phase loss (auxiliary task)
-                        if pred_phases is not None:
-                            # Clamp phase logits to prevent overflow
-                            pred_phases_clamped = torch.clamp(
-                                pred_phases, min=-50, max=50
-                            )
-                            phase_loss = nn.functional.cross_entropy(
-                                pred_phases_clamped, batch_phases, label_smoothing=0.1
-                            )
-                        else:
-                            phase_loss = torch.tensor(0.0, device=self.device)
+                        # Value loss: WDL cross-entropy
+                        wdl_targets = values_to_wdl_targets(batch_values)
+                        wdl_logits_clamped = torch.clamp(wdl_logits, min=-50, max=50)
+                        value_loss = nn.functional.cross_entropy(
+                            wdl_logits_clamped, wdl_targets, label_smoothing=0.1
+                        )
 
                         # Compute entropy bonus for policy diversity (numerically stable)
                         # Use log_softmax which is more stable than softmax + log
@@ -700,7 +697,6 @@ class StreamingTrainer:
                         loss = (
                             policy_loss
                             + self.value_loss_weight * value_loss
-                            + self.phase_loss_weight * phase_loss
                             - self.entropy_coefficient * entropy
                         ) / accum_steps
 
@@ -782,7 +778,7 @@ class StreamingTrainer:
                 )
 
                 # Cleanup chunk data to prevent memory fragmentation
-                del chunk, states, policy_indices, values, phases, indices
+                del chunk, states, policy_indices, values, indices
                 if chunk_idx % 5 == 0:  # Frequent lightweight cleanup
                     gc.collect(0)  # Generation 0 only (10x faster than full gc)
 
@@ -816,7 +812,6 @@ class StreamingTrainer:
                         states = chunk["states"]
                         policy_indices = chunk["policy_indices"]
                         values = chunk["values"]
-                        # phases not needed for validation (auxiliary task)
                     except MemoryError:
                         gc.collect()
                         if torch.cuda.is_available():
@@ -863,11 +858,16 @@ class StreamingTrainer:
                             1, batch_policy_indices.unsqueeze(1), 1.0
                         )
 
-                        pred_policies, pred_values, _ = self.network(batch_states)
+                        pred_policies, _, wdl_logits = self.network(batch_states)
                         policy_loss = nn.functional.cross_entropy(
                             pred_policies, batch_policies, label_smoothing=0.2
                         )
-                        value_loss = nn.functional.mse_loss(pred_values, batch_values)
+
+                        # Value loss: WDL cross-entropy
+                        wdl_targets = values_to_wdl_targets(batch_values)
+                        value_loss = nn.functional.cross_entropy(
+                            wdl_logits, wdl_targets, label_smoothing=0.1
+                        )
 
                         # Skip NaN losses in validation
                         p_loss = policy_loss.item()

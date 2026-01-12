@@ -186,8 +186,16 @@ def run_cli(
         print("Creating new untrained network")
         network = DualHeadNetwork()
 
-    # Create MCTS with batched inference
-    mcts = MCTS(network, num_simulations=num_simulations, batch_size=batch_size)
+    # Create MCTS with batched inference and WDL-aware settings
+    mcts = MCTS(
+        network,
+        num_simulations=num_simulations,
+        batch_size=batch_size,
+        # WDL-aware settings
+        contempt=0.5,
+        uncertainty_weight=0.2,
+        draw_sibling_fpu=True,
+    )
     mcts.temperature = 0.1  # Deterministic play
 
     # Game loop
@@ -298,16 +306,15 @@ def run_match(
         from src.chess_encoding.board_utils import get_raw_material_diff
 
         device = get_device()
-        print(f"NeuralMate2 Match Mode")
+        print("NeuralMate2 Match Mode")
         print("=" * 60)
         print(f"Device: {device}")
 
-        # Helper to get history_length from network
+        # Helper to get history_length from network (68 planes only)
         def get_history_length(network):
             planes = network.num_input_planes
-            if planes == 18:
-                return 0
-            return (planes - 6) // 12 - 1
+            # 68 planes = (history_length + 1) * 12 + 20
+            return (planes - 20) // 12 - 1
 
         # Load player 1
         history_length = 0
@@ -525,7 +532,6 @@ def run_train(
             network = DualHeadNetwork(
                 num_filters=config.network.num_filters,
                 num_residual_blocks=config.network.num_residual_blocks,
-                num_input_planes=config.network.num_input_planes,
             )
         else:
             print("\nCreating new network")

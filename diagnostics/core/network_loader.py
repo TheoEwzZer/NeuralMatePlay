@@ -75,7 +75,7 @@ def analyze_network_architecture(network, results: TestResults):
     config = network.get_config()
 
     print(subheader("Configuration"))
-    print(f"  Input planes:       {config['num_input_planes']}")
+    print("  Input planes:       68")
     print(f"  Filters:            {config['num_filters']}")
     print(f"  Residual blocks:    {config['num_residual_blocks']}")
     print(f"  Policy size:        {config['policy_size']}")
@@ -90,7 +90,7 @@ def analyze_network_architecture(network, results: TestResults):
     print(f"  Model size (approx):   {total_params * 4 / 1024 / 1024:.1f} MB")
 
     # Store for LLM
-    results.add_diagnostic("architecture", "input_planes", config["num_input_planes"])
+    results.add_diagnostic("architecture", "input_planes", 68)
     results.add_diagnostic("architecture", "filters", config["num_filters"])
     results.add_diagnostic(
         "architecture", "residual_blocks", config["num_residual_blocks"]
@@ -117,11 +117,14 @@ def analyze_network_architecture(network, results: TestResults):
 
     # Show key layers (must match actual module names in DualHeadNetwork)
     key_layers = [
+        # Policy head
         "policy_head.fc.weight",
         "policy_head.fc.bias",
-        "value_head.fc1.weight",
-        "value_head.fc2.weight",
-        "value_head.fc2.bias",
+        # WDL head (win/draw/loss)
+        "wdl_head.fc1.weight",
+        "wdl_head.fc1.bias",
+        "wdl_head.fc2.weight",
+        "wdl_head.fc2.bias",
     ]
 
     print(f"  {'Layer':<30} {'Mean':>10} {'Std':>10} {'Min':>10} {'Max':>10}")
@@ -138,7 +141,7 @@ def analyze_network_architecture(network, results: TestResults):
 
     # Check for issues
     for layer, stats in weight_stats.items():
-        if stats["std"] < 0.001 and layer != "value_head.fc2.bias":
+        if stats["std"] < 0.001 and layer != "wdl_head.fc2.bias":
             results.add_issue(
                 "HIGH",
                 "weights",

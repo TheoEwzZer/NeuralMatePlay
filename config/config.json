@@ -44,7 +44,7 @@
     "dirichlet_alpha": 0.3,
     "dirichlet_epsilon": 0.25,
     "c_puct": 1.5,
-    "pretrained_path": "models_save/saved_pretrained_best_7_network.pt",
+    "pretrained_path": "models/pretrained_best_1_network.pt",
     "pretrain_mix_ratio": 0.5,
     "pretrain_label_smoothing": 0.1,
     "pretrain_chunks_loaded": 15,

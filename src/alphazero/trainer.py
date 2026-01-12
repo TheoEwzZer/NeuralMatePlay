@@ -30,6 +30,23 @@ from .spatial_encoding import PositionHistory, DEFAULT_HISTORY_LENGTH
 from .device import get_device, supports_mixed_precision
 
 
+def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
+    """
+    Convert scalar values to WDL class targets.
+
+    Args:
+        values: Tensor of shape (batch,) with values in {-1, 0, 1}
+                1.0 = win, 0.0 = draw, -1.0 = loss
+
+    Returns:
+        Tensor of shape (batch,) with class indices:
+        0 = win, 1 = draw, 2 = loss
+    """
+    # Convert: 1.0 -> 0, 0.0 -> 1, -1.0 -> 2
+    wdl_targets = torch.round(1.0 - values).long()
+    return torch.clamp(wdl_targets, min=0, max=2)
+
+
 @dataclass
 class TrainingConfig:
     """Configuration for AlphaZero training."""
@@ -612,9 +629,9 @@ class AlphaZeroTrainer:
 
                 if self._use_amp:
                     with autocast(device_type="cuda"):
-                        pred_policies, pred_values, _ = self.network(states_t)
+                        pred_policies, _, wdl_logits = self.network(states_t)
                         policy_loss = self._policy_loss(pred_policies, policies_t)
-                        value_loss = self._value_loss(pred_values, values_t)
+                        value_loss = self._value_loss(wdl_logits, values_t)
                         loss = policy_loss + value_loss
 
                         # Add KL divergence loss to prevent catastrophic forgetting
@@ -624,13 +641,14 @@ class AlphaZeroTrainer:
                             loss = loss + self._current_kl_weight * kl_loss
 
                     self._scaler.scale(loss).backward()
-                    self._scaler.unscale_(self._optimizer)
+                    # Note: unscale_() is only needed if doing gradient clipping
+                    # step() handles unscaling automatically
                     self._scaler.step(self._optimizer)
                     self._scaler.update()
                 else:
-                    pred_policies, pred_values, _ = self.network(states_t)
+                    pred_policies, pred_values, wdl_logits = self.network(states_t)
                     policy_loss = self._policy_loss(pred_policies, policies_t)
-                    value_loss = self._value_loss(pred_values, values_t)
+                    value_loss = self._value_loss(wdl_logits, values_t)
                     loss = policy_loss + value_loss
 
                     # Add KL divergence loss to prevent catastrophic forgetting
@@ -701,11 +719,21 @@ class AlphaZeroTrainer:
 
     def _value_loss(
         self,
-        pred: torch.Tensor,
+        wdl_logits: torch.Tensor,
         target: torch.Tensor,
     ) -> torch.Tensor:
-        """MSE loss for value."""
-        return torch.nn.functional.mse_loss(pred, target)
+        """
+        Value loss: WDL cross-entropy.
+
+        Args:
+            wdl_logits: WDL logits (batch, 3)
+            target: Target values in {-1, 0, 1}
+
+        Returns:
+            Loss tensor
+        """
+        wdl_targets = values_to_wdl_targets(target)
+        return torch.nn.functional.cross_entropy(wdl_logits, wdl_targets)
 
     def _kl_divergence_loss(
         self,
@@ -1054,7 +1082,6 @@ class AlphaZeroTrainer:
             self._best_network = DualHeadNetwork(
                 num_filters=self.network.num_filters,
                 num_residual_blocks=self.network.num_residual_blocks,
-                num_input_planes=self.network.num_input_planes,
             )
             self._best_network.load_state_dict(self.network.state_dict())
             self._best_iteration = self._iteration
@@ -1248,23 +1275,30 @@ class AlphaZeroTrainer:
         self.network = DualHeadNetwork.load(checkpoint["network_path"])
         self._iteration = checkpoint["iteration"]
 
-        # Load optimizer state if available
+        # Recreate optimizer with new network's parameters
+        # This is critical: the old optimizer points to the old network's params
         state = checkpoint.get("state")
-        if state:
-            if "optimizer_state" in state:
-                try:
-                    self._optimizer.load_state_dict(state["optimizer_state"])
-                except Exception:
-                    pass  # Optimizer state may not match
+        lr = self.config.learning_rate
+        if state and "learning_rate" in state:
+            lr = state["learning_rate"]
 
-            if "learning_rate" in state:
-                for param_group in self._optimizer.param_groups:
-                    param_group["lr"] = state["learning_rate"]
+        self._optimizer = optim.AdamW(
+            self.network.parameters(),
+            lr=lr,
+            weight_decay=self.config.weight_decay,
+        )
 
-            # Note: Don't restore scaler state - it can cause issues after resume
-            # The scaler will auto-adjust its scale factor during training
-            if self._scaler:
-                self._scaler = GradScaler("cuda")  # Fresh scaler
+        # Load optimizer state if available
+        if state and "optimizer_state" in state:
+            try:
+                self._optimizer.load_state_dict(state["optimizer_state"])
+            except Exception:
+                pass  # Optimizer state may not match
+
+        # Note: Don't restore scaler state - it can cause issues after resume
+        # The scaler will auto-adjust its scale factor during training
+        if self._scaler:
+            self._scaler = GradScaler("cuda")  # Fresh scaler
 
         # Load buffer
         buffer = checkpoint.get("buffer")
@@ -1304,7 +1338,7 @@ class AlphaZeroTrainer:
         """
         all_stats = []
 
-        for i in range(num_iterations):
+        for _ in range(num_iterations):
             stats = self.train_iteration(callback)
             all_stats.append(stats)
 

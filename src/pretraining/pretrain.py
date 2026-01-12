@@ -139,6 +139,11 @@ def pretrain(
     # Check if we need to create or extend chunks
     metadata = ChunkManager.load_metadata(cfg.chunks_dir)
     processed_files = set(metadata.get("processed_files", [])) if metadata else set()
+
+    # Check for partially processed file (resume support)
+    current_file = metadata.get("current_file") if metadata else None
+    current_file_games = metadata.get("current_file_games", 0) if metadata else 0
+
     files_to_process = [p for p in pgn_paths if p not in processed_files]
 
     if files_to_process:
@@ -162,22 +167,34 @@ def pretrain(
         total_games_count = chunk_manager._games_processed
 
         for file_idx, pgn_file in enumerate(files_to_process):
-            print(
-                f"\n[File {file_idx + 1}/{len(files_to_process)}] Processing: {pgn_file}"
-            )
+            # Check if we're resuming this specific file
+            skip_games = 0
+            if current_file and pgn_file == current_file:
+                skip_games = current_file_games
+                print(
+                    f"\n[File {file_idx + 1}/{len(files_to_process)}] Resuming: {pgn_file} (skipping {skip_games} games)"
+                )
+            else:
+                print(
+                    f"\n[File {file_idx + 1}/{len(files_to_process)}] Processing: {pgn_file}"
+                )
+
+            # Track current file for crash recovery
+            chunk_manager.set_current_file(pgn_file, skip_games)
 
             processor = PGNProcessor(
                 pgn_file,
                 min_elo=cfg.min_elo,
                 max_games=cfg.max_games,  # Per-file limit
                 skip_first_n_moves=cfg.skip_first_n_moves,
+                skip_first_n_games=skip_games,
             )
 
             history = PositionHistory(3)  # Default history length
             prev_game_idx = -1
             file_position_count = 0
 
-            for board, move, outcome, phase in processor.process_all():
+            for board, move, outcome in processor.process_all():
                 if cfg.max_positions and total_position_count >= cfg.max_positions:
                     break
 
@@ -186,6 +203,8 @@ def pretrain(
                 if game_idx != prev_game_idx:
                     history.clear()
                     prev_game_idx = game_idx
+                    # Update current file progress for crash recovery
+                    chunk_manager.set_current_file(pgn_file, skip_games + game_idx)
 
                 history.push(board)
                 state = history.encode(from_perspective=True)
@@ -196,7 +215,7 @@ def pretrain(
                     continue
 
                 value = outcome if board.turn else -outcome
-                chunk_manager.add_example(state, move_idx, value, phase)
+                chunk_manager.add_example(state, move_idx, value)
                 file_position_count += 1
                 total_position_count += 1
 
@@ -207,7 +226,8 @@ def pretrain(
 
             # Track this file as processed
             processed_files.add(pgn_file)
-            total_games_count += processor.games_processed
+            total_games_count += processor.games_processed + skip_games
+            chunk_manager.clear_current_file()  # File fully processed
             print(
                 f"  Completed: {file_position_count:,} positions from {processor.games_processed} games"
             )
@@ -225,7 +245,7 @@ def pretrain(
         print(f"\nAll {len(pgn_paths)} PGN file(s) already processed.")
 
     if metadata:
-        print(f"\nChunk info:")
+        print("\nChunk info:")
         print(f"  Chunks: {metadata['num_chunks']}")
         print(f"  Total positions: {metadata['total_examples']:,}")
         games_processed = metadata.get("games_processed", 0)
@@ -235,13 +255,13 @@ def pretrain(
             else "  Games processed: unknown"
         )
 
-        # Estimate memory for full load
-        mem_gb = metadata["total_examples"] * (54 * 8 * 8 * 4 + 6) / (1024**3)
+        # Estimate memory for full load (68 planes per position)
+        mem_gb = metadata["total_examples"] * (68 * 8 * 8 * 4 + 6) / (1024**3)
         print(f"  Est. RAM needed: {mem_gb:.1f} GB")
 
         # Auto-enable streaming if too much data
-        if not streaming and mem_gb > 12:
-            print(f"  Auto-enabling streaming mode (>12GB needed)")
+        if not streaming and mem_gb > 6:
+            print("  Auto-enabling streaming mode (>6GB needed)")
             streaming = True
 
     # Create network
@@ -249,7 +269,6 @@ def pretrain(
         network = DualHeadNetwork(
             num_filters=network_cfg.num_filters,
             num_residual_blocks=network_cfg.num_residual_blocks,
-            num_input_planes=network_cfg.num_input_planes,
         )
     else:
         network = DualHeadNetwork()

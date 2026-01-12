@@ -22,7 +22,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Create default network
+  # Create default network (68 planes, 192 filters, 12 blocks)
   ./neural_mate_init -o models/random.pt
 
   # Create with custom architecture
@@ -59,17 +59,6 @@ Examples:
         help="Number of residual blocks (default: 12)",
     )
     parser.add_argument(
-        "--history",
-        type=int,
-        default=None,
-        help="History length for input planes (default: 3)",
-    )
-    parser.add_argument(
-        "--no-phase-head",
-        action="store_true",
-        help="Disable auxiliary phase prediction head",
-    )
-    parser.add_argument(
         "-f",
         "--force",
         action="store_true",
@@ -84,25 +73,19 @@ Examples:
         config = Config.load(args.config)
         num_filters = config.network.num_filters
         num_blocks = config.network.num_residual_blocks
-        history_length = config.network.history_length
     else:
         # Use defaults
         num_filters = 192
         num_blocks = 12
-        history_length = 3
 
     # Override with CLI arguments if provided
     if args.filters is not None:
         num_filters = args.filters
     if args.blocks is not None:
         num_blocks = args.blocks
-    if args.history is not None:
-        history_length = args.history
 
-    # Compute input planes from history length
-    num_input_planes = (history_length + 1) * 12 + 12
-
-    use_phase_head = not args.no_phase_head
+    # Fixed 68 input planes (no backward compatibility)
+    num_input_planes = 68
 
     # Check if output file exists
     if os.path.exists(args.output) and not args.force:
@@ -117,11 +100,10 @@ Examples:
     print("=" * 60)
     print()
     print("Architecture:")
-    print(f"  Input planes:       {num_input_planes}")
+    print(f"  Input planes:       {num_input_planes} (48 history + 20 metadata)")
     print(f"  Filters:            {num_filters}")
     print(f"  Residual blocks:    {num_blocks}")
-    print(f"  History length:     {history_length}")
-    print(f"  Phase head:         {'Yes' if use_phase_head else 'No'}")
+    print(f"  Heads:              Policy, WDL, Phase, MovesLeft")
     print()
 
     # Create the network
@@ -130,7 +112,6 @@ Examples:
         num_input_planes=num_input_planes,
         num_filters=num_filters,
         num_residual_blocks=num_blocks,
-        use_phase_head=use_phase_head,
     )
 
     # Count parameters

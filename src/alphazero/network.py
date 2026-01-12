@@ -2,11 +2,12 @@
 Neural network architecture for AlphaZero-style chess.
 
 Architecture: SE-ResNet with Spatial Attention
+- 68 input planes (48 history + 20 metadata including NNUE-style features)
 - Squeeze-and-Excitation blocks for channel recalibration
 - Spatial attention in final blocks for global awareness
 - Group Normalization for stability with small batches
 - GELU activation for smoother gradients
-- Dual heads: Policy (1858 moves) and Value (-1 to +1)
+- WDL head (Win/Draw/Loss probabilities)
 """
 
 import os
@@ -151,7 +152,7 @@ class PolicyHead(nn.Module):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, 32, 1, bias=False)
         self.gn = nn.GroupNorm(8, 32)
-        self.dropout = nn.Dropout(0.3)  # Increased regularization (was 0.2)
+        self.dropout = nn.Dropout(0.3)
         self.fc = nn.Linear(32 * 8 * 8, policy_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -159,44 +160,53 @@ class PolicyHead(nn.Module):
         x = self.gn(x)
         x = F.gelu(x)
         x = x.view(x.size(0), -1)
-        x = self.dropout(x)  # Apply dropout before FC
+        x = self.dropout(x)
         x = self.fc(x)
         # Clamp logits to prevent softmax overflow (|logit| > 88 causes overflow in float16)
         x = torch.clamp(x, min=-50, max=50)
         return x  # Clamped logits (softmax applied externally)
 
 
-class ValueHead(nn.Module):
+class WDLHead(nn.Module):
     """
-    Value head: outputs position evaluation in [-1, +1].
+    Win/Draw/Loss head: outputs probability distribution over outcomes.
 
-    Architecture optimized to prevent collapse:
-    - Increased capacity (8 conv channels, 512 hidden)
-    - Reduced dropout (0.3 instead of 0.5)
-    - Explicit weight initialization for output layer
+    Predicts:
+    - P(win): probability of winning
+    - P(draw): probability of drawing
+    - P(loss): probability of losing
+
+    The expected value can be computed as: E[V] = P(win) - P(loss)
+
+    This provides better calibration, especially for positions with high draw probability.
+    Used by Leela Chess Zero with proven success.
     """
 
     def __init__(self, in_channels: int, hidden_size: int = 512):
         super().__init__()
-        # Increased conv channels: 4 -> 8 for more capacity
         self.conv = nn.Conv2d(in_channels, 8, 1, bias=False)
-        self.gn = nn.GroupNorm(4, 8)  # 4 groups for 8 channels
-        # Increased hidden size: 256 -> 512
+        self.gn = nn.GroupNorm(4, 8)
         self.fc1 = nn.Linear(8 * 8 * 8, hidden_size)
-        # Reduced dropout: 0.5 -> 0.3 (matches policy head)
         self.dropout = nn.Dropout(0.3)
-        self.fc2 = nn.Linear(hidden_size, 1)
+        self.fc2 = nn.Linear(hidden_size, 3)  # 3 classes: win, draw, loss
 
-        # Explicit initialization to prevent collapse
         self._init_weights()
 
     def _init_weights(self):
-        """Initialize weights to encourage full use of [-1, 1] range."""
-        # Xavier init for fc2 to get reasonable initial outputs
+        """Initialize weights for balanced initial predictions."""
         nn.init.xavier_uniform_(self.fc2.weight)
         nn.init.zeros_(self.fc2.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+
+        Args:
+            x: Input tensor from backbone.
+
+        Returns:
+            WDL logits of shape (batch, 3) - [win, draw, loss]
+        """
         x = self.conv(x)
         x = self.gn(x)
         x = F.gelu(x)
@@ -205,54 +215,57 @@ class ValueHead(nn.Module):
         x = F.gelu(x)
         x = self.dropout(x)
         x = self.fc2(x)
-        x = torch.tanh(x)
-        return x.squeeze(-1)
+        return x  # logits, softmax applied externally
 
+    @staticmethod
+    def logits_to_value(wdl_logits: torch.Tensor) -> torch.Tensor:
+        """
+        Convert WDL logits to expected value in [-1, 1].
 
-class PhaseHead(nn.Module):
-    """
-    Auxiliary phase prediction head: opening/middlegame/endgame.
+        Args:
+            wdl_logits: WDL logits of shape (..., 3)
 
-    This is an auxiliary task that helps the network learn phase-specific features.
-    The phase prediction is not used during inference, only for training.
-    """
+        Returns:
+            Expected value: P(win) - P(loss), shape (...)
+        """
+        wdl_probs = F.softmax(wdl_logits, dim=-1)
+        # value = P(win) * 1 + P(draw) * 0 + P(loss) * (-1) = P(win) - P(loss)
+        return wdl_probs[..., 0] - wdl_probs[..., 2]
 
-    def __init__(self, in_channels: int):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channels, 4, 1, bias=False)
-        self.gn = nn.GroupNorm(2, 4)
-        self.fc = nn.Linear(4 * 8 * 8, 3)  # 3 phases: opening, middlegame, endgame
+    @staticmethod
+    def probs_to_value(wdl_probs: torch.Tensor) -> torch.Tensor:
+        """
+        Convert WDL probabilities to expected value.
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv(x)
-        x = self.gn(x)
-        x = F.gelu(x)
-        x = x.view(x.size(0), -1)
-        return self.fc(x)  # logits for 3 classes
+        Args:
+            wdl_probs: WDL probabilities of shape (..., 3)
+
+        Returns:
+            Expected value: P(win) - P(loss), shape (...)
+        """
+        return wdl_probs[..., 0] - wdl_probs[..., 2]
 
 
 class DualHeadNetwork(nn.Module):
     """
-    AlphaZero-style network with SE-ResNet, attention, and auxiliary phase head.
+    AlphaZero-style network with SE-ResNet and attention.
 
     Architecture:
-    - Input conv: planes -> filters
+    - Input: 68 planes (48 history + 20 metadata with NNUE-style features)
     - 10 SE-ResBlocks
     - 2 SE-ResBlocks with spatial attention
     - Policy head (move probabilities)
-    - Value head (position evaluation)
-    - Phase head (auxiliary task: opening/middlegame/endgame)
+    - WDL head (win/draw/loss probabilities)
     """
 
     def __init__(
         self,
-        num_input_planes: int = 60,
+        num_input_planes: int = 68,
         num_filters: int = 192,
         num_residual_blocks: int = 12,
         policy_size: int = MOVE_ENCODING_SIZE,
         se_reduction: int = 8,
         attention_heads: int = 4,
-        use_phase_head: bool = True,
     ):
         super().__init__()
 
@@ -262,7 +275,6 @@ class DualHeadNetwork(nn.Module):
         self._policy_size = policy_size
         self._se_reduction = se_reduction
         self._attention_heads = attention_heads
-        self._use_phase_head = use_phase_head
 
         # Input convolution
         self.input_conv = nn.Conv2d(
@@ -287,13 +299,7 @@ class DualHeadNetwork(nn.Module):
 
         # Output heads
         self.policy_head = PolicyHead(num_filters, policy_size)
-        self.value_head = ValueHead(num_filters)
-
-        # Auxiliary phase head (for multi-task learning during training)
-        if use_phase_head:
-            self.phase_head = PhaseHead(num_filters)
-        else:
-            self.phase_head = None
+        self.wdl_head = WDLHead(num_filters)
 
         # Move to device
         self.to(get_device())
@@ -322,23 +328,22 @@ class DualHeadNetwork(nn.Module):
             "policy_size": self._policy_size,
             "se_reduction": self._se_reduction,
             "attention_heads": self._attention_heads,
-            "use_phase_head": self._use_phase_head,
         }
 
     def forward(
         self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass.
 
         Args:
-            x: Input tensor of shape (batch, planes, 8, 8).
+            x: Input tensor of shape (batch, 68, 8, 8).
 
         Returns:
-            Tuple of (policy_logits, values, phase_logits):
+            Tuple of (policy_logits, values, wdl_logits):
             - policy_logits: (batch, policy_size)
-            - values: (batch,)
-            - phase_logits: (batch, 3) or None if no phase head
+            - values: (batch,) - scalar values computed from WDL
+            - wdl_logits: (batch, 3) - [P(win), P(draw), P(loss)]
         """
         # Input processing
         x = self.input_conv(x)
@@ -351,22 +356,17 @@ class DualHeadNetwork(nn.Module):
 
         # Output heads
         policy = self.policy_head(x)
-        value = self.value_head(x)
+        wdl_logits = self.wdl_head(x)
+        value = WDLHead.logits_to_value(wdl_logits)
 
-        # Auxiliary phase head (only during training)
-        if self.phase_head is not None:
-            phase = self.phase_head(x)
-        else:
-            phase = None
-
-        return policy, value, phase
+        return policy, value, wdl_logits
 
     def predict_single(self, state: np.ndarray) -> tuple[np.ndarray, float]:
         """
         Predict policy and value for a single position.
 
         Args:
-            state: Board encoding of shape (planes, 8, 8).
+            state: Board encoding of shape (68, 8, 8).
 
         Returns:
             Tuple of (policy, value):
@@ -394,7 +394,7 @@ class DualHeadNetwork(nn.Module):
         Predict policy and value for a batch of positions.
 
         Args:
-            states: Board encodings of shape (batch, planes, 8, 8).
+            states: Board encodings of shape (batch, 68, 8, 8).
 
         Returns:
             Tuple of (policies, values):
@@ -416,6 +416,72 @@ class DualHeadNetwork(nn.Module):
             policies = F.softmax(policy_logits, dim=-1)
 
             return policies.cpu().numpy(), values.cpu().numpy()
+
+    def predict_single_with_wdl(
+        self, state: np.ndarray
+    ) -> tuple[np.ndarray, float, np.ndarray]:
+        """
+        Predict policy, value, and WDL probabilities for a single position.
+
+        Args:
+            state: Board encoding of shape (68, 8, 8).
+
+        Returns:
+            Tuple of (policy, value, wdl_probs):
+            - policy: numpy array of shape (policy_size,) with probabilities
+            - value: float in [-1, +1]
+            - wdl_probs: numpy array of shape (3,) with [P(win), P(draw), P(loss)]
+        """
+        self.eval()
+        with torch.inference_mode():
+            x = torch.from_numpy(state).unsqueeze(0)
+            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
+
+            with torch.amp.autocast(device_type="cuda"):
+                policy_logits, value, wdl_logits = self(x)
+
+            policy_logits = torch.clamp(policy_logits, min=-50, max=50)
+            policy = F.softmax(policy_logits, dim=-1)
+            wdl_probs = F.softmax(wdl_logits, dim=-1)
+
+            return (
+                policy[0].cpu().numpy(),
+                value[0].item(),
+                wdl_probs[0].cpu().numpy(),
+            )
+
+    def predict_batch_with_wdl(
+        self, states: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Predict policy, value, and WDL probabilities for a batch of positions.
+
+        Args:
+            states: Board encodings of shape (batch, 68, 8, 8).
+
+        Returns:
+            Tuple of (policies, values, wdl_probs):
+            - policies: numpy array of shape (batch, policy_size) with probabilities
+            - values: numpy array of shape (batch,)
+            - wdl_probs: numpy array of shape (batch, 3) with [P(win), P(draw), P(loss)]
+        """
+        self.eval()
+        with torch.inference_mode():
+            x = torch.from_numpy(states)
+            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
+
+            with torch.amp.autocast(device_type="cuda"):
+                policy_logits, values, wdl_logits = self(x)
+
+            policy_logits = torch.clamp(policy_logits, min=-50, max=50)
+            policies = F.softmax(policy_logits, dim=-1)
+            wdl_probs = F.softmax(wdl_logits, dim=-1)
+
+            return (
+                policies.cpu().numpy(),
+                values.cpu().numpy(),
+                wdl_probs.cpu().numpy(),
+            )
 
     def save(self, path: str) -> None:
         """
@@ -456,41 +522,25 @@ class DualHeadNetwork(nn.Module):
 
         checkpoint = torch.load(path, map_location=device, weights_only=False)
 
-        # Handle different save formats
-        if "config" in checkpoint:
-            config = checkpoint["config"]
-            state_dict = checkpoint["state_dict"]
-        else:
-            # Legacy format: just state dict
-            state_dict = checkpoint
-            # Infer config from state dict
-            input_conv_weight = state_dict.get("input_conv.weight")
-            if input_conv_weight is not None:
-                num_input_planes = input_conv_weight.shape[1]
-                num_filters = input_conv_weight.shape[0]
-            else:
-                num_input_planes = 54
-                num_filters = 192
+        if "config" not in checkpoint:
+            raise ValueError(
+                f"Invalid checkpoint format: {path}. "
+                "Only 68-plane WDL models are supported."
+            )
 
-            config = {
-                "num_input_planes": num_input_planes,
-                "num_filters": num_filters,
-                "num_residual_blocks": 12,
-                "policy_size": MOVE_ENCODING_SIZE,
-                "use_phase_head": False,  # Legacy models don't have phase head
-            }
+        config = checkpoint["config"]
+        state_dict = checkpoint["state_dict"]
 
-        # Handle backward compatibility for use_phase_head
-        if "use_phase_head" not in config:
-            # Check if state_dict has phase_head weights
-            has_phase_head = any(k.startswith("phase_head.") for k in state_dict.keys())
-            config["use_phase_head"] = has_phase_head
+        # Filter out deprecated auxiliary head weights (phase_head, moves_left_head)
+        # This allows loading old checkpoints that had these heads
+        deprecated_prefixes = ("phase_head.", "moves_left_head.")
+        filtered_state_dict = {
+            k: v for k, v in state_dict.items() if not k.startswith(deprecated_prefixes)
+        }
 
         # Create network with config
         network = cls(**config)
-
-        # Load state dict with strict=False to handle missing phase_head in old models
-        network.load_state_dict(state_dict, strict=False)
+        network.load_state_dict(filtered_state_dict)
         network.to(device)
         network.eval()
 

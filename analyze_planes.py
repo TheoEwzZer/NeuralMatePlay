@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analyze and visualize the 60 input planes of the neural network.
+Analyze and visualize the 68 input planes of the neural network.
 
 Usage:
     python analyze_planes.py                     # Analyze starting position
@@ -62,6 +62,16 @@ def get_plane_descriptions(white_to_move: bool = True) -> dict:
     descs[57] = "Meta: In Check"
     descs[58] = "Meta: My Attack Map"
     descs[59] = "Meta: Opp Attack Map"
+
+    # Semantic planes (NNUE-inspired features)
+    descs[60] = "Semantic: King Attackers"
+    descs[61] = "Semantic: King Defenders"
+    descs[62] = "Semantic: Knight Mobility"
+    descs[63] = "Semantic: Bishop Mobility"
+    descs[64] = "Semantic: Passed Pawns"
+    descs[65] = "Semantic: Isolated Pawns"
+    descs[66] = "Semantic: Weak Squares"
+    descs[67] = "Semantic: Center Control"
 
     return descs
 
@@ -165,7 +175,7 @@ def analyze_from_pgn(pgn_path: str, max_positions: int = 1000) -> dict:
 
     # Track per-plane stats across all positions
     plane_usage = {
-        i: {"nonzero_count": 0, "total_sum": 0.0, "positions": 0} for i in range(60)
+        i: {"nonzero_count": 0, "total_sum": 0.0, "positions": 0} for i in range(68)
     }
 
     positions_analyzed = 0
@@ -195,7 +205,7 @@ def analyze_from_pgn(pgn_path: str, max_positions: int = 1000) -> dict:
                 planes = history.encode()
 
                 # Update stats
-                for i in range(60):
+                for i in range(68):
                     plane = planes[i]
                     nonzero = np.count_nonzero(plane)
                     plane_usage[i]["nonzero_count"] += 1 if nonzero > 0 else 0
@@ -303,7 +313,7 @@ def print_pgn_summary(plane_usage: dict) -> None:
     rarely_used = []
     never_used = []
 
-    for i in range(60):
+    for i in range(68):
         usage = plane_usage[i]
         desc = PLANE_DESCRIPTIONS.get(i, f"Plane {i}")
         total = usage["positions"]
@@ -333,7 +343,7 @@ def print_pgn_summary(plane_usage: dict) -> None:
     print("=" * 90)
 
     # Summary
-    print(f"\nTotal planes: 60")
+    print(f"\nTotal planes: 68")
     print(
         f"Always used (>50%): {sum(1 for u in plane_usage.values() if u['positions'] > 0 and u['nonzero_count']/u['positions'] >= 0.5)}"
     )
@@ -406,7 +416,7 @@ def show_gui(
     # Title
     title_label = tk.Label(
         root,
-        text=f"60 Input Planes - {title}",
+        text=f"68 Input Planes - {title}",
         font=FONTS["title"],
         fg=COLORS["text_primary"],
         bg=COLORS["bg_primary"],
@@ -583,7 +593,7 @@ def show_gui(
     slider = ttk.Scale(
         slider_frame,
         from_=0,
-        to=59,
+        to=67,
         orient=tk.HORIZONTAL,
         variable=current_plane,
         command=on_slider_change,
@@ -609,7 +619,7 @@ def show_gui(
         draw_board(idx)
 
     def next_plane():
-        idx = min(59, current_plane.get() + 1)
+        idx = min(67, current_plane.get() + 1)
         current_plane.set(idx)
         slider.set(idx)
         draw_board(idx)
@@ -694,9 +704,9 @@ def show_gui(
             slider.set(0)
             draw_board(0)
         elif event.keysym == "End":
-            current_plane.set(59)
-            slider.set(59)
-            draw_board(59)
+            current_plane.set(67)
+            slider.set(67)
+            draw_board(67)
 
     root.bind("<Key>", on_key)
 
@@ -709,7 +719,7 @@ def show_gui(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyze and visualize the 60 input planes"
+        description="Analyze and visualize the 68 input planes"
     )
     parser.add_argument(
         "--fen",

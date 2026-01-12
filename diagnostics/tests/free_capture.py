@@ -95,7 +95,7 @@ def test_free_capture(network, results: TestResults):
             )
         print(f"\n  Value head evaluation: {value:+.4f} {value_assessment}")
         print(
-            "    → Expected: positive (+0.3 to +0.9), higher for more valuable pieces"
+            "    -> Expected: positive (+0.3 to +0.9), higher for more valuable pieces"
         )
 
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -117,7 +117,7 @@ def test_free_capture(network, results: TestResults):
             )
         print(f"  Policy entropy: {entropy:.4f} {entropy_assessment}")
         print(
-            f"    → Expected: low (<2.0) for obvious captures, lower = more confident"
+            f"    -> Expected: low (<2.0) for obvious captures, lower = more confident"
         )
 
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Type':<15}")

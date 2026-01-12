@@ -564,12 +564,11 @@ class MatchApp:
                 }
             )
 
-            # Helper to get history_length from network
+            # Helper to get history_length from network (68 planes only)
             def get_history_length(network):
                 planes = network.num_input_planes
-                if planes == 18:
-                    return 0
-                return (planes - 6) // 12 - 1
+                # 68 planes = (history_length + 1) * 12 + 20
+                return (planes - 20) // 12 - 1
 
             # Load player 1
             history_length = 0

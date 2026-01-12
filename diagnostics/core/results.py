@@ -91,7 +91,7 @@ class TestResults:
             score_str = f"{t['score']:.2f}/{t['max_score']:.1f}"
             pct = (t["score"] / t["max_score"] * 100) if t["max_score"] > 0 else 0
             bar_len = int(pct / 10)
-            bar = "█" * bar_len + "░" * (10 - bar_len)
+            bar = "#" * bar_len + "-" * (10 - bar_len)
             print(f"  {t['name']:<33} {score_str:>10} [{bar}] {status_str}")
 
         print("-" * 60)

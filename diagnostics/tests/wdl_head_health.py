@@ -1,4 +1,4 @@
-"""Test: Value Head Health (MCTS Critical)."""
+"""Test: WDL Head Health (MCTS Critical)."""
 
 import numpy as np
 import chess
@@ -15,20 +15,20 @@ from ..core import (
 )
 
 
-def test_value_head_health(network, results: TestResults):
+def test_wdl_head_health(network, results: TestResults):
     """
-    Test if the value head is healthy enough for MCTS to work.
+    Test if the WDL head is healthy enough for MCTS to work.
 
-    A collapsed value head outputs ~0 for all positions, making MCTS blind.
+    A collapsed WDL head outputs ~0 for all positions, making MCTS blind.
     This test is CRITICAL because MCTS = Policy × Value, so a broken
-    value head renders the entire system useless regardless of policy quality.
+    WDL head renders the entire system useless regardless of policy quality.
 
     Tests:
     1. Variance across diverse positions (should be high)
     2. Range spanning most of [-1, 1]
     3. Clear separation between winning/losing positions
     """
-    print(header("TEST: Value Head Health (MCTS Critical)"))
+    print(header("TEST: WDL Head Health (MCTS Critical)"))
 
     # Diverse test positions: clearly winning, clearly losing, neutral
     test_positions = [
@@ -80,8 +80,8 @@ def test_value_head_health(network, results: TestResults):
 
         print(f"  {desc:<25} {expected_sign:>+10.2f} {value:>+10.4f} {status}")
 
-        results.add_diagnostic("value_health", f"{desc}_expected", expected_sign)
-        results.add_diagnostic("value_health", f"{desc}_actual", float(value))
+        results.add_diagnostic("wdl_health", f"{desc}_expected", expected_sign)
+        results.add_diagnostic("wdl_health", f"{desc}_actual", float(value))
 
     print("  " + "-" * 60)
 
@@ -113,12 +113,12 @@ def test_value_head_health(network, results: TestResults):
     print(f"  Correct directions:     {correct_direction}/{len(test_positions)}")
 
     # Store diagnostics
-    results.add_diagnostic("value_health", "std_deviation", float(value_std))
-    results.add_diagnostic("value_health", "range", float(value_range))
-    results.add_diagnostic("value_health", "mean", float(value_mean))
-    results.add_diagnostic("value_health", "separation", float(separation))
-    results.add_diagnostic("value_health", "correct_directions", correct_direction)
-    results.add_diagnostic("value_health", "all_values", [float(v) for v in values])
+    results.add_diagnostic("wdl_health", "std_deviation", float(value_std))
+    results.add_diagnostic("wdl_health", "range", float(value_range))
+    results.add_diagnostic("wdl_health", "mean", float(value_mean))
+    results.add_diagnostic("wdl_health", "separation", float(separation))
+    results.add_diagnostic("wdl_health", "correct_directions", correct_direction)
+    results.add_diagnostic("wdl_health", "all_values", [float(v) for v in values])
 
     # Calculate health score (0-1)
     # Weights: std (40%), range (30%), separation (30%)
@@ -134,7 +134,7 @@ def test_value_head_health(network, results: TestResults):
     print(subheader("MCTS Usability Score"))
 
     if is_collapsed:
-        print(f"\n  {Colors.RED}{Colors.BOLD}⚠ VALUE HEAD COLLAPSED ⚠{Colors.ENDC}")
+        print(f"\n  {Colors.RED}{Colors.BOLD}[!] WDL HEAD COLLAPSED [!]{Colors.ENDC}")
         print(
             f"  {Colors.RED}MCTS is effectively BLIND - cannot distinguish positions{Colors.ENDC}"
         )
@@ -144,14 +144,14 @@ def test_value_head_health(network, results: TestResults):
         health_score = 0.0  # Force zero score
         results.add_issue(
             "CRITICAL",
-            "value_head",
-            "VALUE HEAD COLLAPSED - MCTS UNUSABLE",
+            "wdl_head",
+            "WDL HEAD COLLAPSED - MCTS UNUSABLE",
             f"std={value_std:.4f}, range={value_range:.4f}. Network outputs ~constant value for all positions.",
         )
         results.add_recommendation(
             0,  # Highest priority
-            "URGENT: Retrain from scratch or fix value head architecture",
-            "Collapsed value head makes MCTS blind. Games are effectively random.",
+            "URGENT: Retrain from scratch or fix WDL head architecture",
+            "Collapsed WDL head makes MCTS blind. Games are effectively random.",
         )
     else:
         bar_len = int(health_score * 20)
@@ -165,7 +165,7 @@ def test_value_head_health(network, results: TestResults):
             color = Colors.RED
             status = "POOR"
 
-        bar = color + "█" * bar_len + Colors.DIM + "░" * (20 - bar_len) + Colors.ENDC
+        bar = color + "#" * bar_len + Colors.DIM + "-" * (20 - bar_len) + Colors.ENDC
         print(
             f"\n  Health: [{bar}] {health_score*100:.0f}% - {color}{status}{Colors.ENDC}"
         )
@@ -173,8 +173,8 @@ def test_value_head_health(network, results: TestResults):
         if health_score < 0.7:
             results.add_issue(
                 "HIGH" if health_score < 0.4 else "MEDIUM",
-                "value_head",
-                f"Value head health is {status.lower()} ({health_score*100:.0f}%)",
+                "wdl_head",
+                f"WDL head health is {status.lower()} ({health_score*100:.0f}%)",
                 f"std={value_std:.4f}, range={value_range:.4f}, separation={separation:.4f}",
             )
 
@@ -191,10 +191,10 @@ def test_value_head_health(network, results: TestResults):
     for i in range(bins):
         bar_width = int(hist[i] / max_count * 30) if max_count > 0 else 0
         label = f"{edges[i]:+.1f} to {edges[i+1]:+.1f}"
-        bar = "█" * bar_width
+        bar = "#" * bar_width
         print(f"    {label}: {bar} ({hist[i]})")
 
     passed = health_score >= 0.5 and not is_collapsed
-    results.add("Value Head Health", passed, health_score, 1.0)
+    results.add("WDL Head Health", passed, health_score, 1.0)
 
     return health_score

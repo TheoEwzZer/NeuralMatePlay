@@ -17,8 +17,8 @@ from .check_response import test_check_response
 from .tactics import test_tactics
 from .endgame import test_endgame
 from .development import test_development
-from .value_head import test_value_head
-from .value_head_health import test_value_head_health
+from .wdl_head import test_wdl_head
+from .wdl_head_health import test_wdl_head_health
 from .policy_diversity import test_policy_diversity
 from .mcts_behavior import test_mcts_behavior
 from .inference_speed import test_inference_speed
@@ -34,8 +34,8 @@ ALL_TESTS = [
     (test_tactics, "Tactics", 1.0),
     (test_endgame, "Endgame Understanding", 1.0),
     (test_development, "Opening Development", 1.0),
-    (test_value_head, "Material Evaluation", 1.0),
-    (test_value_head_health, "Value Head Health", 3.0),  # CRITICAL for MCTS
+    (test_wdl_head, "Material Evaluation", 1.0),
+    (test_wdl_head_health, "WDL Head Health", 3.0),  # CRITICAL for MCTS
     (test_policy_diversity, "Policy Diversity", 1.0),
     (test_mcts_behavior, "MCTS Behavior", 1.0),
     # (test_inference_speed, "Inference Speed", 1.0),
@@ -51,8 +51,8 @@ __all__ = [
     "test_tactics",
     "test_endgame",
     "test_development",
-    "test_value_head",
-    "test_value_head_health",
+    "test_wdl_head",
+    "test_wdl_head_health",
     "test_policy_diversity",
     "test_mcts_behavior",
     "test_inference_speed",

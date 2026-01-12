@@ -13,11 +13,6 @@ from io import StringIO
 import chess
 import chess.pgn
 
-from src.chess_encoding.board_utils import get_game_phase
-
-# Phase string to int mapping
-PHASE_TO_INT = {"opening": 0, "middlegame": 1, "endgame": 2}
-
 
 class PGNProcessor:
     """
@@ -34,6 +29,7 @@ class PGNProcessor:
         max_games: Optional[int] = None,
         chunk_size: int = 10000,
         skip_first_n_moves: int = 8,
+        skip_first_n_games: int = 0,
     ):
         """
         Initialize PGN processor.
@@ -44,17 +40,20 @@ class PGNProcessor:
             max_games: Maximum number of games to process (None = all).
             chunk_size: Number of games to process per chunk.
             skip_first_n_moves: Skip opening moves (too theoretical).
+            skip_first_n_games: Skip first N games (for resume).
         """
         self.pgn_path = pgn_path
         self.min_elo = min_elo
         self.max_games = max_games
         self.chunk_size = chunk_size
         self.skip_first_n_moves = skip_first_n_moves
+        self.skip_first_n_games = skip_first_n_games
 
         # File stats
         self._file_size = os.path.getsize(pgn_path) if os.path.exists(pgn_path) else 0
         self._bytes_read = 0
         self._games_processed = 0
+        self._games_skipped = 0
         self._positions_extracted = 0
 
     @property
@@ -80,14 +79,13 @@ class PGNProcessor:
 
     def process_all(
         self,
-    ) -> Generator[Tuple[chess.Board, chess.Move, float, int], None, None]:
+    ) -> Generator[Tuple[chess.Board, chess.Move, float], None, None]:
         """
         Process entire PGN file.
 
         Yields:
-            Tuple of (board, move, outcome, phase) for each position.
+            Tuple of (board, move, outcome) for each position.
             outcome: 1.0 for white win, -1.0 for black win, 0.0 for draw.
-            phase: 0=opening, 1=middlegame, 2=endgame.
         """
         with open(self.pgn_path, "r", encoding="utf-8", errors="ignore") as f:
             while True:
@@ -114,6 +112,11 @@ class PGNProcessor:
                 if outcome is None:
                     continue
 
+                # Skip games for resume functionality
+                if self._games_skipped < self.skip_first_n_games:
+                    self._games_skipped += 1
+                    continue
+
                 self._games_processed += 1
 
                 # Extract positions
@@ -128,11 +131,7 @@ class PGNProcessor:
                         board.push(move)
                         continue
 
-                    # Get phase (0=opening, 1=middlegame, 2=endgame)
-                    phase = PHASE_TO_INT[get_game_phase(board)]
-
-                    # Yield position with phase
-                    yield board.copy(), move, outcome, phase
+                    yield board.copy(), move, outcome
                     self._positions_extracted += 1
 
                     board.push(move)
@@ -140,7 +139,7 @@ class PGNProcessor:
     def process_chunk(
         self,
         start_game: int = 0,
-    ) -> Generator[Tuple[chess.Board, chess.Move, float, int], None, None]:
+    ) -> Generator[Tuple[chess.Board, chess.Move, float], None, None]:
         """
         Process a chunk of games.
 
@@ -148,8 +147,7 @@ class PGNProcessor:
             start_game: Game index to start from.
 
         Yields:
-            Tuple of (board, move, outcome, phase) for each position.
-            phase: 0=opening, 1=middlegame, 2=endgame.
+            Tuple of (board, move, outcome) for each position.
         """
         games_in_chunk = 0
         current_game = 0
@@ -190,10 +188,7 @@ class PGNProcessor:
                         board.push(move)
                         continue
 
-                    # Get phase (0=opening, 1=middlegame, 2=endgame)
-                    phase = PHASE_TO_INT[get_game_phase(board)]
-
-                    yield board.copy(), move, outcome, phase
+                    yield board.copy(), move, outcome
                     self._positions_extracted += 1
 
                     board.push(move)

@@ -24,7 +24,6 @@ from .move_encoding import (
     MOVE_ENCODING_SIZE,
 )
 from .spatial_encoding import (
-    encode_board_spatial,
     encode_board_with_history,
     encode_single_position,
     PositionHistory,
@@ -64,7 +63,6 @@ __all__ = [
     "flip_policy",
     "MOVE_ENCODING_SIZE",
     # Spatial encoding
-    "encode_board_spatial",
     "encode_board_with_history",
     "encode_single_position",
     "PositionHistory",

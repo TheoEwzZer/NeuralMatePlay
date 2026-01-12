@@ -168,10 +168,10 @@ def compare_two_models(model1_path: str, model2_path: str, quick: bool = False):
         # Determine winner (weighted wins count more)
         diff = score2 - score1
         if diff > 0.05:
-            winner = f"{Colors.CYAN}→ M2{Colors.ENDC}"
+            winner = f"{Colors.CYAN}-> M2{Colors.ENDC}"
             model2_wins += weight  # Weighted wins
         elif diff < -0.05:
-            winner = f"{Colors.CYAN}M1 ←{Colors.ENDC}"
+            winner = f"{Colors.CYAN}<- M1{Colors.ENDC}"
             model1_wins += weight  # Weighted wins
         else:
             winner = f"{Colors.DIM}tie{Colors.ENDC}"
@@ -339,11 +339,11 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
         if len(scores_for_trend) >= 2:
             diff = scores_for_trend[-1] - scores_for_trend[0]
             if diff > 0.1:
-                trend = f"{Colors.GREEN}↑{Colors.ENDC}"
+                trend = f"{Colors.GREEN}+{Colors.ENDC}"
             elif diff < -0.1:
-                trend = f"{Colors.RED}↓{Colors.ENDC}"
+                trend = f"{Colors.RED}-{Colors.ENDC}"
             else:
-                trend = f"{Colors.YELLOW}→{Colors.ENDC}"
+                trend = f"{Colors.YELLOW}={Colors.ENDC}"
         else:
             trend = "-"
         row += f"   {trend:>6}"
@@ -372,11 +372,11 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
         last_avg = np.mean(list(all_results[sorted_iters[-1]].values()))
         diff = last_avg - first_avg
         if diff > 0.05:
-            trend = f"{Colors.GREEN}↑{Colors.ENDC}"
+            trend = f"{Colors.GREEN}+{Colors.ENDC}"
         elif diff < -0.05:
-            trend = f"{Colors.RED}↓{Colors.ENDC}"
+            trend = f"{Colors.RED}-{Colors.ENDC}"
         else:
-            trend = f"{Colors.YELLOW}→{Colors.ENDC}"
+            trend = f"{Colors.YELLOW}={Colors.ENDC}"
         print(f"   {trend:>6}")
     else:
         print()

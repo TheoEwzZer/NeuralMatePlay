@@ -16,13 +16,7 @@ class NetworkConfig:
 
     num_filters: int = 192
     num_residual_blocks: int = 12
-    history_length: int = 3
-    num_input_planes: int = 60  # Computed from history_length
-
-    def __post_init__(self):
-        # Compute input planes from history length
-        # (history + 1) positions × 12 planes + 12 metadata planes (includes attack maps)
-        self.num_input_planes = (self.history_length + 1) * 12 + 12
+    history_length: int = 3  # Fixed at 3 (4 positions total)
 
 
 @dataclass
@@ -175,8 +169,6 @@ class Config:
             for key, value in data["network"].items():
                 if hasattr(config.network, key):
                     setattr(config.network, key, value)
-            # Recompute input planes
-            config.network.__post_init__()
 
         return config
 

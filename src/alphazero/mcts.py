@@ -44,6 +44,8 @@ class MCTSNode:
     virtual_loss: int = 0  # Virtual loss for parallel search
     children: dict = field(default_factory=dict)  # move -> MCTSNode
     is_expanded: bool = False
+    # WDL probabilities: [P(win), P(draw), P(loss)] - summed for averaging
+    total_wdl: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float32))
 
     @property
     def q_value(self) -> float:
@@ -51,6 +53,13 @@ class MCTSNode:
         if self.visit_count == 0:
             return 0.0
         return self.total_value / self.visit_count
+
+    @property
+    def wdl(self) -> np.ndarray:
+        """Average WDL probabilities [P(win), P(draw), P(loss)]."""
+        if self.visit_count == 0:
+            return np.array([0.33, 0.34, 0.33], dtype=np.float32)
+        return self.total_wdl / self.visit_count
 
     @property
     def effective_visits(self) -> int:
@@ -78,6 +87,10 @@ class MCTS:
         history_length: int = DEFAULT_HISTORY_LENGTH,
         fpu_reduction: float = 0.25,  # First Play Urgency reduction
         temperature: float = 0.0,  # 0 = deterministic, >0 = sample from policy
+        # WDL-aware parameters
+        contempt: float = 0.0,  # Dynamic draw penalty (scales with W-L)
+        uncertainty_weight: float = 0.0,  # Exploration bonus for sharp positions
+        draw_sibling_fpu: bool = False,  # Adaptive FPU when draw is found
     ):
         """
         Initialize MCTS.
@@ -92,6 +105,10 @@ class MCTS:
             history_length: Number of past positions to track.
             fpu_reduction: FPU reduction for unexplored moves.
             temperature: Move selection temperature (0 = best move, >0 = sample).
+            contempt: Dynamic draw penalty. Only active when winning (W > L) to avoid
+                draws. When losing, contempt=0 to play for complications. Use ~0.5.
+            uncertainty_weight: Bonus for exploring sharp positions (high W and L).
+            draw_sibling_fpu: If True, don't reduce FPU when a draw move is found.
         """
         self.network = network
         self.num_simulations = num_simulations
@@ -102,6 +119,10 @@ class MCTS:
         self.history_length = history_length
         self.fpu_reduction = fpu_reduction
         self.temperature = temperature
+        # WDL-aware settings
+        self.contempt = contempt
+        self.uncertainty_weight = uncertainty_weight
+        self.draw_sibling_fpu = draw_sibling_fpu
 
         # Random number generator
         self._rng = np.random.default_rng(42)
@@ -109,9 +130,9 @@ class MCTS:
         # Transposition table (position hash -> node)
         self._transposition_table: dict[str, MCTSNode] = {}
 
-        # Evaluation cache (position hash -> (policy, value))
+        # Evaluation cache (position hash -> (policy, value, wdl))
         # Avoids re-evaluating same positions reached via different paths
-        self._eval_cache: dict[str, tuple[np.ndarray, float]] = {}
+        self._eval_cache: dict[str, tuple[np.ndarray, float, np.ndarray]] = {}
         self._max_eval_cache_size = 50000  # ~400MB max (8KB per entry)
 
         # Position history tracker
@@ -387,26 +408,42 @@ class MCTS:
         self,
         path: list[tuple[chess.Move | None, MCTSNode]],
         value: float,
+        wdl: np.ndarray | None = None,
     ) -> None:
         """
-        Backpropagate value through the path, removing virtual losses.
+        Backpropagate value and WDL through the path, removing virtual losses.
 
         Args:
             path: List of (move, node) pairs from root to leaf.
             value: Value from the leaf node's perspective.
+            wdl: WDL probabilities [W, D, L] from leaf's perspective.
         """
+        # Default WDL based on value if not provided
+        if wdl is None:
+            if value > 0.5:
+                wdl = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+            elif value < -0.5:
+                wdl = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+            else:
+                wdl = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+
         for i, (move, path_node) in enumerate(reversed(path)):
             # Remove virtual loss
             if move is not None:
                 path_node.virtual_loss = max(0, path_node.virtual_loss - 1)
 
-            # Update statistics (flip value for each level)
+            # Update statistics (flip value and WDL for each level)
             if i % 2 == 0:
                 path_node.visit_count += 1
                 path_node.total_value += value
+                path_node.total_wdl += wdl
             else:
                 path_node.visit_count += 1
                 path_node.total_value -= value
+                # Flip WDL: opponent's win is our loss
+                path_node.total_wdl += np.array(
+                    [wdl[2], wdl[1], wdl[0]], dtype=np.float32
+                )
 
     def _expand_node_with_eval(
         self,
@@ -414,6 +451,7 @@ class MCTS:
         board: chess.Board,
         policy: np.ndarray,
         value: float,
+        wdl: np.ndarray,
     ) -> None:
         """
         Expand node using pre-computed policy and value from batch evaluation.
@@ -423,13 +461,15 @@ class MCTS:
             board: Board state at this node.
             policy: Policy array from neural network.
             value: Value from neural network.
+            wdl: WDL probabilities [P(win), P(draw), P(loss)].
         """
         if node.is_expanded:
             return
 
-        # Store initial value
+        # Store initial value and WDL
         node.visit_count = 1
         node.total_value = value
+        node.total_wdl = wdl.copy()
 
         # Create children for legal moves
         flip = board.turn == chess.BLACK
@@ -507,33 +547,38 @@ class MCTS:
                 result = leaf_board.result()
                 if result == "1-0":
                     value = 1.0
+                    wdl = np.array([1.0, 0.0, 0.0], dtype=np.float32)
                 elif result == "0-1":
                     value = -1.0
+                    wdl = np.array([0.0, 0.0, 1.0], dtype=np.float32)
                 else:
                     value = 0.0
+                    wdl = np.array([0.0, 1.0, 0.0], dtype=np.float32)
                 # Adjust for perspective
                 if leaf_board.turn == chess.BLACK:
                     value = -value
+                    wdl = np.array([wdl[2], wdl[1], wdl[0]], dtype=np.float32)
 
-                self._backpropagate(path, value)
+                self._backpropagate(path, value, wdl)
                 simulations_done += 1
 
-            # Handle already expanded leaves (use stored value)
+            # Handle already expanded leaves (use stored value and WDL)
             for path, leaf_board, leaf_node in expanded_leaves:
                 value = leaf_node.q_value
-                self._backpropagate(path, value)
+                wdl = leaf_node.wdl
+                self._backpropagate(path, value, wdl)
                 simulations_done += 1
 
             # Batch evaluate new leaves (with cache lookup)
             if new_leaves:
                 # Separate cached and uncached positions
-                cached_evals = []  # (index, policy, value)
+                cached_evals = []  # (index, policy, value, wdl)
                 to_evaluate = []  # (index, state, leaf_board)
 
                 for i, (path, leaf_board, leaf_node) in enumerate(new_leaves):
                     cached = self._get_cached_eval(leaf_board)
                     if cached is not None:
-                        cached_evals.append((i, cached[0], cached[1]))
+                        cached_evals.append((i, cached[0], cached[1], cached[2]))
                     else:
                         self._history.clear()
                         self._history.push(leaf_board)
@@ -541,41 +586,46 @@ class MCTS:
                         to_evaluate.append((i, state, leaf_board))
 
                 # Batch evaluate uncached positions
-                eval_results = {}  # index -> (policy, value)
+                eval_results = {}  # index -> (policy, value, wdl)
 
                 if to_evaluate:
                     states_array = np.array(
                         [s for _, s, _ in to_evaluate], dtype=np.float32
                     )
-                    policies, values = self.network.predict_batch(states_array)
+                    policies, values, wdl_batch = self.network.predict_batch_with_wdl(
+                        states_array
+                    )
 
                     for j, (i, _, leaf_board) in enumerate(to_evaluate):
                         policy = policies[j]
                         value = float(values[j])
-                        eval_results[i] = (policy, value)
+                        wdl = wdl_batch[j]
+                        eval_results[i] = (policy, value, wdl)
                         # Cache the result
-                        self._cache_eval(leaf_board, policy, value)
+                        self._cache_eval(leaf_board, policy, value, wdl)
 
                 # Add cached results
-                for i, policy, value in cached_evals:
-                    eval_results[i] = (policy, value)
+                for i, policy, value, wdl in cached_evals:
+                    eval_results[i] = (policy, value, wdl)
 
                 # Expand nodes and backpropagate
                 for i, (path, leaf_board, leaf_node) in enumerate(new_leaves):
-                    policy, value = eval_results[i]
+                    policy, value, wdl = eval_results[i]
 
                     # Expand the node with pre-computed values
-                    self._expand_node_with_eval(leaf_node, leaf_board, policy, value)
+                    self._expand_node_with_eval(
+                        leaf_node, leaf_board, policy, value, wdl
+                    )
 
-                    # Backpropagate
-                    self._backpropagate(path, value)
+                    # Backpropagate with WDL
+                    self._backpropagate(path, value, wdl)
                     simulations_done += 1
 
     def _select_child(
         self, node: MCTSNode, board: chess.Board
     ) -> tuple[chess.Move, MCTSNode]:
         """
-        Select child node using PUCT formula.
+        Select child node using PUCT formula with WDL enhancements.
 
         Args:
             node: Parent node.
@@ -590,8 +640,19 @@ class MCTS:
         best_move = None
         best_child = None
 
-        # FPU (First Play Urgency)
-        fpu_value = node.q_value - self.fpu_reduction
+        # Draw-Sibling-FPU: check if any sibling is a confirmed draw
+        draw_found = False
+        if self.draw_sibling_fpu:
+            for child in node.children.values():
+                if child.visit_count > 0 and child.wdl[1] > 0.9:
+                    draw_found = True
+                    break
+
+        # FPU (First Play Urgency) - no reduction if draw found
+        if draw_found:
+            fpu_value = node.q_value  # Compare against current position
+        else:
+            fpu_value = node.q_value - self.fpu_reduction
 
         for move, child in node.children.items():
             if child.effective_visits == 0:
@@ -601,8 +662,25 @@ class MCTS:
                 # but parent needs value from parent's perspective
                 q = -child.q_value
 
+                # Dynamic contempt: only penalize draws when winning
+                # When losing, contempt=0 to let MCTS play for complications/blunders
+                if self.contempt != 0.0 and node.visit_count > 0:
+                    node_wdl = node.wdl  # Current position WDL
+                    # Only apply contempt when winning (W > L), else 0
+                    win_margin = node_wdl[0] - node_wdl[2]
+                    dynamic_contempt = self.contempt * max(win_margin, 0.0)
+                    draw_prob = child.wdl[1]
+                    q -= dynamic_contempt * draw_prob
+
             # PUCT formula
             u = self.c_puct * child.prior * sqrt_total / (1 + child.effective_visits)
+
+            # Uncertainty bonus: explore sharp positions more
+            if self.uncertainty_weight > 0.0 and child.visit_count > 0:
+                # uncertainty = sqrt(W * L), maximized when position is sharp
+                uncertainty = math.sqrt(child.wdl[0] * child.wdl[2])
+                u *= (1.0 + self.uncertainty_weight * uncertainty)
+
             score = q + u
 
             if score > best_score:
@@ -626,19 +704,20 @@ class MCTS:
         # Check cache first
         cached = self._get_cached_eval(board)
         if cached is not None:
-            policy, value = cached
+            policy, value, wdl = cached
         else:
             # Get policy from neural network
             self._history.clear()
             self._history.push(board)
             state = self._history.encode(from_perspective=True)
-            policy, value = self.network.predict_single(state)
+            policy, value, wdl = self.network.predict_single_with_wdl(state)
             # Cache the result
-            self._cache_eval(board, policy, value)
+            self._cache_eval(board, policy, value, wdl)
 
-        # Store initial value
+        # Store initial value and WDL
         node.visit_count = 1
         node.total_value = value
+        node.total_wdl = wdl.copy()
 
         # Create children for legal moves
         flip = board.turn == chess.BLACK
@@ -766,7 +845,7 @@ class MCTS:
     def _get_cached_eval(
         self,
         board: chess.Board,
-    ) -> tuple[np.ndarray, float] | None:
+    ) -> tuple[np.ndarray, float, np.ndarray] | None:
         """
         Get cached evaluation for a position.
 
@@ -774,7 +853,7 @@ class MCTS:
             board: Board position.
 
         Returns:
-            Tuple of (policy, value) if cached, None otherwise.
+            Tuple of (policy, value, wdl) if cached, None otherwise.
         """
         # Use FEN with side-to-move for unique key
         key = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
@@ -785,6 +864,7 @@ class MCTS:
         board: chess.Board,
         policy: np.ndarray,
         value: float,
+        wdl: np.ndarray,
     ) -> None:
         """
         Cache evaluation for a position.
@@ -793,13 +873,14 @@ class MCTS:
             board: Board position.
             policy: Policy array.
             value: Value estimate.
+            wdl: WDL probabilities [P(win), P(draw), P(loss)].
         """
         # Clear cache if too large to avoid memory issues
         if len(self._eval_cache) >= self._max_eval_cache_size:
             self._eval_cache.clear()
 
         key = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
-        self._eval_cache[key] = (policy.copy(), value)
+        self._eval_cache[key] = (policy.copy(), value, wdl.copy())
 
     def get_pv(self, board: chess.Board, depth: int = 50) -> list[chess.Move]:
         """
@@ -963,13 +1044,22 @@ class MCTS:
             board: Current position.
 
         Returns:
-            List of dicts with keys: move, visits, q_value, prior
+            List of dicts with keys: move, visits, q_value, prior, wdl
             Sorted by visits descending.
         """
         node = self._get_or_create_node(board)
         stats = []
 
         for move, child in node.children.items():
+            # Get WDL from child's perspective and flip for current player
+            # Child stores [P(win), P(draw), P(loss)] from opponent's view
+            # We flip to [P(loss), P(draw), P(win)] = current player's view
+            child_wdl = child.wdl
+            # Flip: current player's win = opponent's loss
+            flipped_wdl = np.array(
+                [child_wdl[2], child_wdl[1], child_wdl[0]], dtype=np.float32
+            )
+
             stats.append(
                 {
                     "move": move,
@@ -979,6 +1069,7 @@ class MCTS:
                     "q_value": -child.q_value if child.visit_count > 0 else 0.0,
                     "prior": child.prior,
                     "total_value": child.total_value,
+                    "wdl": flipped_wdl,  # [P(win), P(draw), P(loss)] for current player
                 }
             )
 

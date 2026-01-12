@@ -660,20 +660,10 @@ Examples:
         network = DualHeadNetwork(
             num_filters=config.network.num_filters,
             num_residual_blocks=config.network.num_residual_blocks,
-            num_input_planes=config.network.num_input_planes,
         )
     else:
         print("\nCreating new network")
         network = DualHeadNetwork()
-
-    # Sync history_length with network architecture
-    # Formula: num_input_planes = (history_length + 1) * 12 + 12 metadata (includes attack maps)
-    network_history_length = (network.num_input_planes - 12) // 12 - 1
-    if network_history_length != cfg.history_length:
-        print(
-            f"  Adjusting history_length: {cfg.history_length} -> {network_history_length} (from network)"
-        )
-        cfg.history_length = network_history_length
 
     # Create trainer
     trainer = AlphaZeroTrainer(network, cfg)

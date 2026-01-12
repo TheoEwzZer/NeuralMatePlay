@@ -7,9 +7,10 @@ Displays search statistics for top candidate moves after AI move.
 import tkinter as tk
 from tkinter import ttk
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import chess
+import numpy as np
 
 try:
     from ..styles import COLORS, FONTS
@@ -24,8 +25,11 @@ class MCTSMoveStats:
     move: chess.Move
     san: str  # Standard algebraic notation
     visits: int
-    q_value: float  # Win rate (0 to 1)
+    q_value: float  # Value estimate (-1 to +1)
     prior: float  # Policy prior probability
+    wdl: np.ndarray = field(
+        default_factory=lambda: np.array([0.33, 0.34, 0.33], dtype=np.float32)
+    )  # [P(win), P(draw), P(loss)]
 
 
 class MCTSPanel(tk.Frame):
@@ -90,10 +94,13 @@ class MCTSPanel(tk.Frame):
         header_frame.pack(fill=tk.X, padx=5, pady=(0, 2))
 
         headers = [
-            ("Move", 50, "w"),
-            ("Visits", 50, "e"),
-            ("%", 50, "e"),
+            ("Move", 48, "w"),
+            ("Visits", 48, "e"),
+            ("%", 40, "e"),
             ("Q-value", 55, "e"),
+            ("W", 45, "e"),
+            ("D", 45, "e"),
+            ("L", 45, "e"),
             ("Prior", 45, "e"),
         ]
 
@@ -180,13 +187,19 @@ class MCTSPanel(tk.Frame):
             move = stat["move"]
             san = board.san(move) if isinstance(move, chess.Move) else str(move)
 
+            # Get WDL or use default
+            wdl = stat.get("wdl", np.array([0.33, 0.34, 0.33], dtype=np.float32))
+            if not isinstance(wdl, np.ndarray):
+                wdl = np.array(wdl, dtype=np.float32)
+
             self._moves.append(
                 MCTSMoveStats(
                     move=move,
                     san=san,
                     visits=stat.get("visits", 0),
-                    q_value=stat.get("q_value", 0.5),
+                    q_value=stat.get("q_value", 0.0),
                     prior=stat.get("prior", 0.0),
+                    wdl=wdl,
                 )
             )
 
@@ -284,6 +297,47 @@ class MCTSPanel(tk.Frame):
             anchor="e",
         )
         q_label.pack(side=tk.LEFT, padx=2)
+
+        # W, D, L as separate columns
+        win_pct = stat.wdl[0] * 100
+        draw_pct = stat.wdl[1] * 100
+        loss_pct = stat.wdl[2] * 100
+
+        # Win (green)
+        win_label = tk.Label(
+            row,
+            text=f"{win_pct:.1f}",
+            font=("Consolas", 9),
+            fg=COLORS["q_value_positive"],
+            bg=bg,
+            width=5,
+            anchor="e",
+        )
+        win_label.pack(side=tk.LEFT, padx=2)
+
+        # Draw (gray)
+        draw_label = tk.Label(
+            row,
+            text=f"{draw_pct:.1f}",
+            font=("Consolas", 9),
+            fg=COLORS["text_muted"],
+            bg=bg,
+            width=5,
+            anchor="e",
+        )
+        draw_label.pack(side=tk.LEFT, padx=2)
+
+        # Loss (red)
+        loss_label = tk.Label(
+            row,
+            text=f"{loss_pct:.1f}",
+            font=("Consolas", 9),
+            fg=COLORS["q_value_negative"],
+            bg=bg,
+            width=5,
+            anchor="e",
+        )
+        loss_label.pack(side=tk.LEFT, padx=2)
 
         # Prior (policy probability with 1 decimal)
         prior_pct = stat.prior * 100

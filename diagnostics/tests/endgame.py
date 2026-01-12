@@ -103,15 +103,15 @@ def test_endgame(network, results: TestResults):
             if err["expected"] == "positive" and err["actual"] <= 0:
                 results.add_issue(
                     "CRITICAL",
-                    "value_head",
-                    f"Value head gives wrong sign for {err['position']}",
+                    "wdl_head",
+                    f"WDL head gives wrong sign for {err['position']}",
                     f"Expected positive (material {err['material']:+d}), got {err['actual']:+.4f}",
                 )
             elif err["expected"] == "negative" and err["actual"] >= 0:
                 results.add_issue(
                     "CRITICAL",
-                    "value_head",
-                    f"Value head gives wrong sign for {err['position']}",
+                    "wdl_head",
+                    f"WDL head gives wrong sign for {err['position']}",
                     f"Expected negative (material {err['material']:+d}), got {err['actual']:+.4f}",
                 )
 

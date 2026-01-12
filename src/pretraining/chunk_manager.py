@@ -56,12 +56,13 @@ class ChunkManager:
         self._state_buffer: list[np.ndarray] = []
         self._policy_buffer: list[int] = []  # Store as indices
         self._value_buffer: list[float] = []
-        self._phase_buffer: list[int] = []  # 0=opening, 1=middlegame, 2=endgame
 
         self._chunk_count = 0
         self._total_examples = 0
         self._games_processed = 0
         self._processed_files: List[str] = []
+        self._current_file: Optional[str] = None
+        self._current_file_games: int = 0
 
         # Resume from existing chunks
         if resume:
@@ -71,6 +72,8 @@ class ChunkManager:
                 self._total_examples = metadata.get("total_examples", 0)
                 self._games_processed = metadata.get("games_processed", 0)
                 self._processed_files = metadata.get("processed_files", [])
+                self._current_file = metadata.get("current_file")
+                self._current_file_games = metadata.get("current_file_games", 0)
                 if verbose:
                     print(
                         f"Resuming from chunk {self._chunk_count}, {self._games_processed} games already processed"
@@ -78,6 +81,10 @@ class ChunkManager:
                     if self._processed_files:
                         print(
                             f"  Already processed files: {len(self._processed_files)}"
+                        )
+                    if self._current_file:
+                        print(
+                            f"  Partial file: {self._current_file} ({self._current_file_games} games)"
                         )
 
     def get_chunk_path(self, chunk_idx: int) -> str:
@@ -89,7 +96,6 @@ class ChunkManager:
         state: np.ndarray,
         policy_idx: int,
         value: float,
-        phase: int = 1,
     ) -> None:
         """
         Add a single training example.
@@ -98,12 +104,10 @@ class ChunkManager:
             state: Board state encoding (C, H, W).
             policy_idx: Index of the move in policy vector.
             value: Game outcome from perspective of current player.
-            phase: Game phase (0=opening, 1=middlegame, 2=endgame).
         """
         self._state_buffer.append(state)
         self._policy_buffer.append(policy_idx)
         self._value_buffer.append(value)
-        self._phase_buffer.append(phase)
 
         # Flush when buffer is full
         if len(self._state_buffer) >= self.chunk_size:
@@ -119,7 +123,6 @@ class ChunkManager:
         states = np.array(self._state_buffer, dtype=np.float32)
         policy_indices = np.array(self._policy_buffer, dtype=np.uint16)
         values = np.array(self._value_buffer, dtype=np.float32)
-        phases = np.array(self._phase_buffer, dtype=np.uint8)
 
         # Validate data before writing to prevent corrupted chunks
         if np.isnan(states).any() or np.isinf(states).any():
@@ -130,7 +133,6 @@ class ChunkManager:
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
-            self._phase_buffer.clear()
             return
 
         if np.isnan(values).any() or np.isinf(values).any():
@@ -141,7 +143,6 @@ class ChunkManager:
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
-            self._phase_buffer.clear()
             return
 
         chunk_path = self.get_chunk_path(self._chunk_count)
@@ -152,8 +153,6 @@ class ChunkManager:
             f.create_dataset("policy_indices", data=policy_indices)
             # Values - small, no compression needed
             f.create_dataset("values", data=values)
-            # Phases - small, no compression needed (0=opening, 1=middlegame, 2=endgame)
-            f.create_dataset("phases", data=phases)
 
         n_examples = len(self._state_buffer)
         self._total_examples += n_examples
@@ -165,8 +164,25 @@ class ChunkManager:
         self._state_buffer.clear()
         self._policy_buffer.clear()
         self._value_buffer.clear()
-        self._phase_buffer.clear()
         self._chunk_count += 1
+
+        # Save metadata after each chunk for crash recovery
+        self._save_metadata_incremental()
+
+    def _save_metadata_incremental(self) -> None:
+        """Save metadata incrementally for crash recovery."""
+        metadata = {
+            "num_chunks": self._chunk_count,
+            "total_examples": self._total_examples,
+            "chunk_size": self.chunk_size,
+            "games_processed": self._games_processed,
+            "processed_files": self._processed_files,
+            "current_file": self._current_file,
+            "current_file_games": self._current_file_games,
+        }
+        metadata_path = os.path.join(self.chunks_dir, "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
 
     def set_games_processed(self, count: int) -> None:
         """Set the number of games processed (for metadata)."""
@@ -179,6 +195,20 @@ class ChunkManager:
     def get_processed_files(self) -> List[str]:
         """Get the list of already processed PGN files."""
         return self._processed_files.copy()
+
+    def set_current_file(self, file_path: Optional[str], games_processed: int = 0) -> None:
+        """Set the current file being processed (for resume tracking)."""
+        self._current_file = file_path
+        self._current_file_games = games_processed
+
+    def get_current_file(self) -> tuple[Optional[str], int]:
+        """Get the current file and games processed in it."""
+        return self._current_file, self._current_file_games
+
+    def clear_current_file(self) -> None:
+        """Clear current file tracking (when file is fully processed)."""
+        self._current_file = None
+        self._current_file_games = 0
 
     def finalize(self) -> int:
         """
@@ -198,6 +228,8 @@ class ChunkManager:
             "chunk_size": self.chunk_size,
             "games_processed": self._games_processed,
             "processed_files": self._processed_files,
+            "current_file": self._current_file,
+            "current_file_games": self._current_file_games,
         }
         metadata_path = os.path.join(self.chunks_dir, "metadata.json")
         with open(metadata_path, "w") as f:
@@ -257,17 +289,20 @@ class ChunkManager:
     def load_chunk(cls, chunk_path: str) -> dict:
         """Load a single chunk file."""
         with h5py.File(chunk_path, "r") as f:
+            # Validate required fields
+            required_fields = ["states", "policy_indices", "values"]
+            missing = [field for field in required_fields if field not in f]
+            if missing:
+                raise ValueError(
+                    f"Chunk {chunk_path} is missing required fields: {missing}. "
+                    "Please regenerate chunks with the latest preprocessing."
+                )
+
             data = {
                 "states": f["states"][:],
                 "policy_indices": f["policy_indices"][:],
                 "values": f["values"][:],
             }
-            # Backward compatibility: old chunks may not have phases
-            if "phases" in f:
-                data["phases"] = f["phases"][:]
-            else:
-                # Default to middlegame (1) for old chunks
-                data["phases"] = np.ones(len(data["states"]), dtype=np.uint8)
 
         # Validate data for NaN/Inf values
         if np.isnan(data["states"]).any() or np.isinf(data["states"]).any():

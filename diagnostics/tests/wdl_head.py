@@ -1,4 +1,4 @@
-"""Test: Value Head Material Evaluation."""
+"""Test: WDL Head Material Evaluation."""
 
 import numpy as np
 import chess
@@ -14,9 +14,9 @@ from ..core import (
 )
 
 
-def test_value_head(network, results: TestResults):
-    """Test if the value head correctly evaluates material imbalances."""
-    print(header("TEST: Value Head Material Evaluation"))
+def test_wdl_head(network, results: TestResults):
+    """Test if the WDL head correctly evaluates material imbalances."""
+    print(header("TEST: WDL Head Material Evaluation"))
 
     # Test positions with BOTH White to move (WTM) and Black to move (BTM)
     # Value is always from CURRENT PLAYER's perspective:
@@ -126,7 +126,7 @@ def test_value_head(network, results: TestResults):
     value_std = np.std(values)
     value_range = max(values) - min(values)
 
-    print(subheader("Value Head Statistics"))
+    print(subheader("WDL Head Statistics"))
     print(f"  Correct evaluations:   {correct}/{len(test_positions)}")
     print(f"  Wrong sign errors:     {wrong_sign}")
     print(f"  Average error:         {avg_error:.4f}")
@@ -155,30 +155,30 @@ def test_value_head(network, results: TestResults):
         if abs(bias) > 0.3:
             if bias > 0:
                 print(
-                    f"\n  {Colors.RED}⚠️  PERSPECTIVE BIAS DETECTED: WTM {bias*100:+.0f}% better than BTM{Colors.ENDC}"
+                    f"\n  {Colors.RED}[!] PERSPECTIVE BIAS DETECTED: WTM {bias*100:+.0f}% better than BTM{Colors.ENDC}"
                 )
                 print(
-                    f"  {Colors.YELLOW}   → Network may not generalize well to Black's perspective{Colors.ENDC}"
+                    f"  {Colors.YELLOW}   -> Network may not generalize well to Black's perspective{Colors.ENDC}"
                 )
                 results.add_issue(
                     "HIGH",
-                    "value_head",
+                    "wdl_head",
                     f"Perspective bias: WTM accuracy {wtm_pct:.0f}% vs BTM {btm_pct:.0f}%",
                     "Network evaluates differently depending on who is to move",
                 )
             else:
                 print(
-                    f"\n  {Colors.RED}⚠️  PERSPECTIVE BIAS DETECTED: BTM {-bias*100:+.0f}% better than WTM{Colors.ENDC}"
+                    f"\n  {Colors.RED}[!] PERSPECTIVE BIAS DETECTED: BTM {-bias*100:+.0f}% better than WTM{Colors.ENDC}"
                 )
                 results.add_issue(
                     "HIGH",
-                    "value_head",
+                    "wdl_head",
                     f"Perspective bias: BTM accuracy {btm_pct:.0f}% vs WTM {wtm_pct:.0f}%",
                     "Network evaluates differently depending on who is to move",
                 )
         else:
             print(
-                f"\n  {Colors.GREEN}✓ No significant perspective bias detected{Colors.ENDC}"
+                f"\n  {Colors.GREEN}[OK] No significant perspective bias detected{Colors.ENDC}"
             )
 
     results.add_diagnostic("material_eval", "correct_count", correct)
@@ -200,24 +200,24 @@ def test_value_head(network, results: TestResults):
     if value_std < 0.1:
         results.add_issue(
             "CRITICAL",
-            "value_head",
-            f"Value head has very low variance (std={value_std:.4f})",
+            "wdl_head",
+            f"WDL head has very low variance (std={value_std:.4f})",
             "Output is nearly constant regardless of position - training may have collapsed",
         )
 
     if wrong_sign > 0:
         results.add_issue(
             "CRITICAL",
-            "value_head",
-            f"Value head gives wrong sign for {wrong_sign} positions",
+            "wdl_head",
+            f"WDL head gives wrong sign for {wrong_sign} positions",
             "Network doesn't understand basic material advantage",
         )
 
     if value_range < 0.2:
         results.add_issue(
             "HIGH",
-            "value_head",
-            f"Value head has very narrow range ({value_range:.4f})",
+            "wdl_head",
+            f"WDL head has very narrow range ({value_range:.4f})",
             "Cannot distinguish between winning and losing positions",
         )
 
@@ -227,7 +227,7 @@ def test_value_head(network, results: TestResults):
     if not passed:
         results.add_recommendation(
             1,
-            "URGENT: Fix value head training",
+            "URGENT: Fix WDL head training",
             f"Only {correct}/{len(test_positions)} correct, value std={value_std:.4f}",
         )
 
