@@ -44,6 +44,13 @@ class PretrainingConfig:
     gradient_accumulation_steps: int = (
         1  # Accumulate gradients over N steps (effective batch = batch_size * N)
     )
+    # Training dynamics (prevent catastrophic forgetting)
+    weight_decay: float = 1e-4  # AdamW weight decay
+    gradient_clip_norm: float = 1.0  # Gradient clipping max norm
+    lr_decay_factor: float = 0.7  # ReduceLROnPlateau decay factor
+    lr_decay_patience: int = 5  # Epochs before LR decay triggers
+    min_learning_rate: float = 1e-5  # Minimum LR floor
+    checkpoint_keep_last: int = 10  # Keep last N checkpoints
 
     def get_pgn_paths(self) -> List[str]:
         """Get all PGN paths as a list (handles both legacy and new format)."""

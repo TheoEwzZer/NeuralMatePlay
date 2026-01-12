@@ -294,6 +294,13 @@ def pretrain(
             entropy_coefficient=cfg.entropy_coefficient,
             prefetch_workers=cfg.prefetch_workers,
             gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+            # Training dynamics (prevent catastrophic forgetting)
+            weight_decay=cfg.weight_decay,
+            gradient_clip_norm=cfg.gradient_clip_norm,
+            lr_decay_factor=cfg.lr_decay_factor,
+            lr_decay_patience=cfg.lr_decay_patience,
+            min_learning_rate=cfg.min_learning_rate,
+            checkpoint_keep_last=cfg.checkpoint_keep_last,
         )
         return trainer.train(cfg.epochs)
 

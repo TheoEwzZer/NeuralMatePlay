@@ -162,6 +162,13 @@ class StreamingTrainer:
         entropy_coefficient: float = 0.01,
         prefetch_workers: int = 2,
         gradient_accumulation_steps: int = 1,
+        # Training dynamics (prevent catastrophic forgetting)
+        weight_decay: float = 1e-4,
+        gradient_clip_norm: float = 1.0,
+        lr_decay_factor: float = 0.7,
+        lr_decay_patience: int = 5,
+        min_learning_rate: float = 1e-5,
+        checkpoint_keep_last: int = 10,
     ):
         """
         Initialize streaming trainer.
@@ -187,6 +194,13 @@ class StreamingTrainer:
         self.entropy_coefficient = entropy_coefficient
         self.prefetch_workers = prefetch_workers
         self.gradient_accumulation_steps = gradient_accumulation_steps
+        # Training dynamics parameters
+        self.weight_decay = weight_decay
+        self.gradient_clip_norm = gradient_clip_norm
+        self.lr_decay_factor = lr_decay_factor
+        self.lr_decay_patience = lr_decay_patience
+        self.min_learning_rate = min_learning_rate
+        self.checkpoint_keep_last = checkpoint_keep_last
         self.chunks_dir = chunks_dir
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -220,7 +234,7 @@ class StreamingTrainer:
         self.optimizer = optim.AdamW(
             network.parameters(),
             lr=learning_rate,
-            weight_decay=5e-4,  # Increased for regularization
+            weight_decay=self.weight_decay,
         )
 
         # Get chunk paths
@@ -240,7 +254,11 @@ class StreamingTrainer:
         # Checkpoint manager
         checkpoint_dir = os.path.dirname(output_path) or "models"
         checkpoint_name = os.path.splitext(os.path.basename(output_path))[0]
-        self.checkpoint_manager = CheckpointManager(checkpoint_dir, verbose=False)
+        self.checkpoint_manager = CheckpointManager(
+            checkpoint_dir,
+            keep_last_n=self.checkpoint_keep_last,
+            verbose=False,
+        )
         self.checkpoint_name = checkpoint_name
 
         # Random number generator
@@ -287,7 +305,7 @@ class StreamingTrainer:
         self.optimizer = optim.AdamW(
             self.network.parameters(),
             lr=self.learning_rate,
-            weight_decay=5e-4,  # Increased for regularization
+            weight_decay=self.weight_decay,
         )
 
         # Recreate scaler (don't load old state - causes "No inf checks" error)
@@ -353,13 +371,13 @@ class StreamingTrainer:
         torch.set_float32_matmul_precision("high")
 
         # Create scheduler - ReduceLROnPlateau for adaptive learning
-        # Reduces LR by factor of 0.5 when val loss doesn't improve for 3 epochs
+        # Reduces LR when val loss doesn't improve for lr_decay_patience epochs
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode="min",
-            factor=0.5,
-            patience=3,
-            min_lr=1e-6,
+            factor=self.lr_decay_factor,
+            patience=self.lr_decay_patience,
+            min_lr=self.min_learning_rate,
         )
 
         # Restore scheduler state if resuming
@@ -652,9 +670,10 @@ class StreamingTrainer:
                                 self.scaler.reset_on_nan()
                                 self.scaler.update()
                             else:
-                                # Use tighter gradient clipping to prevent explosions
+                                # Gradient clipping to prevent explosions
                                 nn.utils.clip_grad_norm_(
-                                    self.network.parameters(), max_norm=0.5
+                                    self.network.parameters(),
+                                    max_norm=self.gradient_clip_norm,
                                 )
                                 self.scaler.step(self.optimizer)
                                 self.scaler.update()
@@ -734,9 +753,10 @@ class StreamingTrainer:
                                 )
                                 self.optimizer.zero_grad()
                             else:
-                                # Use tighter gradient clipping to prevent explosions
+                                # Gradient clipping to prevent explosions
                                 nn.utils.clip_grad_norm_(
-                                    self.network.parameters(), max_norm=0.5
+                                    self.network.parameters(),
+                                    max_norm=self.gradient_clip_norm,
                                 )
                                 self.optimizer.step()
                                 self.optimizer.zero_grad()
