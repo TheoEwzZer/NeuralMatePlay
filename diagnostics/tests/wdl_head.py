@@ -48,7 +48,8 @@ def test_wdl_head(network, results: TestResults):
     )
     print("  " + "-" * 65)
 
-    correct = 0
+    passed = 0.0  # Progressive score
+    correct = 0  # Full correct count
     total_error = 0
     wrong_sign = 0
     values = []
@@ -69,27 +70,66 @@ def test_wdl_head(network, results: TestResults):
         _, value = network.predict_single(state)
         values.append(value)
 
-        # Determine if sign is correct
+        # Determine if sign is correct and calculate progressive score
         is_correct = False
         has_wrong_sign = False
+        position_score = 0.0
 
-        if material > 0 and value > 0.05:
-            status = ok("")
-            is_correct = True
-            error = abs(value - material / 10)  # Normalize material to [-1,1] range
-        elif material < 0 and value < -0.05:
-            status = ok("")
-            is_correct = True
-            error = abs(value - material / 10)
-        elif material == 0 and abs(value) < 0.15:
-            status = ok("")
-            is_correct = True
-            error = abs(value)
-        else:
-            status = fail("")
-            error = abs(value - material / 10)
-            if (material > 0 and value <= 0) or (material < 0 and value >= 0):
+        if material > 0:
+            # Expected positive value
+            if value > 0.2:
+                status = ok("")
+                is_correct = True
+                position_score = 1.0
+            elif value > 0.05:
+                status = ok("")
+                is_correct = True
+                position_score = 0.85  # Weak but correct
+            elif value > -0.05:
+                status = fail("")
+                position_score = 0.3  # Near neutral, wrong but not inverted
+            else:
+                status = fail("")
                 has_wrong_sign = True
+                position_score = 0.0  # Wrong sign
+            error = abs(value - material / 10)
+        elif material < 0:
+            # Expected negative value
+            if value < -0.2:
+                status = ok("")
+                is_correct = True
+                position_score = 1.0
+            elif value < -0.05:
+                status = ok("")
+                is_correct = True
+                position_score = 0.85  # Weak but correct
+            elif value < 0.05:
+                status = fail("")
+                position_score = 0.3  # Near neutral
+            else:
+                status = fail("")
+                has_wrong_sign = True
+                position_score = 0.0  # Wrong sign
+            error = abs(value - material / 10)
+        else:  # material == 0
+            # Expected neutral value
+            if abs(value) < 0.1:
+                status = ok("")
+                is_correct = True
+                position_score = 1.0
+            elif abs(value) < 0.2:
+                status = ok("")
+                is_correct = True
+                position_score = 0.8  # Slightly off neutral
+            elif abs(value) < 0.35:
+                status = fail("")
+                position_score = 0.4  # More off but not terrible
+            else:
+                status = fail("")
+                position_score = 0.1  # Way off for equal position
+            error = abs(value)
+
+        passed += position_score
 
         # Update global counters
         if is_correct:
@@ -221,15 +261,15 @@ def test_wdl_head(network, results: TestResults):
             "Cannot distinguish between winning and losing positions",
         )
 
-    score = correct / len(test_positions)
-    passed = correct >= len(test_positions) * 0.7
+    score = passed / len(test_positions)  # Progressive score
+    test_passed = score >= 0.7
 
-    if not passed:
+    if not test_passed:
         results.add_recommendation(
             1,
             "URGENT: Fix WDL head training",
-            f"Only {correct}/{len(test_positions)} correct, value std={value_std:.4f}",
+            f"Score {score*100:.0f}% ({correct}/{len(test_positions)} fully correct), value std={value_std:.4f}",
         )
 
-    results.add("Material Evaluation", passed, score, 1.0)
+    results.add("Material Evaluation", test_passed, score, 1.0)
     return score

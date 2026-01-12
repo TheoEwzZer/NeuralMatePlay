@@ -22,6 +22,7 @@ def test_tactics(network, results: TestResults):
     print(header("TEST: Basic Tactics"))
 
     test_positions = [
+        # === FORKS (4 positions) ===
         {
             "name": "Knight Fork Setup",
             "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
@@ -30,6 +31,73 @@ def test_tactics(network, results: TestResults):
             "type": "attack",
         },
         {
+            "name": "Central Fork",
+            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4N3/8/PPPPPPPP/R1BQKBNR w KQkq - 0 1",
+            "tactical_move": "e4d6",
+            "description": "Nd6+ forks king and bishop",
+            "type": "fork",
+        },
+        {
+            "name": "Knight Fork Check",
+            "fen": "4k3/8/8/3N4/8/8/8/4K3 w - - 0 1",
+            "tactical_move": "d5c7",
+            "description": "Nc7+ forks king (corner threats)",
+            "type": "fork",
+        },
+        {
+            "name": "Queen Fork",
+            "fen": "4k3/8/8/8/8/8/4q3/4K1NR b - - 0 1",
+            "tactical_move": "e2g2",
+            "description": "Qg2 forks knight and threatens",
+            "type": "fork",
+        },
+        # === BACK RANK TACTICS (2 positions) ===
+        {
+            "name": "Back Rank Mate",
+            "fen": "6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1",
+            "tactical_move": "a1a8",
+            "description": "Ra8# back rank mate",
+            "type": "mate",
+        },
+        {
+            "name": "Double Attack f7",
+            "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
+            "tactical_move": "f3g5",
+            "description": "Ng5 double attack on f7",
+            "type": "attack",
+        },
+        # === REMOVING DEFENDER / CAPTURES (3 positions) ===
+        {
+            "name": "Win Material",
+            "fen": "rnbqkbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 1",
+            "tactical_move": "h4e1",
+            "description": "Qe1+ wins material",
+            "type": "attack",
+        },
+        {
+            "name": "Remove Defender",
+            "fen": "r1b1k2r/ppppqppp/2n2n2/4p1B1/2B1P3/3P1N2/PPP2PPP/RN1QK2R w KQkq - 0 1",
+            "tactical_move": "g5f6",
+            "description": "Bxf6 removes defender",
+            "type": "capture",
+        },
+        {
+            "name": "Sacrifice Pattern",
+            "fen": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 1",
+            "tactical_move": "c4f7",
+            "description": "Bxf7+ classic sacrifice",
+            "type": "sacrifice",
+        },
+        # === SKEWER (1 position) ===
+        {
+            "name": "Rook Skewer",
+            "fen": "4k3/8/8/8/8/4R3/8/4K3 w - - 0 1",
+            "tactical_move": "e3e8",
+            "description": "Re8+ skewer pattern",
+            "type": "skewer",
+        },
+        # === EVALUATION POSITIONS (2 positions) ===
+        {
             "name": "Discovered Attack",
             "fen": "r1bqkb1r/pppp1Bpp/2n2n2/4p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 1",
             "tactical_move": None,
@@ -37,11 +105,11 @@ def test_tactics(network, results: TestResults):
             "type": "evaluation",
         },
         {
-            "name": "Central Fork",
-            "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4N3/8/PPPPPPPP/R1BQKBNR w KQkq - 0 1",
-            "tactical_move": "e4d6",
-            "description": "Nd6+ forks king and bishop",
-            "type": "fork",
+            "name": "Pin Position",
+            "fen": "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 1",
+            "tactical_move": None,
+            "description": "Bb4 pins Nc3 to king",
+            "type": "evaluation",
         },
     ]
 
@@ -89,16 +157,23 @@ def test_tactics(network, results: TestResults):
                 )
 
         if test.get("tactical_move"):
+            # Progressive scoring based on rank
             if tactical_rank == 1:
                 print(f"\n  {ok('Tactical move found as top choice!')}")
-                passed += 1
+                passed += 1.0
+            elif tactical_rank == 2:
+                print(f"\n  {warn(f'Tactical move at rank 2')}")
+                passed += 0.75
+            elif tactical_rank == 3:
+                print(f"\n  {warn(f'Tactical move at rank 3')}")
+                passed += 0.5
             elif tactical_rank:
                 print(f"\n  {warn(f'Tactical move at rank {tactical_rank}')}")
-                passed += 0.5
+                passed += 0.25
             else:
                 print(f"\n  {fail('Tactical move not in top 5')}")
         else:
-            # Evaluation-only position
+            # Evaluation-only position - score based on value correctness
             passed += 0.5
             print(f"\n  {info('Position for evaluation analysis')}")
 

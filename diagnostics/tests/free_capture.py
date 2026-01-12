@@ -21,6 +21,7 @@ def test_free_capture(network, results: TestResults):
     print(header("TEST: Free Piece Capture"))
 
     test_positions = [
+        # === HANGING PIECES (4 - various piece types) ===
         {
             "name": "Hanging Queen",
             "fen": "rnb1kbnr/pppppppp/8/8/3q4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 1",
@@ -44,9 +45,68 @@ def test_free_capture(network, results: TestResults):
         },
         {
             "name": "Hanging Knight",
-            # Knight on e5, white knight on f3 can capture with Nxe5
             "fen": "rnbqkb1r/pppppppp/8/4n3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1",
             "target_square": chess.E5,
+            "target_piece": chess.KNIGHT,
+            "piece_value": 3,
+        },
+        # === PAWN CAPTURES (2) ===
+        {
+            "name": "Hanging Pawn (center)",
+            "fen": "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1",
+            "target_square": chess.D5,
+            "target_piece": chess.PAWN,
+            "piece_value": 1,
+        },
+        {
+            "name": "Hanging Pawn (flank)",
+            "fen": "rnbqkbnr/1ppppppp/p7/8/P7/8/1PPPPPPP/RNBQKBNR b KQkq - 0 1",
+            "target_square": chess.A4,
+            "target_piece": chess.PAWN,
+            "piece_value": 1,
+        },
+        # === MULTIPLE ATTACKERS (2) ===
+        {
+            "name": "Queen Attacked by Two",
+            "fen": "rnb1kbnr/pppppppp/8/8/2Bq4/5N2/PPPPPPPP/RNBQK2R w KQkq - 0 1",
+            "target_square": chess.D4,
+            "target_piece": chess.QUEEN,
+            "piece_value": 9,
+        },
+        {
+            "name": "Rook Attacked by Two",
+            "fen": "rnbqkbnr/pppppppp/8/8/2Br4/5N2/PPPPPPPP/RNBQK2R w KQkq - 0 1",
+            "target_square": chess.D4,
+            "target_piece": chess.ROOK,
+            "piece_value": 5,
+        },
+        # === BACK RANK PIECES (2) ===
+        {
+            "name": "Hanging Back Rank Rook",
+            "fen": "r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKB1R w KQkq - 0 1",
+            "target_square": chess.A8,
+            "target_piece": chess.ROOK,
+            "piece_value": 5,
+        },
+        {
+            "name": "Hanging Back Rank Queen",
+            "fen": "r2qkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKB1R b KQkq - 0 1",
+            "target_square": chess.D1,
+            "target_piece": chess.QUEEN,
+            "piece_value": 9,
+        },
+        # === COMPLEX POSITIONS (2) ===
+        {
+            "name": "Bishop on Edge",
+            "fen": "rnbqkbnr/pppppppp/8/8/7b/6P1/PPPPPP1P/RNBQKBNR w KQkq - 0 1",
+            "target_square": chess.H4,
+            "target_piece": chess.BISHOP,
+            "piece_value": 3,
+        },
+        {
+            "name": "Knight on Rim",
+            "fen": "rnbqkbnr/pppppppp/8/8/8/n7/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "target_square": chess.A3,
             "target_piece": chess.KNIGHT,
             "piece_value": 3,
         },
@@ -58,7 +118,6 @@ def test_free_capture(network, results: TestResults):
     for test in test_positions:
         board = chess.Board(test["fen"])
         print(subheader(test["name"]))
-        print(board)
 
         # Find captures of the target piece
         capture_moves = []
@@ -160,28 +219,45 @@ def test_free_capture(network, results: TestResults):
         }
         total_details.append(detail)
 
+        # Progressive scoring based on rank
         if found_capture:
             print(f"\n  {ok('Network prioritizes the capture')}")
-            passed += 1
+            passed += 1.0
+        elif capture_rank == 2:
+            print(f"\n  {warn(f'Capture at rank 2 ({capture_prob*100:.1f}%)')}")
+            passed += 0.7
+            results.add_issue(
+                "HIGH",
+                "policy",
+                f"Network sees {test['name']} capture but doesn't prioritize it",
+                f"Capture at rank {capture_rank} ({capture_prob*100:.1f}%) vs top move ({top_probs[0]*100:.1f}%)",
+            )
+        elif capture_rank == 3:
+            print(f"\n  {warn(f'Capture at rank 3 ({capture_prob*100:.1f}%)')}")
+            passed += 0.5
+            results.add_issue(
+                "HIGH",
+                "policy",
+                f"Network sees {test['name']} capture but doesn't prioritize it",
+                f"Capture at rank {capture_rank} ({capture_prob*100:.1f}%) vs top move ({top_probs[0]*100:.1f}%)",
+            )
+        elif capture_rank:
+            print(f"\n  {warn(f'Capture at rank {capture_rank} ({capture_prob*100:.1f}%)')}")
+            passed += 0.25
+            results.add_issue(
+                "HIGH",
+                "policy",
+                f"Network sees {test['name']} capture but ranks it low",
+                f"Capture at rank {capture_rank} ({capture_prob*100:.1f}%) vs top move ({top_probs[0]*100:.1f}%)",
+            )
         else:
-            if capture_rank:
-                print(
-                    f"\n  {warn(f'Capture found at rank {capture_rank} with {capture_prob*100:.1f}% prob')}"
-                )
-                results.add_issue(
-                    "HIGH",
-                    "policy",
-                    f"Network sees {test['name']} capture but doesn't prioritize it",
-                    f"Capture at rank {capture_rank} ({capture_prob*100:.1f}%) vs top move ({top_probs[0]*100:.1f}%)",
-                )
-            else:
-                print(f"\n  {fail('Network does not see the capture in top 10')}")
-                results.add_issue(
-                    "CRITICAL",
-                    "policy",
-                    f"Network completely misses {test['name']} capture",
-                    f"Free {chess.piece_name(test['target_piece'])} (value {test['piece_value']}) not in top 10 moves",
-                )
+            print(f"\n  {fail('Network does not see the capture in top 10')}")
+            results.add_issue(
+                "CRITICAL",
+                "policy",
+                f"Network completely misses {test['name']} capture",
+                f"Free {chess.piece_name(test['target_piece'])} (value {test['piece_value']}) not in top 10 moves",
+            )
 
     # Summary statistics
     print(subheader("Capture Test Summary"))

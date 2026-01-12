@@ -21,26 +21,115 @@ def test_defense(network, results: TestResults):
     print(header("TEST: Defense (Avoid Hanging Pieces)"))
 
     test_positions = [
+        # === PAWN ATTACKS (4 positions) ===
         {
-            "name": "Knight under attack",
+            "name": "Knight attacked by pawn",
             "fen": "rnbqkbnr/ppp1pppp/8/3p4/4N3/8/PPPPPPPP/R1BQKBNR w KQkq - 0 1",
             "threatened_square": chess.E4,
             "threatened_piece": chess.KNIGHT,
             "attacker_square": chess.D5,
         },
         {
-            "name": "Bishop under attack",
-            "fen": "rnbqkbnr/ppp1pppp/8/3pB3/8/8/PPPPPPPP/RN1QKBNR w KQkq - 0 1",
-            "threatened_square": chess.E5,
+            "name": "Bishop attacked by pawn",
+            "fen": "rnbqkbnr/ppp1pppp/8/3p4/2B5/8/PPPPPPPP/RN1QKBNR w KQkq - 0 1",
+            "threatened_square": chess.C4,
             "threatened_piece": chess.BISHOP,
             "attacker_square": chess.D5,
         },
         {
-            "name": "Rook under attack",
-            "fen": "rnbqkbnr/pppp1ppp/8/4p3/7R/8/PPPPPPPP/RNBQKBN1 w Qkq - 0 1",
-            "threatened_square": chess.H4,
+            "name": "Rook attacked by pawn",
+            "fen": "rnbqkbnr/pppp1ppp/8/4p3/3R4/8/PPPPPPPP/RNBQKBN1 w Qkq - 0 1",
+            "threatened_square": chess.D4,
             "threatened_piece": chess.ROOK,
             "attacker_square": chess.E5,
+        },
+        {
+            "name": "Queen attacked by pawn",
+            "fen": "rnbqkbnr/pp1ppppp/8/2p5/3Q4/8/PPP1PPPP/RNB1KBNR w KQkq - 0 1",
+            "threatened_square": chess.D4,
+            "threatened_piece": chess.QUEEN,
+            "attacker_square": chess.C5,
+        },
+        # === KNIGHT ATTACKS (4 positions) ===
+        {
+            "name": "Knight attacked by knight",
+            "fen": "r1bqkbnr/pppppppp/2n5/8/3N4/8/PPPPPPPP/R1BQKBNR w KQkq - 0 1",
+            "threatened_square": chess.D4,
+            "threatened_piece": chess.KNIGHT,
+            "attacker_square": chess.C6,
+        },
+        {
+            "name": "Bishop attacked by knight",
+            "fen": "rnbqkb1r/pppppppp/5n2/8/4B3/8/PPPPPPPP/RN1QKBNR w KQkq - 0 1",
+            "threatened_square": chess.E4,
+            "threatened_piece": chess.BISHOP,
+            "attacker_square": chess.F6,
+        },
+        {
+            "name": "Rook attacked by knight",
+            "fen": "r1bqkbnr/pppppppp/2n5/4R3/8/8/PPPPPPPP/RNBQKBN1 w Qkq - 0 1",
+            "threatened_square": chess.E5,
+            "threatened_piece": chess.ROOK,
+            "attacker_square": chess.C6,
+        },
+        {
+            "name": "Queen attacked by knight",
+            "fen": "rnbqkb1r/pppppppp/5n2/8/6Q1/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1",
+            "threatened_square": chess.G4,
+            "threatened_piece": chess.QUEEN,
+            "attacker_square": chess.F6,
+        },
+        # === BISHOP ATTACKS (3 positions) ===
+        {
+            "name": "Knight attacked by bishop",
+            "fen": "rnbqk1nr/pppppppp/8/7b/8/5N2/PPPPPPPP/RNBQKB1R w KQkq - 0 1",
+            "threatened_square": chess.F3,
+            "threatened_piece": chess.KNIGHT,
+            "attacker_square": chess.H5,
+        },
+        {
+            "name": "Rook attacked by bishop",
+            "fen": "rnbqkbnr/pppppppp/8/4R3/8/6b1/PPPPPPPP/RNBQKBN1 w Qkq - 0 1",
+            "threatened_square": chess.E5,
+            "threatened_piece": chess.ROOK,
+            "attacker_square": chess.G3,
+        },
+        {
+            "name": "Queen attacked by bishop",
+            "fen": "rnbqkbnr/pppppppp/8/5b2/8/3Q4/PPP1PPPP/RNB1KBNR w KQkq - 0 1",
+            "threatened_square": chess.D3,
+            "threatened_piece": chess.QUEEN,
+            "attacker_square": chess.F5,
+        },
+        # === ROOK ATTACKS (2 positions) ===
+        {
+            "name": "Knight attacked by rook",
+            "fen": "rnbqkbnr/pppppppp/8/8/4N2r/8/PPPPPPPP/R1BQKBNR w KQkq - 0 1",
+            "threatened_square": chess.E4,
+            "threatened_piece": chess.KNIGHT,
+            "attacker_square": chess.H4,
+        },
+        {
+            "name": "Bishop attacked by rook",
+            "fen": "rnbqkbnr/pppppppp/8/4B2r/8/8/PPPPPPPP/RN1QKBNR w KQkq - 0 1",
+            "threatened_square": chess.E5,
+            "threatened_piece": chess.BISHOP,
+            "attacker_square": chess.H5,
+        },
+        # === QUEEN ATTACKS (2 positions) ===
+        {
+            "name": "Knight attacked by queen",
+            "fen": "rnb1kbnr/pppppppp/8/8/4Nq2/8/PPPPPPPP/R1BQKBNR w KQkq - 0 1",
+            "threatened_square": chess.E4,
+            "threatened_piece": chess.KNIGHT,
+            "attacker_square": chess.F4,
+        },
+        {
+            "name": "Bishop attacked by queen",
+            "fen": "rnb1kbnr/pppppppp/8/4Bq2/8/8/PPPPPPPP/RN1QKBNR w KQkq - 0 1",
+            "threatened_square": chess.E5,
+            "threatened_piece": chess.BISHOP,
+            "attacker_square": chess.F5,
         },
     ]
 
@@ -104,17 +193,22 @@ def test_defense(network, results: TestResults):
         )
         results.add_diagnostic("defense", f"{test['name']}_top_prob", float(top_prob))
 
+        # Progressive scoring based on rank
         if top_move and top_move in good_moves:
             print(f"\n  {ok(f'Network defends: {top_move.uci()}')}")
-            passed += 1
+            passed += 1.0
+        elif defense_found_at == 2:
+            print(f"\n  {warn(f'Defense at rank 2')}")
+            passed += 0.7
+        elif defense_found_at == 3:
+            print(f"\n  {warn(f'Defense at rank 3')}")
+            passed += 0.5
+        elif defense_found_at:
+            print(f"\n  {warn(f'Defense at rank {defense_found_at}')}")
+            passed += 0.3
         else:
-            if defense_found_at:
-                print(
-                    f"\n  {warn(f'Defense at rank {defense_found_at}, not prioritized')}"
-                )
-            else:
-                move = top_move.uci() if top_move else "None"
-                print(f"\n  {fail(f'Network ignores the threat, plays {move}')}")
+            move = top_move.uci() if top_move else "None"
+            print(f"\n  {fail(f'Network ignores the threat, plays {move}')}")
             results.add_issue(
                 "HIGH",
                 "defense",

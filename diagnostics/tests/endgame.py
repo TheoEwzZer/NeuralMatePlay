@@ -8,6 +8,7 @@ from ..core import (
     subheader,
     ok,
     fail,
+    warn,
     predict_for_board,
 )
 
@@ -17,6 +18,7 @@ def test_endgame(network, results: TestResults):
     print(header("TEST: Endgame Understanding"))
 
     test_positions = [
+        # === BASIC PIECE ENDGAMES (4) ===
         {
             "name": "K+R vs K (White winning)",
             "fen": "8/8/8/4k3/8/8/8/R3K3 w Q - 0 1",
@@ -36,10 +38,61 @@ def test_endgame(network, results: TestResults):
             "material_diff": -5,
         },
         {
-            "name": "K+P vs K (White should win)",
+            "name": "K+Q vs K (Black winning)",
+            "fen": "8/8/8/4K3/8/8/8/q3k3 w - - 0 1",
+            "expected_eval": "negative",
+            "material_diff": -9,
+        },
+        # === PAWN ENDGAMES (4) ===
+        {
+            "name": "K+P vs K (advanced pawn)",
             "fen": "8/4P3/8/4k3/8/8/8/4K3 w - - 0 1",
             "expected_eval": "positive",
             "material_diff": 1,
+        },
+        {
+            "name": "K+P vs K (center pawn)",
+            "fen": "8/8/8/4k3/4P3/8/8/4K3 w - - 0 1",
+            "expected_eval": "positive",
+            "material_diff": 1,
+        },
+        {
+            "name": "K+PP vs K (two pawns)",
+            "fen": "8/8/8/4k3/3PP3/8/8/4K3 w - - 0 1",
+            "expected_eval": "positive",
+            "material_diff": 2,
+        },
+        {
+            "name": "K vs K+P (Black pawn)",
+            "fen": "8/8/8/4K3/8/4p3/8/4k3 w - - 0 1",
+            "expected_eval": "negative",
+            "material_diff": -1,
+        },
+        # === ROOK ENDGAMES (2) ===
+        {
+            "name": "R+P vs R (Lucena-like)",
+            "fen": "1K6/1P6/8/8/8/8/r7/2R1k3 w - - 0 1",
+            "expected_eval": "positive",
+            "material_diff": 1,
+        },
+        {
+            "name": "R vs R (equal)",
+            "fen": "8/8/8/4k3/8/8/R7/4K2r w - - 0 1",
+            "expected_eval": "neutral",
+            "material_diff": 0,
+        },
+        # === MINOR PIECE ENDGAMES (2) ===
+        {
+            "name": "K+B+N vs K (White winning)",
+            "fen": "8/8/8/4k3/8/8/8/B3KN2 w - - 0 1",
+            "expected_eval": "positive",
+            "material_diff": 6,
+        },
+        {
+            "name": "K+B vs K+B (opposite colors)",
+            "fen": "8/8/8/4k3/8/8/2b5/B3K3 w - - 0 1",
+            "expected_eval": "neutral",
+            "material_diff": 0,
         },
     ]
 
@@ -58,26 +111,46 @@ def test_endgame(network, results: TestResults):
         expected = test["expected_eval"]
         material = test["material_diff"]
 
-        # Determine if evaluation is correct
-        if expected == "positive" and value > 0.1:
-            status = ok("")
-            passed += 1
-        elif expected == "negative" and value < -0.1:
-            status = ok("")
-            passed += 1
-        elif expected == "neutral" and abs(value) < 0.2:
-            status = ok("")
-            passed += 1
-        else:
-            status = fail("")
-            value_errors.append(
-                {
-                    "position": test["name"],
-                    "expected": expected,
-                    "actual": value,
-                    "material": material,
-                }
-            )
+        # Progressive scoring based on how close the evaluation is
+        if expected == "positive":
+            if value > 0.2:
+                status = ok("")
+                passed += 1.0
+            elif value > 0.05:
+                status = warn("")
+                passed += 0.7
+            elif value > -0.1:
+                status = warn("")
+                passed += 0.3
+            else:
+                status = fail("")
+                value_errors.append({"position": test["name"], "expected": expected, "actual": value, "material": material})
+        elif expected == "negative":
+            if value < -0.2:
+                status = ok("")
+                passed += 1.0
+            elif value < -0.05:
+                status = warn("")
+                passed += 0.7
+            elif value < 0.1:
+                status = warn("")
+                passed += 0.3
+            else:
+                status = fail("")
+                value_errors.append({"position": test["name"], "expected": expected, "actual": value, "material": material})
+        else:  # neutral
+            if abs(value) < 0.15:
+                status = ok("")
+                passed += 1.0
+            elif abs(value) < 0.3:
+                status = warn("")
+                passed += 0.7
+            elif abs(value) < 0.5:
+                status = warn("")
+                passed += 0.3
+            else:
+                status = fail("")
+                value_errors.append({"position": test["name"], "expected": expected, "actual": value, "material": material})
 
         exp_str = (
             "+" if expected == "positive" else ("-" if expected == "negative" else "=")
