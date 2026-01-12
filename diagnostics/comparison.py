@@ -335,12 +335,12 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
             else:
                 row += f" {Colors.DIM}     -{Colors.ENDC}"
 
-        # Trend
+        # Trend (5% threshold for progressive scoring sensitivity)
         if len(scores_for_trend) >= 2:
             diff = scores_for_trend[-1] - scores_for_trend[0]
-            if diff > 0.1:
+            if diff > 0.05:
                 trend = f"{Colors.GREEN}+{Colors.ENDC}"
-            elif diff < -0.1:
+            elif diff < -0.05:
                 trend = f"{Colors.RED}-{Colors.ENDC}"
             else:
                 trend = f"{Colors.YELLOW}={Colors.ENDC}"
