@@ -361,6 +361,84 @@ class ChessGameApp:
             )
             rb.pack(side="left", padx=(5, 0))
 
+        # AI Settings panel
+        self._create_ai_settings_panel(parent)
+
+    def _create_ai_settings_panel(self, parent: tk.Widget) -> None:
+        """Create the AI settings panel with simulations slider."""
+        ai_panel = create_panel(parent, title="AI Settings")
+        ai_panel.pack(fill="x", pady=(10, 0))
+
+        ai_content = tk.Frame(ai_panel, bg=COLORS["bg_secondary"])
+        ai_content.pack(fill="x", padx=10, pady=(0, 10))
+
+        # Simulations label and value
+        sim_header = tk.Frame(ai_content, bg=COLORS["bg_secondary"])
+        sim_header.pack(fill="x")
+
+        tk.Label(
+            sim_header,
+            text="Simulations:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(side="left")
+
+        self.sim_value_label = tk.Label(
+            sim_header,
+            text=str(self.num_simulations),
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            font=("Consolas", 10, "bold"),
+        )
+        self.sim_value_label.pack(side="right")
+
+        # Simulations slider
+        self.sim_var = tk.IntVar(value=self.num_simulations)
+        self.sim_slider = ttk.Scale(
+            ai_content,
+            from_=50,
+            to=2000,
+            orient="horizontal",
+            variable=self.sim_var,
+            command=self._on_simulations_change,
+        )
+        self.sim_slider.pack(fill="x", pady=(5, 0))
+
+        # Preset buttons
+        preset_frame = tk.Frame(ai_content, bg=COLORS["bg_secondary"])
+        preset_frame.pack(fill="x", pady=(5, 0))
+
+        presets = [100, 200, 400, 800, 1600]
+        for preset in presets:
+            btn = tk.Button(
+                preset_frame,
+                text=str(preset),
+                command=lambda p=preset: self._set_simulations(p),
+                bg=COLORS["bg_tertiary"],
+                fg=COLORS["text_primary"],
+                font=("Segoe UI", 8),
+                relief="flat",
+                width=4,
+                cursor="hand2",
+            )
+            btn.pack(side="left", padx=(0, 3))
+
+    def _on_simulations_change(self, value: str) -> None:
+        """Handle simulations slider change."""
+        new_sims = int(float(value))
+        self.num_simulations = new_sims
+        self.sim_value_label.configure(text=str(new_sims))
+
+        # Update MCTS if it exists
+        if self.mcts is not None:
+            self.mcts.num_simulations = new_sims
+
+    def _set_simulations(self, value: int) -> None:
+        """Set simulations to a preset value."""
+        self.sim_var.set(value)
+        self._on_simulations_change(str(value))
+
     def _create_center_panel(self, parent: tk.Widget) -> None:
         """Create the center panel with board and eval bar."""
         center_panel = tk.Frame(parent, bg=COLORS["bg_primary"])
