@@ -80,6 +80,10 @@ COLORS = {
     "move_black_bg": "#1e1e2e",
     # Opening display
     "opening_eco": "#a78bfa",
+    # Timer colors
+    "timer_urgent": "#ef4444",  # Red - < 30s
+    "timer_warning": "#f59e0b",  # Orange - < 1min
+    "player_active_bg": "#3b82f6",  # Blue - active player timer background
 }
 
 # Font configurations

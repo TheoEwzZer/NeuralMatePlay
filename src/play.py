@@ -145,6 +145,7 @@ def run_gui(
     network_path: str = None,
     num_simulations: int = 200,
     verbose: bool = False,
+    time_control: int = None,
 ) -> int:
     """Launch the graphical user interface for playing."""
     try:
@@ -154,6 +155,7 @@ def run_gui(
             network_path=network_path,
             num_simulations=num_simulations,
             verbose=verbose,
+            time_control=time_control,
         )
         app.run()
         return 0
@@ -785,6 +787,13 @@ Examples:
         help="Print MCTS search tree after each AI move (for debugging/analysis)",
     )
 
+    parser.add_argument(
+        "--time",
+        type=int,
+        default=None,
+        help="Time control in minutes per player (e.g., --time 5 for 5 min each)",
+    )
+
     args = parser.parse_args()
 
     # Set device
@@ -818,7 +827,12 @@ Examples:
         if args.cli:
             return run_cli(network_path, args.simulations)
         else:
-            return run_gui(network_path, args.simulations, verbose=args.verbose)
+            return run_gui(
+                network_path,
+                args.simulations,
+                verbose=args.verbose,
+                time_control=args.time,
+            )
 
 
 if __name__ == "__main__":

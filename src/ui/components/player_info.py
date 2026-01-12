@@ -113,6 +113,18 @@ class PlayerInfo(tk.Frame):
         )
         self._color_label.pack(fill=tk.X)
 
+        # Timer display (for time control mode)
+        self._timer_label = tk.Label(
+            top_row,
+            text="--:--",
+            font=("Consolas", 14, "bold"),
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_tertiary"],
+            padx=8,
+            pady=2,
+        )
+        self._timer_label.pack(side=tk.RIGHT, padx=(5, 0))
+
         # Active turn indicator
         self._turn_indicator = tk.Label(
             top_row,
@@ -215,6 +227,18 @@ class PlayerInfo(tk.Frame):
         self._name = name
         self._name_label.configure(text=name)
 
+    def set_timer(self, time_str: str, color: str = None) -> None:
+        """
+        Update the timer display.
+
+        Args:
+            time_str: Formatted time string (e.g., "05:00")
+            color: Optional text color for urgency indication
+        """
+        self._timer_label.configure(text=time_str)
+        if color:
+            self._timer_label.configure(fg=color)
+
     def set_active(self, is_active: bool) -> None:
         """Set whether this player's turn is active."""
         self._is_active = is_active
@@ -222,8 +246,13 @@ class PlayerInfo(tk.Frame):
 
         if is_active:
             self._turn_indicator.configure(text="")
+            # Highlight timer background when active
+            self._timer_label.configure(
+                bg=COLORS.get("player_active_bg", COLORS["accent"])
+            )
         else:
             self._turn_indicator.configure(text="")
+            self._timer_label.configure(bg=COLORS["bg_tertiary"])
 
     def set_captured(
         self,
