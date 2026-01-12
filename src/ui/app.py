@@ -14,6 +14,7 @@ import threading
 import queue
 import os
 import json
+import time
 
 try:
     import chess
@@ -133,6 +134,10 @@ class ChessGameApp:
 
         # Evaluation history for graph
         self.eval_history: List[float] = []
+
+        # Move timing
+        self.turn_start_time: float = time.time()
+        self.last_move_time: float = 0.0
 
         # Update queue for thread-safe UI updates
         self.update_queue = queue.Queue()
@@ -431,6 +436,27 @@ class ChessGameApp:
         self.eval_graph = EvalGraph(right_panel, width=280, height=100)
         self.eval_graph.pack(fill="x", pady=(0, 5))
 
+        # Last move time display
+        time_frame = tk.Frame(right_panel, bg=COLORS["bg_secondary"])
+        time_frame.pack(fill="x", pady=(0, 5))
+
+        tk.Label(
+            time_frame,
+            text="Last move:",
+            font=("Segoe UI", 9),
+            fg=COLORS["text_muted"],
+            bg=COLORS["bg_secondary"],
+        ).pack(side="left", padx=(10, 5), pady=3)
+
+        self.last_move_time_label = tk.Label(
+            time_frame,
+            text="--",
+            font=("Consolas", 10, "bold"),
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_secondary"],
+        )
+        self.last_move_time_label.pack(side="left", pady=3)
+
         # Value Prediction (simple label below graph)
         value_frame = tk.Frame(right_panel, bg=COLORS["bg_secondary"])
         value_frame.pack(fill="x")
@@ -638,6 +664,10 @@ class ChessGameApp:
 
         self._update_game_info()
 
+        # Reset move time display and start timer
+        self.last_move_time_label.configure(text="--")
+        self.turn_start_time = time.time()
+
         if self.game_mode == "human_vs_ai":
             self.board_widget.set_player_color(self.human_color)
             if self.human_color == chess.BLACK:
@@ -802,8 +832,23 @@ class ChessGameApp:
         """Flip the board orientation."""
         self.board_widget.flip()
 
+    def _update_move_time_display(self, player: str, elapsed: float) -> None:
+        """Update the last move time display."""
+        if elapsed < 60:
+            time_str = f"{elapsed:.1f}s"
+        else:
+            minutes = int(elapsed // 60)
+            seconds = elapsed % 60
+            time_str = f"{minutes}m {seconds:.1f}s"
+
+        self.last_move_time_label.configure(text=f"{player}: {time_str}")
+
     def _on_human_move(self, move: chess.Move) -> None:
         """Handle human move."""
+        # Record human thinking time
+        self.last_move_time = time.time() - self.turn_start_time
+        self._update_move_time_display("You", self.last_move_time)
+
         self.undone_moves.clear()
         self._update_game_info()
 
@@ -819,7 +864,12 @@ class ChessGameApp:
         if board.is_game_over():
             self._show_game_over()
         elif self.game_mode == "human_vs_ai":
+            # Start timer for AI
+            self.turn_start_time = time.time()
             self._trigger_ai_move()
+        else:
+            # Human vs Human: start timer for next player
+            self.turn_start_time = time.time()
 
     def _trigger_ai_move(self) -> None:
         """Start AI move calculation in background thread."""
@@ -924,6 +974,10 @@ class ChessGameApp:
         """Apply AI move to the board with animation."""
         self.ai_thinking = False
 
+        # Record AI thinking time
+        self.last_move_time = time.time() - self.turn_start_time
+        self._update_move_time_display("AI", self.last_move_time)
+
         self.thinking_indicator.stop()
         self.thinking_indicator.pack_forget()
 
@@ -979,7 +1033,12 @@ class ChessGameApp:
                 if updated_board.is_game_over():
                     self._show_game_over()
                 elif self.game_mode == "ai_vs_ai":
+                    # Start timer for next AI
+                    self.turn_start_time = time.time()
                     self.root.after(300, self._trigger_ai_move)
+                else:
+                    # Start timer for human
+                    self.turn_start_time = time.time()
 
             self.board_widget.animate_move(
                 move, duration_ms=300, on_complete=on_animation_complete
