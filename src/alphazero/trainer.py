@@ -467,8 +467,10 @@ class AlphaZeroTrainer:
             state = history.encode(from_perspective=True)
             states.append(state)
 
-            # Run MCTS
-            policy = mcts.search(board, add_noise=True)
+            # Run MCTS with real history
+            # history.get_boards() returns [current, T-1, T-2, ...], we want [T-1, T-2, ...]
+            history_boards = history.get_boards()[1:]
+            policy = mcts.search(board, add_noise=True, history_boards=history_boards)
             policies.append(policy)
 
             # Select move by sampling from policy (uses temperature for exploration)

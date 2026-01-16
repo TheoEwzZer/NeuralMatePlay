@@ -175,6 +175,7 @@ def run_cli(
     import chess
 
     from alphazero import DualHeadNetwork, MCTS, get_device
+    from alphazero.spatial_encoding import PositionHistory
 
     print("NeuralMate2 Chess Engine - CLI Mode")
     print("=" * 40)
@@ -202,6 +203,8 @@ def run_cli(
 
     # Game loop
     board = chess.Board()
+    history = PositionHistory(3)  # Track position history
+    history.push(board)
 
     print("\nCommands:")
     print("  Enter move in UCI format (e.g., e2e4)")
@@ -228,6 +231,8 @@ def run_cli(
                     return 0
                 elif user_input == "new":
                     board = chess.Board()
+                    history.clear()
+                    history.push(board)
                     mcts.clear_cache()
                     break
                 elif user_input == "undo":
@@ -241,6 +246,7 @@ def run_cli(
                     move = chess.Move.from_uci(user_input)
                     if move in board.legal_moves:
                         board.push(move)
+                        history.push(board)
                         break
                     else:
                         print("Illegal move. Try again.")
@@ -251,10 +257,13 @@ def run_cli(
             # Engine plays black
             if not board.is_game_over():
                 print("Thinking...")
-                move = mcts.get_best_move(board)
+                # Pass history to MCTS (excluding current position)
+                history_boards = history.get_boards()[1:]
+                move = mcts.get_best_move(board, history_boards=history_boards)
                 if move:
                     print(f"Engine plays: {board.san(move)}")
                     board.push(move)
+                    history.push(board)
                 else:
                     print("Engine has no move (game over?)")
 

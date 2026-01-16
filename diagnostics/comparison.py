@@ -280,7 +280,7 @@ def run_comparison(checkpoint_dir: str, checkpoint_type: str = "train"):
             color = Colors.YELLOW
         else:
             color = Colors.RED
-        print(f"      {'─'*35}")
+        print(f"      {'-'*35}")
         print(
             f"      Average: {color}{avg_score*100:.0f}%{Colors.ENDC} ({elapsed:.1f}s)"
         )

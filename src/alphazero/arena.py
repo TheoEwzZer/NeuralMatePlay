@@ -16,7 +16,7 @@ import chess
 
 from .network import DualHeadNetwork
 from .mcts import MCTS
-from .spatial_encoding import DEFAULT_HISTORY_LENGTH
+from .spatial_encoding import DEFAULT_HISTORY_LENGTH, PositionHistory
 from src.chess_encoding.board_utils import get_raw_material_diff
 
 
@@ -117,6 +117,7 @@ class NetworkPlayer(Player):
         self._name = name
         self._network = network
         self._num_simulations = num_simulations
+        self._history_length = history_length
         self._mcts = MCTS(
             network,
             num_simulations=num_simulations,
@@ -124,6 +125,9 @@ class NetworkPlayer(Player):
             batch_size=batch_size,
         )
         self._mcts.temperature = temperature
+
+        # Position history for proper encoding
+        self._history = PositionHistory(history_length)
 
         # Stats storage for UI display
         self.last_mcts_stats: Optional[List[Dict[str, Any]]] = None
@@ -139,7 +143,13 @@ class NetworkPlayer(Player):
 
     def select_move(self, board: chess.Board) -> Optional[chess.Move]:
         """Select move using MCTS and capture stats."""
-        move = self._mcts.get_best_move(board, add_noise=False)
+        # Update history with current position
+        self._history.push(board)
+
+        # Get history for MCTS (excluding current position which is passed separately)
+        history_boards = self._history.get_boards()[1:]
+
+        move = self._mcts.get_best_move(board, add_noise=False, history_boards=history_boards)
 
         # Capture stats after search (before advancing root)
         self.last_mcts_stats = self._mcts.get_root_statistics(board)
@@ -170,8 +180,9 @@ class NetworkPlayer(Player):
         }
 
     def reset(self) -> None:
-        """Clear MCTS cache for new game."""
+        """Clear MCTS cache and history for new game."""
         self._mcts.clear_cache()
+        self._history.clear()
         # Clear stats
         self.last_mcts_stats = None
         self.last_tree_data = None

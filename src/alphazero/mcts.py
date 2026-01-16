@@ -142,6 +142,7 @@ class MCTS:
         self,
         board: chess.Board,
         add_noise: bool = False,
+        history_boards: list[chess.Board] | None = None,
     ) -> np.ndarray:
         """
         Run MCTS search and return visit count distribution.
@@ -149,12 +150,15 @@ class MCTS:
         Args:
             board: Current board position.
             add_noise: Whether to add Dirichlet noise at root.
+            history_boards: Optional list of previous board positions [T-1, T-2, ...].
+                           Used for proper history encoding during search.
 
         Returns:
             Policy array of shape (MOVE_ENCODING_SIZE,) with visit proportions.
         """
-        # Initialize history with current position
-        self._history.reset(board)
+        # Store initial history for use during simulations
+        # history_boards should be [T-1, T-2, ...] (most recent first, excluding current)
+        self._initial_history = history_boards if history_boards is not None else []
 
         # Get or create root node
         root = self._get_or_create_node(board)
@@ -257,6 +261,7 @@ class MCTS:
         self,
         board: chess.Board,
         add_noise: bool = False,
+        history_boards: list[chess.Board] | None = None,
     ) -> Optional[chess.Move]:
         """
         Run MCTS and return the best move.
@@ -264,6 +269,7 @@ class MCTS:
         Args:
             board: Current board position.
             add_noise: Whether to add exploration noise.
+            history_boards: Optional list of previous board positions [T-1, T-2, ...].
 
         Returns:
             Best move according to MCTS, or None if no legal moves.
@@ -271,7 +277,7 @@ class MCTS:
         if not list(board.legal_moves):
             return None
 
-        policy = self.search(board, add_noise)
+        policy = self.search(board, add_noise, history_boards)
 
         # Sample or select best move based on temperature
         if self.temperature > 0:
@@ -389,24 +395,35 @@ class MCTS:
         self,
         board: chess.Board,
         root: MCTSNode,
-    ) -> tuple[list[tuple[chess.Move | None, MCTSNode]], chess.Board, bool]:
+        root_board: chess.Board,
+    ) -> tuple[list[tuple[chess.Move | None, MCTSNode]], chess.Board, bool, list[chess.Board]]:
         """
         Traverse tree to a leaf node, applying virtual losses.
 
+        Args:
+            board: Board copy to modify during traversal.
+            root: Root node of the tree.
+            root_board: Original root board (for history building).
+
         Returns:
-            Tuple of (path, leaf_board, is_terminal):
+            Tuple of (path, leaf_board, is_terminal, history_boards):
             - path: list of (move, node) pairs from root to leaf
             - leaf_board: board state at the leaf
             - is_terminal: True if leaf is a terminal game state
+            - history_boards: list of boards [current, T-1, T-2, ...] for encoding
         """
         node = root
         path = [(None, node)]
+
+        # Build history: start with initial history and root position
+        # history_boards will be [current, T-1, T-2, ...] at the end
+        history_boards = [root_board.copy()] + self._initial_history[:self.history_length]
 
         # Selection: traverse tree to leaf
         while node.is_expanded and node.children:
             # Check for terminal state
             if board.is_game_over():
-                return path, board, True
+                return path, board, True, history_boards
 
             # Select best child using PUCT
             move, child = self._select_child(node, board)
@@ -424,10 +441,13 @@ class MCTS:
             path.append((move, child))
             node = child
 
+            # Update history: new position becomes current, shift others
+            history_boards = [board.copy()] + history_boards[:self.history_length]
+
         # Check if terminal at leaf
         is_terminal = board.is_game_over()
 
-        return path, board, is_terminal
+        return path, board, is_terminal, history_boards
 
     def _backpropagate(
         self,
@@ -545,27 +565,29 @@ class MCTS:
             current_batch_size = min(self.batch_size, remaining)
 
             # Collect leaves (apply virtual loss during traversal)
-            pending_leaves = []  # List of (path, board, node, is_terminal)
+            pending_leaves = []  # List of (path, board, node, is_terminal, history)
 
             for _ in range(current_batch_size):
                 board_copy = board.copy()
-                path, leaf_board, is_terminal = self._collect_leaf(board_copy, root)
+                path, leaf_board, is_terminal, history = self._collect_leaf(
+                    board_copy, root, board
+                )
                 leaf_node = path[-1][1]
-                pending_leaves.append((path, leaf_board, leaf_node, is_terminal))
+                pending_leaves.append((path, leaf_board, leaf_node, is_terminal, history))
 
             # Separate terminal, already expanded, and new leaves
             terminal_leaves = []
             expanded_leaves = []
             new_leaves = []
 
-            for path, leaf_board, leaf_node, is_terminal in pending_leaves:
+            for path, leaf_board, leaf_node, is_terminal, history in pending_leaves:
                 if is_terminal:
                     terminal_leaves.append((path, leaf_board, leaf_node))
                 elif leaf_node.is_expanded:
                     # Already expanded (race condition with virtual loss)
                     expanded_leaves.append((path, leaf_board, leaf_node))
                 else:
-                    new_leaves.append((path, leaf_board, leaf_node))
+                    new_leaves.append((path, leaf_board, leaf_node, history))
 
             # Handle terminal leaves
             for path, leaf_board, leaf_node in terminal_leaves:
@@ -600,14 +622,18 @@ class MCTS:
                 cached_evals = []  # (index, policy, value, wdl)
                 to_evaluate = []  # (index, state, leaf_board)
 
-                for i, (path, leaf_board, leaf_node) in enumerate(new_leaves):
+                for i, (path, leaf_board, leaf_node, history) in enumerate(new_leaves):
                     cached = self._get_cached_eval(leaf_board)
                     if cached is not None:
                         cached_evals.append((i, cached[0], cached[1], cached[2]))
                     else:
-                        # Duplicate position to fill history (consistent with training)
-                        boards = [leaf_board] * (self.history_length + 1)
-                        state = encode_board_with_history(boards, from_perspective=True)
+                        # Use real history from tree traversal
+                        # Pad with duplicates if history is shorter than needed
+                        if len(history) < self.history_length + 1:
+                            # Pad with oldest position (or current if no history)
+                            pad_board = history[-1] if history else leaf_board
+                            history = history + [pad_board] * (self.history_length + 1 - len(history))
+                        state = encode_board_with_history(history, from_perspective=True)
                         to_evaluate.append((i, state, leaf_board))
 
                 # Batch evaluate uncached positions
@@ -634,7 +660,7 @@ class MCTS:
                     eval_results[i] = (policy, value, wdl)
 
                 # Expand nodes and backpropagate
-                for i, (path, leaf_board, leaf_node) in enumerate(new_leaves):
+                for i, (path, leaf_board, leaf_node, _history) in enumerate(new_leaves):
                     policy, value, wdl = eval_results[i]
 
                     # Expand the node with pre-computed values
@@ -715,13 +741,19 @@ class MCTS:
 
         return best_move, best_child
 
-    def _expand_node(self, node: MCTSNode, board: chess.Board) -> None:
+    def _expand_node(
+        self,
+        node: MCTSNode,
+        board: chess.Board,
+        history_boards: list[chess.Board] | None = None,
+    ) -> None:
         """
         Expand node by adding children for all legal moves.
 
         Args:
             node: Node to expand.
             board: Current board state.
+            history_boards: Optional history [current, T-1, T-2, ...] for encoding.
         """
         if node.is_expanded:
             return
@@ -732,9 +764,19 @@ class MCTS:
             policy, value, wdl = cached
         else:
             # Get policy from neural network
-            # Duplicate position to fill history (consistent with training)
-            boards = [board] * (self.history_length + 1)
-            state = encode_board_with_history(boards, from_perspective=True)
+            # Use provided history or create from initial_history
+            if history_boards is None:
+                # Build history from initial_history (for root node)
+                history_boards = [board] + self._initial_history[:self.history_length]
+
+            # Pad if needed
+            if len(history_boards) < self.history_length + 1:
+                pad_board = history_boards[-1] if history_boards else board
+                history_boards = history_boards + [pad_board] * (
+                    self.history_length + 1 - len(history_boards)
+                )
+
+            state = encode_board_with_history(history_boards, from_perspective=True)
             policy, value, wdl = self.network.predict_single_with_wdl(state)
             # Cache the result
             self._cache_eval(board, policy, value, wdl)

@@ -132,11 +132,14 @@ class MoveList(tk.Frame):
         self._moves = []
         self._sans = []
 
-        for move in board.move_stack:
-            san = temp_board.san(move)
-            self._moves.append(move)
-            self._sans.append(san)
-            temp_board.push(move)
+        try:
+            for move in board.move_stack:
+                self._moves.append(move)
+                san = temp_board.san(move)
+                self._sans.append(san)
+                temp_board.push(move)
+        except (AssertionError, ValueError):
+            pass
 
         self._current_index = len(self._moves) - 1
         self._rebuild_display()

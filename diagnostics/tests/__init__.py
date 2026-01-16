@@ -35,6 +35,7 @@ from .pawn_structure import test_pawn_structure
 from .outposts import test_outposts
 from .bishop_quality import test_bishop_quality
 from .prophylaxis import test_prophylaxis
+from .history_comparison import test_history_comparison
 
 # All tests in order
 ALL_TESTS = [
@@ -68,6 +69,7 @@ ALL_TESTS = [
     (test_wdl_head_health, "WDL Head Health", 3.0),  # CRITICAL for MCTS
     (test_policy_diversity, "Policy Diversity", 1.0),
     (test_mcts_behavior, "MCTS Behavior", 1.0),
+    (test_history_comparison, "History Comparison", 1.0),
 ]
 
 __all__ = [
@@ -96,5 +98,6 @@ __all__ = [
     "test_wdl_head_health",
     "test_policy_diversity",
     "test_mcts_behavior",
+    "test_history_comparison",
     "ALL_TESTS",
 ]
