@@ -33,6 +33,7 @@ from alphazero.checkpoint_manager import CheckpointManager
 from config import Config, PretrainingConfig
 from .dataset import ChessPositionDataset
 from .chunk_manager import ChunkManager
+from .tactical_weighting import calculate_tactical_weight
 from .streaming_trainer import StreamingTrainer
 
 
@@ -215,7 +216,11 @@ def pretrain(
                     continue
 
                 value = outcome if board.turn else -outcome
-                chunk_manager.add_example(state, move_idx, value)
+
+                # Calculate tactical weight for this position
+                weight = calculate_tactical_weight(board, move)
+
+                chunk_manager.add_example(state, move_idx, value, weight=weight)
                 file_position_count += 1
                 total_position_count += 1
 
@@ -255,8 +260,8 @@ def pretrain(
             else "  Games processed: unknown"
         )
 
-        # Estimate memory for full load (68 planes per position)
-        mem_gb = metadata["total_examples"] * (68 * 8 * 8 * 4 + 6) / (1024**3)
+        # Estimate memory for full load (72 planes per position)
+        mem_gb = metadata["total_examples"] * (72 * 8 * 8 * 4 + 6) / (1024**3)
         print(f"  Est. RAM needed: {mem_gb:.1f} GB")
 
         # Auto-enable streaming if too much data
@@ -468,7 +473,7 @@ def pretrain(
                 with autocast(device_type="cuda"):
                     pred_policies, pred_values, _ = network(states)
                     policy_loss = nn.functional.cross_entropy(
-                        pred_policies, policies, label_smoothing=0.2
+                        pred_policies, policies, label_smoothing=0.1
                     )
                     value_loss = nn.functional.mse_loss(pred_values, values)
 
@@ -489,7 +494,7 @@ def pretrain(
             else:
                 pred_policies, pred_values, _ = network(states)
                 policy_loss = nn.functional.cross_entropy(
-                    pred_policies, policies, label_smoothing=0.2
+                    pred_policies, policies, label_smoothing=0.1
                 )
                 value_loss = nn.functional.mse_loss(pred_values, values)
 
@@ -538,7 +543,7 @@ def pretrain(
 
                 pred_policies, pred_values, _ = network(states)
                 policy_loss = nn.functional.cross_entropy(
-                    pred_policies, policies, label_smoothing=0.2
+                    pred_policies, policies, label_smoothing=0.1
                 )
                 value_loss = nn.functional.mse_loss(pred_values, values)
 

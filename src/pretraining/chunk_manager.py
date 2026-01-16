@@ -56,6 +56,7 @@ class ChunkManager:
         self._state_buffer: list[np.ndarray] = []
         self._policy_buffer: list[int] = []  # Store as indices
         self._value_buffer: list[float] = []
+        self._weight_buffer: list[float] = []  # Tactical weights
 
         self._chunk_count = 0
         self._total_examples = 0
@@ -96,6 +97,7 @@ class ChunkManager:
         state: np.ndarray,
         policy_idx: int,
         value: float,
+        weight: float = 1.0,
     ) -> None:
         """
         Add a single training example.
@@ -104,10 +106,12 @@ class ChunkManager:
             state: Board state encoding (C, H, W).
             policy_idx: Index of the move in policy vector.
             value: Game outcome from perspective of current player.
+            weight: Tactical weight for this position (default 1.0).
         """
         self._state_buffer.append(state)
         self._policy_buffer.append(policy_idx)
         self._value_buffer.append(value)
+        self._weight_buffer.append(weight)
 
         # Flush when buffer is full
         if len(self._state_buffer) >= self.chunk_size:
@@ -123,6 +127,7 @@ class ChunkManager:
         states = np.array(self._state_buffer, dtype=np.float32)
         policy_indices = np.array(self._policy_buffer, dtype=np.uint16)
         values = np.array(self._value_buffer, dtype=np.float32)
+        weights = np.array(self._weight_buffer, dtype=np.float32)
 
         # Validate data before writing to prevent corrupted chunks
         if np.isnan(states).any() or np.isinf(states).any():
@@ -133,6 +138,7 @@ class ChunkManager:
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
+            self._weight_buffer.clear()
             return
 
         if np.isnan(values).any() or np.isinf(values).any():
@@ -143,6 +149,7 @@ class ChunkManager:
             self._state_buffer.clear()
             self._policy_buffer.clear()
             self._value_buffer.clear()
+            self._weight_buffer.clear()
             return
 
         chunk_path = self.get_chunk_path(self._chunk_count)
@@ -153,6 +160,8 @@ class ChunkManager:
             f.create_dataset("policy_indices", data=policy_indices)
             # Values - small, no compression needed
             f.create_dataset("values", data=values)
+            # Tactical weights - small, no compression needed
+            f.create_dataset("weights", data=weights)
 
         n_examples = len(self._state_buffer)
         self._total_examples += n_examples
@@ -164,6 +173,7 @@ class ChunkManager:
         self._state_buffer.clear()
         self._policy_buffer.clear()
         self._value_buffer.clear()
+        self._weight_buffer.clear()
         self._chunk_count += 1
 
         # Save metadata after each chunk for crash recovery
@@ -303,6 +313,9 @@ class ChunkManager:
                 "policy_indices": f["policy_indices"][:],
                 "values": f["values"][:],
             }
+
+            if "weights" in f:
+                data["weights"] = f["weights"][:]
 
         # Validate data for NaN/Inf values
         if np.isnan(data["states"]).any() or np.isinf(data["states"]).any():

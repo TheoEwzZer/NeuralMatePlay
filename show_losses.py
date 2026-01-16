@@ -104,7 +104,7 @@ def main():
 
         # Format values
         def fmt(v):
-            return f"{v:.4f}" if v is not None else "-"
+            return f"{v:.5f}" if v is not None else "-"
 
         print(
             f"  {checkpoint_num:<4} {epoch:<6} {fmt(train_loss):<12} {fmt(val_loss):<12} "

@@ -2,7 +2,7 @@
 Neural network architecture for AlphaZero-style chess.
 
 Architecture: SE-ResNet with Spatial Attention
-- 68 input planes (48 history + 20 metadata including NNUE-style features)
+- 72 input planes (48 history + 12 metadata + 8 semantic + 4 tactical)
 - Squeeze-and-Excitation blocks for channel recalibration
 - Spatial attention in final blocks for global awareness
 - Group Normalization for stability with small batches
@@ -251,7 +251,7 @@ class DualHeadNetwork(nn.Module):
     AlphaZero-style network with SE-ResNet and attention.
 
     Architecture:
-    - Input: 68 planes (48 history + 20 metadata with NNUE-style features)
+    - Input: 72 planes (48 history + 12 metadata + 8 semantic + 4 tactical)
     - 10 SE-ResBlocks
     - 2 SE-ResBlocks with spatial attention
     - Policy head (move probabilities)
@@ -260,7 +260,7 @@ class DualHeadNetwork(nn.Module):
 
     def __init__(
         self,
-        num_input_planes: int = 68,
+        num_input_planes: int = 72,
         num_filters: int = 192,
         num_residual_blocks: int = 12,
         policy_size: int = MOVE_ENCODING_SIZE,
@@ -337,7 +337,7 @@ class DualHeadNetwork(nn.Module):
         Forward pass.
 
         Args:
-            x: Input tensor of shape (batch, 68, 8, 8).
+            x: Input tensor of shape (batch, 72, 8, 8).
 
         Returns:
             Tuple of (policy_logits, values, wdl_logits):
@@ -366,7 +366,7 @@ class DualHeadNetwork(nn.Module):
         Predict policy and value for a single position.
 
         Args:
-            state: Board encoding of shape (68, 8, 8).
+            state: Board encoding of shape (72, 8, 8).
 
         Returns:
             Tuple of (policy, value):
@@ -394,7 +394,7 @@ class DualHeadNetwork(nn.Module):
         Predict policy and value for a batch of positions.
 
         Args:
-            states: Board encodings of shape (batch, 68, 8, 8).
+            states: Board encodings of shape (batch, 72, 8, 8).
 
         Returns:
             Tuple of (policies, values):
@@ -424,7 +424,7 @@ class DualHeadNetwork(nn.Module):
         Predict policy, value, and WDL probabilities for a single position.
 
         Args:
-            state: Board encoding of shape (68, 8, 8).
+            state: Board encoding of shape (72, 8, 8).
 
         Returns:
             Tuple of (policy, value, wdl_probs):
@@ -457,7 +457,7 @@ class DualHeadNetwork(nn.Module):
         Predict policy, value, and WDL probabilities for a batch of positions.
 
         Args:
-            states: Board encodings of shape (batch, 68, 8, 8).
+            states: Board encodings of shape (batch, 72, 8, 8).
 
         Returns:
             Tuple of (policies, values, wdl_probs):
@@ -525,7 +525,7 @@ class DualHeadNetwork(nn.Module):
         if "config" not in checkpoint:
             raise ValueError(
                 f"Invalid checkpoint format: {path}. "
-                "Only 68-plane WDL models are supported."
+                "Only 72-plane WDL models are supported."
             )
 
         config = checkpoint["config"]

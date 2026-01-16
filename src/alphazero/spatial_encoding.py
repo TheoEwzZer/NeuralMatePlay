@@ -1,7 +1,7 @@
 """
 Spatial encoding of chess positions for neural network input.
 
-Default: 68 planes with 3 positions of history.
+Default: 72 planes with 3 positions of history.
 
 Structure:
 - Planes 0-11:  Current position pieces (6 piece types × 2 colors)
@@ -10,6 +10,7 @@ Structure:
 - Planes 36-47: Position T-3 (three moves ago)
 - Planes 48-59: Metadata (turn, castling, en passant, repetition, attack maps)
 - Planes 60-67: Semantic features (king safety, mobility, pawn structure, center)
+- Planes 68-71: Tactical features (pins, hanging, attacking, trapped pieces)
 """
 
 import chess
@@ -36,6 +37,9 @@ METADATA_PLANES = 12
 # Number of extra semantic planes (NNUE-inspired features)
 SEMANTIC_PLANES = 8
 
+# Number of tactical planes (pins, hanging, attacks, trapped)
+TACTICAL_PLANES = 4
+
 # Default history length
 DEFAULT_HISTORY_LENGTH = 3
 
@@ -53,7 +57,7 @@ def encode_board_with_history(
     from_perspective: bool = True,
 ) -> np.ndarray:
     """
-    Encode board positions with history to 68 planes.
+    Encode board positions with history to 72 planes.
 
     Args:
         boards: List of boards [current, T-1, T-2, ...]. Length should be
@@ -62,12 +66,12 @@ def encode_board_with_history(
                           (flip board for black).
 
     Returns:
-        numpy array of shape (68, 8, 8).
+        numpy array of shape (72, 8, 8).
     """
     history_length = DEFAULT_HISTORY_LENGTH
     num_position_planes = (history_length + 1) * PLANES_PER_POSITION  # 48
     metadata_planes = 12  # Basic metadata + attack maps
-    total_planes = num_position_planes + metadata_planes + SEMANTIC_PLANES  # 68
+    total_planes = num_position_planes + metadata_planes + SEMANTIC_PLANES + TACTICAL_PLANES  # 72
 
     planes = np.zeros((total_planes, 8, 8), dtype=np.float32)
 
@@ -90,6 +94,10 @@ def encode_board_with_history(
     # Encode semantic features (planes 60-67)
     semantic_offset = num_position_planes + metadata_planes  # 60
     _encode_semantic_features(current_board, planes, semantic_offset, flip=flip)
+
+    # Encode tactical features (planes 68-71)
+    tactical_offset = semantic_offset + SEMANTIC_PLANES  # 68
+    _encode_tactical_features(current_board, planes, tactical_offset, flip=flip)
 
     return planes
 
@@ -351,6 +359,88 @@ def _is_isolated_pawn(pawn_sq: int, friendly_pawns: chess.SquareSet) -> bool:
     return True
 
 
+def _encode_tactical_features(
+    board: chess.Board,
+    planes: np.ndarray,
+    offset: int,
+    flip: bool = False,
+) -> None:
+    """
+    Encode tactical features for improved pattern recognition.
+
+    Planes (from offset):
+        0: Pinned pieces - my pieces pinned to king/queen
+        1: Hanging pieces - my undefended pieces under attack
+        2: Attacking pieces - my pieces attacking higher-value targets
+        3: Trapped pieces - my pieces with very limited mobility
+
+    Args:
+        board: Chess board.
+        planes: Target array.
+        offset: Starting plane index (68 for 72-plane encoding).
+        flip: Whether perspective is flipped.
+    """
+    # Determine colors from perspective
+    if flip:
+        my_color = chess.BLACK
+        opp_color = chess.WHITE
+    else:
+        my_color = board.turn
+        opp_color = not board.turn
+
+    # Helper to set a square in a plane
+    def set_square(plane_idx: int, square: int) -> None:
+        file_idx = chess.square_file(square)
+        rank_idx = chess.square_rank(square)
+        if flip:
+            rank_idx = 7 - rank_idx
+        planes[plane_idx, 7 - rank_idx, file_idx] = 1.0
+
+    # Piece values for comparison
+    piece_values = {
+        chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+        chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0
+    }
+
+    # Plane 0: Pinned pieces - my pieces pinned to king
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color == my_color:
+            if board.is_pinned(my_color, square):
+                set_square(offset, square)
+
+    # Plane 1: Hanging pieces - my pieces attacked but not defended
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color == my_color and piece.piece_type != chess.KING:
+            attackers = board.attackers(opp_color, square)
+            if attackers:
+                defenders = board.attackers(my_color, square)
+                if not defenders:
+                    set_square(offset + 1, square)
+
+    # Plane 2: Attacking pieces - my pieces attacking higher-value targets
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color == my_color:
+            my_value = piece_values.get(piece.piece_type, 0)
+            attacks = board.attacks(square)
+            for target_sq in attacks:
+                target = board.piece_at(target_sq)
+                if target and target.color == opp_color:
+                    target_value = piece_values.get(target.piece_type, 0)
+                    if target_value > my_value:
+                        set_square(offset + 2, square)
+                        break
+
+    # Plane 3: Trapped pieces - my pieces with very limited mobility (< 2 moves)
+    for piece_type in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
+        for square in board.pieces(piece_type, my_color):
+            mobility = sum(1 for m in board.legal_moves if m.from_square == square)
+            if mobility < 2:
+                set_square(offset + 3, square)
+
+
 def _encode_metadata_54(
     board: chess.Board,
     planes: np.ndarray,
@@ -442,14 +532,14 @@ def encode_single_position(
     from_perspective: bool = True,
 ) -> np.ndarray:
     """
-    Encode a single position (convenience wrapper for 68 planes with no history).
+    Encode a single position (convenience wrapper for 72 planes with no history).
 
     Args:
         board: Chess board.
         from_perspective: Encode from current player's perspective.
 
     Returns:
-        numpy array of shape (68, 8, 8).
+        numpy array of shape (72, 8, 8).
     """
     return encode_board_with_history([board], from_perspective)
 
@@ -462,25 +552,25 @@ def get_num_planes(history_length: int = DEFAULT_HISTORY_LENGTH) -> int:
         history_length: Number of historical positions (0 = current only).
 
     Returns:
-        Total number of planes (68 for default history_length=3).
+        Total number of planes (72 for default history_length=3).
     """
-    # (history_length + 1) positions × 12 planes + 12 metadata + 8 semantic
-    return (history_length + 1) * PLANES_PER_POSITION + 12 + SEMANTIC_PLANES
+    # (history_length + 1) positions × 12 planes + 12 metadata + 8 semantic + 4 tactical
+    return (history_length + 1) * PLANES_PER_POSITION + 12 + SEMANTIC_PLANES + TACTICAL_PLANES
 
 
 def history_length_from_planes(num_planes: int) -> int:
     """
-    Infer history length from number of input planes (68 planes only).
+    Infer history length from number of input planes (72 planes only).
 
     Args:
         num_planes: Number of input planes.
 
     Returns:
-        History length (3 for 68 planes).
+        History length (3 for 72 planes).
     """
-    # 68 planes = (history_length + 1) * 12 + 12 + 8
-    # num_planes - 20 = (history_length + 1) * 12
-    return (num_planes - 20) // 12 - 1
+    # 72 planes = (history_length + 1) * 12 + 12 + 8 + 4
+    # num_planes - 24 = (history_length + 1) * 12
+    return (num_planes - 24) // 12 - 1
 
 
 class PositionHistory:
@@ -528,7 +618,7 @@ class PositionHistory:
             from_perspective: Encode from current player's perspective.
 
         Returns:
-            numpy array of shape (68, 8, 8) for default history length.
+            numpy array of shape (72, 8, 8) for default history length.
         """
         if not self._boards:
             # Return empty encoding for empty history

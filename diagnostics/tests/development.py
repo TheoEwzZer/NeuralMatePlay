@@ -158,6 +158,7 @@ def test_development(network, results: TestResults):
     for test in TEST_POSITIONS:
         board = chess.Board(test["fen"])
         print(subheader(test["name"]))
+        print(board)
 
         stats = _analyze_position(board, network, test)
 

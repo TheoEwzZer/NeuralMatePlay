@@ -24,20 +24,22 @@ NeuralMate2 est un moteur d'échecs par reinforcement learning qui combine :
 - **WDL Head** : Sortie Win/Draw/Loss au lieu d'un scalaire
 
 ```
-Input (68 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attention × 2]
+Input (72 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attention × 2]
     ↑                                                           ↓
     │                                             ┌─────────────┴─────────────┐
     │                                             ↓                           ↓
  4 positions                               Policy Head                  WDL Head
  (T, T-1, T-2, T-3)                        (4672 moves)            (Win/Draw/Loss)
  + 8 semantic planes
+ + 4 tactical planes
 ```
 
-**Pourquoi 68 planes ?**
+**Pourquoi 72 planes ?**
 
 - 48 planes d'historique (4 positions × 12 pièces)
 - 12 planes de métadonnées (roque, en passant, répétitions, etc.)
 - 8 planes sémantiques NNUE-style (attaquants roi, mobilité, pions passés, etc.)
+- 4 planes tactiques (pièces épinglées, en prise, attaquantes, piégées)
 - Détection des répétitions (règle des 3 coups)
 - Gain estimé : +100-150 ELO vs architecture classique
 
@@ -83,7 +85,7 @@ src/
 │   ├── train.py                 # Point d'entrée CLI pour self-play training
 │   ├── arena.py                 # Évaluation : NetworkPlayer, RandomPlayer
 │   ├── move_encoding.py         # Encodage/décodage des coups (4672 classes)
-│   ├── spatial_encoding.py      # Encodage du plateau (68 planes)
+│   ├── spatial_encoding.py      # Encodage du plateau (72 planes)
 │   ├── replay_buffer.py         # Buffer circulaire avec sampling prioritaire
 │   ├── device.py                # Gestion GPU/CPU et device selection
 │   └── checkpoint_manager.py    # Gestion des checkpoints et versioning
@@ -114,13 +116,13 @@ src/
 
 ---
 
-## Encodage du Plateau (68 planes)
+## Encodage du Plateau (72 planes)
 
-L'encodage utilise **68 planes** : 4 positions d'historique + métadonnées + features sémantiques NNUE-style.
+L'encodage utilise **72 planes** : 4 positions d'historique + métadonnées + features sémantiques NNUE-style + planes tactiques.
 
-**Formule** : `(history_length + 1) × 12 + 20 = (3 + 1) × 12 + 20 = 68 planes`
+**Formule** : `(history_length + 1) × 12 + 24 = (3 + 1) × 12 + 24 = 72 planes`
 
-### Structure des 68 Planes
+### Structure des 72 Planes
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -167,6 +169,13 @@ L'encodage utilise **68 planes** : 4 positions d'historique + métadonnées + fe
 │ Plane 65     : Pions isolés                                     │
 │ Plane 66     : Cases faibles (non défendues)                    │
 │ Plane 67     : Contrôle du centre (d4, d5, e4, e5)              │
+├─────────────────────────────────────────────────────────────────┤
+│ FEATURES TACTIQUES - 4 planes                                   │
+├─────────────────────────────────────────────────────────────────┤
+│ Plane 68     : Pièces épinglées (contre roi/dame)               │
+│ Plane 69     : Pièces en prise (attaquées, non défendues)       │
+│ Plane 70     : Pièces attaquantes (ciblent valeur supérieure)   │
+│ Plane 71     : Pièces piégées (mobilité < 2 coups)              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -262,7 +271,7 @@ wdl_loss = CrossEntropy(wdl_logits, wdl_target)
 
 | Paramètre        | Valeur  | Justification                                |
 | ---------------- | ------- | -------------------------------------------- |
-| **Input planes** | **68**  | 48 history + 12 metadata + 8 semantic        |
+| **Input planes** | **72**  | 48 history + 12 metadata + 8 semantic + 4 tactical |
 | Residual blocks  | 12      | Bon ratio performance/vitesse                |
 | Filters          | 192     | Optimal pour RTX 3060                        |
 | SE reduction     | 8       | Standard pour SE-ResNet                      |

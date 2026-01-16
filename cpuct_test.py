@@ -10,6 +10,7 @@ import chess
 import torch
 from src.alphazero.network import DualHeadNetwork
 from src.alphazero.mcts import MCTS
+from src.alphazero.spatial_encoding import get_num_planes
 
 # Configuration
 MODEL_PATH = "models/pretrained_best_7_network.pt"
@@ -30,7 +31,7 @@ def load_network(path: str) -> DualHeadNetwork:
         network = DualHeadNetwork(
             num_filters=config.get("num_filters", 192),
             num_residual_blocks=config.get("num_residual_blocks", 12),
-            num_input_planes=68,
+            num_input_planes=get_num_planes(),
         )
     else:
         network = DualHeadNetwork()

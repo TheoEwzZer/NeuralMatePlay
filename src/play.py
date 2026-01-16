@@ -312,11 +312,11 @@ def run_match(
         print("=" * 60)
         print(f"Device: {device}")
 
-        # Helper to get history_length from network (68 planes only)
+        # Helper to get history_length from network
         def get_history_length(network):
             planes = network.num_input_planes
-            # 68 planes = (history_length + 1) * 12 + 20
-            return (planes - 20) // 12 - 1
+            # 72 planes = (history_length + 1) * 12 + 24 (metadata + semantic + tactical)
+            return (planes - 24) // 12 - 1
 
         # Load player 1
         history_length = 0

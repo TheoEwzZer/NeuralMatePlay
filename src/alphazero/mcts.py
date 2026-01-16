@@ -197,28 +197,53 @@ class MCTS:
                 if idx is not None:
                     policy[idx] = child.prior
         else:
-            for move, child in root.children.items():
-                if child.visit_count > 0:
-                    idx = encode_move_from_perspective(move, flip)
-                    if idx is not None:
-                        if self.temperature > 0:
+            if self.temperature > 0:
+                # Temperature > 0: use visit counts for stochastic selection
+                for move, child in root.children.items():
+                    if child.visit_count > 0:
+                        idx = encode_move_from_perspective(move, flip)
+                        if idx is not None:
                             policy[idx] = child.visit_count / total_visits
-                        else:
-                            # Temperature 0: deterministic selection by visits, then Q-value
-                            max_visits = max(
-                                c.visit_count for c in root.children.values()
-                            )
-                            best_q = min(
-                                c.q_value
-                                for c in root.children.values()
-                                if c.visit_count == max_visits
-                            )
-                            policy[idx] = (
-                                1.0
-                                if child.visit_count == max_visits
-                                and child.q_value == best_q
-                                else 0.0
-                            )
+            else:
+                # Temperature 0: deterministic selection by visits, then Q-value
+                # Avoid moves that lead to forced mate for opponent
+                sorted_children = sorted(
+                    [(m, c) for m, c in root.children.items() if c.visit_count > 0],
+                    key=lambda x: (x[1].visit_count, -x[1].q_value),
+                    reverse=True,
+                )
+
+                # Find the best move that doesn't lead to forced mate
+                best_move = None
+                losing_moves = []  # (move, mate_distance) for moves leading to mate
+                for move, child in sorted_children:
+                    test_board = board.copy()
+                    test_board.push(move)
+                    # Check if opponent has forced mate (depth limited to 5)
+                    opponent_mate = self._find_forced_mate(
+                        child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                    )
+                    if opponent_mate is None:
+                        # This move doesn't lead to forced mate - take it
+                        best_move = move
+                        break
+                    else:
+                        losing_moves.append((move, opponent_mate))
+
+                # If all moves lead to mate, choose the one with longest mate distance
+                if best_move is None:
+                    if losing_moves:
+                        # Sort by mate distance descending (longest first)
+                        losing_moves.sort(key=lambda x: -x[1])
+                        best_move = losing_moves[0][0]
+                    elif sorted_children:
+                        best_move = sorted_children[0][0]
+
+                # Encode the selected move in the policy
+                if best_move:
+                    idx = encode_move_from_perspective(best_move, flip)
+                    if idx is not None:
+                        policy[idx] = 1.0
 
         # Apply temperature
         if self.temperature > 0 and self.temperature != 1.0:
@@ -580,9 +605,9 @@ class MCTS:
                     if cached is not None:
                         cached_evals.append((i, cached[0], cached[1], cached[2]))
                     else:
-                        self._history.clear()
-                        self._history.push(leaf_board)
-                        state = self._history.encode(from_perspective=True)
+                        # Duplicate position to fill history (consistent with training)
+                        boards = [leaf_board] * (self.history_length + 1)
+                        state = encode_board_with_history(boards, from_perspective=True)
                         to_evaluate.append((i, state, leaf_board))
 
                 # Batch evaluate uncached positions
@@ -707,9 +732,9 @@ class MCTS:
             policy, value, wdl = cached
         else:
             # Get policy from neural network
-            self._history.clear()
-            self._history.push(board)
-            state = self._history.encode(from_perspective=True)
+            # Duplicate position to fill history (consistent with training)
+            boards = [board] * (self.history_length + 1)
+            state = encode_board_with_history(boards, from_perspective=True)
             policy, value, wdl = self.network.predict_single_with_wdl(state)
             # Cache the result
             self._cache_eval(board, policy, value, wdl)
@@ -1060,6 +1085,15 @@ class MCTS:
                 [child_wdl[2], child_wdl[1], child_wdl[0]], dtype=np.float32
             )
 
+            # Check if opponent has forced mate after this move
+            opponent_mate_in = None
+            if child.visit_count > 0:
+                test_board = board.copy()
+                test_board.push(move)
+                opponent_mate_in = self._find_forced_mate(
+                    child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                )
+
             stats.append(
                 {
                     "move": move,
@@ -1070,6 +1104,7 @@ class MCTS:
                     "prior": child.prior,
                     "total_value": child.total_value,
                     "wdl": flipped_wdl,  # [P(win), P(draw), P(loss)] for current player
+                    "opponent_mate_in": opponent_mate_in,  # Forced mate for opponent
                 }
             )
 

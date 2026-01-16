@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.alphazero.network import DualHeadNetwork
+from src.alphazero.spatial_encoding import get_num_planes
 from src.config import Config
 
 
@@ -22,7 +23,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Create default network (68 planes, 192 filters, 12 blocks)
+  # Create default network (72 planes, 192 filters, 12 blocks)
   ./neural_mate_init -o models/random.pt
 
   # Create with custom architecture
@@ -84,8 +85,8 @@ Examples:
     if args.blocks is not None:
         num_blocks = args.blocks
 
-    # Fixed 68 input planes (no backward compatibility)
-    num_input_planes = 68
+    # Fixed 72 input planes (48 history + 12 metadata + 8 semantic + 4 tactical)
+    num_input_planes = get_num_planes()
 
     # Check if output file exists
     if os.path.exists(args.output) and not args.force:
@@ -100,10 +101,10 @@ Examples:
     print("=" * 60)
     print()
     print("Architecture:")
-    print(f"  Input planes:       {num_input_planes} (48 history + 20 metadata)")
+    print(f"  Input planes:       {num_input_planes} (48 history + 24 metadata/semantic/tactical)")
     print(f"  Filters:            {num_filters}")
     print(f"  Residual blocks:    {num_blocks}")
-    print(f"  Heads:              Policy, WDL, Phase, MovesLeft")
+    print("  Heads:              Policy, WDL, Phase, MovesLeft")
     print()
 
     # Create the network

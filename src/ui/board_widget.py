@@ -243,6 +243,11 @@ class ChessBoardWidget(tk.Canvas):
         self.interactive = True
         self.player_color: chess.Color | None = chess.WHITE  # None = both colors
 
+        # Editor mode state
+        self.editor_mode = False
+        self.selected_piece_to_place: chess.Piece | None = None
+        self.on_position_changed: Callable[[], None] | None = None
+
         # Animation state
         self._animation_id: int | None = None
         self._animating = False
@@ -259,6 +264,7 @@ class ChessBoardWidget(tk.Canvas):
         self.bind("<Button-1>", self._on_click)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Button-3>", self._on_right_click)  # Right-click for editor
 
         # Load piece images
         if self._use_images:
@@ -694,9 +700,91 @@ class ChessBoardWidget(tk.Canvas):
         """Check if an animation is in progress."""
         return self._animating
 
+    def _on_right_click(self, event: tk.Event) -> None:
+        """Handle right-click - remove piece in editor mode."""
+        if not self.editor_mode:
+            return
+
+        square = self._coords_to_square(event.x, event.y)
+        if square is not None and self.board.piece_at(square):
+            self.board.remove_piece_at(square)
+            self._draw_board()
+            if self.on_position_changed:
+                self.on_position_changed()
+
+    def _handle_editor_click(self, event: tk.Event) -> None:
+        """Handle click in editor mode."""
+        square = self._coords_to_square(event.x, event.y)
+        if square is None:
+            return
+
+        if self.selected_piece_to_place:
+            # Place the selected piece
+            self.board.set_piece_at(square, self.selected_piece_to_place)
+            self._draw_board()
+            if self.on_position_changed:
+                self.on_position_changed()
+        else:
+            # Select existing piece for drag
+            piece = self.board.piece_at(square)
+            if piece:
+                self.selected_square = square
+                self.drag_from = square
+                self.drag_piece = piece.symbol()
+                self.drag_pos = (event.x, event.y)
+                self._draw_board()
+
+    def _handle_editor_release(self, target_square: int) -> None:
+        """Handle mouse release in editor mode - free piece movement."""
+        if self.drag_from is None:
+            return
+
+        # Scale down callback
+        def on_scale_complete():
+            self.dragging = False
+            self.drag_pos = None
+            self.drag_piece = None
+            self._drag_scale = 1.0
+            self._shrink_at_square = None
+            self._draw_board()
+
+        if target_square != self.drag_from:
+            # Move piece to new square (free placement, no rules)
+            piece = self.board.piece_at(self.drag_from)
+            if piece:
+                self.board.remove_piece_at(self.drag_from)
+                self.board.set_piece_at(target_square, piece)
+
+            # Snap to destination
+            fx, fy = self._square_to_coords(target_square)
+            self.drag_pos = (fx + self.square_size // 2, fy + self.square_size // 2)
+            self._shrink_at_square = target_square
+
+            # Clear selection state
+            self.selected_square = None
+            self.drag_from = None
+
+            self._draw_board()
+            self._start_drag_scale_animation(1.0, on_scale_complete)
+
+            if self.on_position_changed:
+                self.on_position_changed()
+        else:
+            # Same square - just reset
+            self._shrink_at_square = self.drag_from
+            self.selected_square = None
+            self.drag_from = None
+            self._draw_board()
+            self._start_drag_scale_animation(1.0, on_scale_complete)
+
     def _on_click(self, event: tk.Event) -> None:
         """Handle mouse click."""
         if not self.interactive or self._animating:
+            return
+
+        # Editor mode has its own click handling
+        if self.editor_mode:
+            self._handle_editor_click(event)
             return
 
         # Check if it's the player's turn
@@ -771,8 +859,14 @@ class ChessBoardWidget(tk.Canvas):
             return
 
         target_square = self._coords_to_square(event.x, event.y)
-        move = self._find_move(self.drag_from, target_square)
         self._drag_hover_square = None
+
+        # Editor mode: free piece placement
+        if self.editor_mode:
+            self._handle_editor_release(target_square)
+            return
+
+        move = self._find_move(self.drag_from, target_square)
 
         # Scale down callback (used after position animation if needed)
         def on_scale_complete():

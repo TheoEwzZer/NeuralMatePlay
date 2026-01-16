@@ -10,7 +10,7 @@ import gc
 import os
 import random
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import numpy as np
 import torch
@@ -271,6 +271,12 @@ class StreamingTrainer:
         self.start_epoch = 0
         self._scheduler_state_to_restore = None
 
+        # Intra-epoch resume state
+        self._resume_chunk_idx = None
+        self._resume_train_chunks_order = None
+        self._resume_rng_state = None
+        self._resume_epoch_metrics = None
+
         # Handle resume
         if resume_from is not None:
             self._load_checkpoint(resume_from)
@@ -279,6 +285,82 @@ class StreamingTrainer:
         """Load checkpoint for resume."""
         # Parse resume_from
         if resume_from.lower() == "latest":
+            # Try to load latest checkpoint first (intra-epoch)
+            latest_checkpoint = self.checkpoint_manager.load_latest_checkpoint(
+                self.checkpoint_name
+            )
+            if latest_checkpoint is not None:
+                state = latest_checkpoint.get("state")
+                if state and "chunk_idx" in state:
+                    # Intra-epoch checkpoint found
+                    print("Found latest checkpoint with intra-epoch state")
+                    self.network = DualHeadNetwork.load(
+                        latest_checkpoint["network_path"]
+                    )
+                    print(f"Loaded network from: {latest_checkpoint['network_path']}")
+
+                    # Recreate optimizer
+                    self.optimizer = optim.AdamW(
+                        self.network.parameters(),
+                        lr=self.learning_rate,
+                        weight_decay=self.weight_decay,
+                    )
+
+                    # Recreate scaler
+                    if self.use_amp:
+                        safe_max_scale = 2**15 // max(
+                            1, self.gradient_accumulation_steps
+                        )
+                        self.scaler = SafeGradScaler(
+                            "cuda",
+                            init_scale=2**8,
+                            growth_interval=2000,
+                            max_scale=safe_max_scale,
+                            enabled=True,
+                        )
+
+                    # Load optimizer state if available
+                    if "optimizer_state" in state:
+                        try:
+                            self.optimizer.load_state_dict(state["optimizer_state"])
+                        except (ValueError, RuntimeError):
+                            pass
+
+                    # Restore intra-epoch state
+                    self.start_epoch = state.get("epoch", 0)
+                    self._resume_chunk_idx = state.get("chunk_idx")
+                    self._resume_train_chunks_order = state.get("train_chunks_order")
+                    self._resume_rng_state = state.get("rng_state")
+                    self._resume_epoch_metrics = {
+                        "total_policy_loss": state.get("total_policy_loss", 0.0),
+                        "total_value_loss": state.get("total_value_loss", 0.0),
+                        "total_batches": state.get("total_batches", 0),
+                    }
+
+                    # Restore RNG state if available
+                    # Note: We use a fixed seed per epoch, so RNG state is deterministic
+                    # Just recreate RNG with epoch-based seed
+                    if self._resume_rng_state is not None:
+                        # RNG state is saved but we'll use epoch-based seed for consistency
+                        pass
+
+                    if "best_val_loss" in state:
+                        self.best_val_loss = state["best_val_loss"]
+                    if "best_count" in state:
+                        self.best_count = state["best_count"]
+                    if "epochs_without_improvement" in state:
+                        self.epochs_without_improvement = state[
+                            "epochs_without_improvement"
+                        ]
+                    if "scheduler_state" in state:
+                        self._scheduler_state_to_restore = state["scheduler_state"]
+
+                    print(
+                        f"Resuming from epoch {self.start_epoch + 1}, chunk {self._resume_chunk_idx + 1}"
+                    )
+                    return
+
+            # Fallback to best numbered checkpoint
             best_count = None
         else:
             try:
@@ -288,7 +370,7 @@ class StreamingTrainer:
                 print("Use 'latest' or a checkpoint number")
                 return
 
-        # Load checkpoint
+        # Load best numbered checkpoint
         checkpoint = self.checkpoint_manager.load_best_numbered_checkpoint(
             self.checkpoint_name, best_count
         )
@@ -329,7 +411,9 @@ class StreamingTrainer:
                 except (ValueError, RuntimeError) as e:
                     # Optimizer state mismatch (e.g., network architecture changed)
                     print(f"  Warning: Could not load optimizer state ({e})")
-                    print("  Using fresh optimizer (this is normal after architecture changes)")
+                    print(
+                        "  Using fresh optimizer (this is normal after architecture changes)"
+                    )
             if "best_val_loss" in state:
                 self.best_val_loss = state["best_val_loss"]
             if "best_count" in state:
@@ -484,22 +568,55 @@ class StreamingTrainer:
         """Train for one epoch."""
         self.network.train()
 
-        # Shuffle chunk order
-        train_chunks = self.train_chunks.copy()
-        random.shuffle(train_chunks)
+        # Check if we need to resume from a specific chunk
+        start_chunk_idx = 0
+        if self._resume_chunk_idx is not None and epoch == self.start_epoch:
+            # Resume from saved chunk
+            start_chunk_idx = self._resume_chunk_idx + 1  # Resume from next chunk
+            if self._resume_train_chunks_order is not None:
+                # Use saved chunk order
+                train_chunks = self._resume_train_chunks_order
+            print(
+                f"Resuming epoch {epoch + 1} from chunk {start_chunk_idx + 1}/{len(train_chunks)}"
+            )
+            total_policy_loss = self._resume_epoch_metrics.get("total_policy_loss", 0.0)
+            total_value_loss = self._resume_epoch_metrics.get("total_value_loss", 0.0)
+            total_batches = self._resume_epoch_metrics.get("total_batches", 0)
+            # Clear resume state after using it
+            self._resume_chunk_idx = None
+            self._resume_train_chunks_order = None
+            self._resume_rng_state = None
+            self._resume_epoch_metrics = None
+        else:
+            total_policy_loss = 0.0
+            total_value_loss = 0.0
+            total_batches = 0
 
-        total_policy_loss = 0.0
-        total_value_loss = 0.0
-        total_batches = 0
+        # Shuffle chunk order with fixed seed based on epoch for reproducibility
+        train_chunks = self.train_chunks.copy()
+        # Use Python's random for chunk shuffle (deterministic per epoch)
+        rng_epoch = random.Random(42 + epoch)  # Fixed seed per epoch
+        rng_epoch.shuffle(train_chunks)
+
+        # Set numpy RNG with epoch-based seed for consistency
+        # Note: We save RNG state in checkpoints but use epoch-based seed for reproducibility
+        # The within-chunk shuffle may be slightly different on resume, but that's acceptable
+        self._rng = np.random.default_rng(42 + epoch)
+
         epoch_start_time = time.time()
 
         # Use prefetching to load next chunk while GPU processes current chunk
+        # Also use executor for async checkpoint saving
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.prefetch_workers
+            max_workers=self.prefetch_workers + 1  # +1 for checkpoint saving
         ) as executor:
             prefetch_future = None
+            checkpoint_future = None
 
             for chunk_idx, chunk_path in enumerate(train_chunks):
+                # Skip chunks if resuming
+                if chunk_idx < start_chunk_idx:
+                    continue
                 # Get current chunk (from prefetch or load directly)
                 try:
                     if prefetch_future is not None:
@@ -509,6 +626,7 @@ class StreamingTrainer:
                     states = chunk["states"]
                     policy_indices = chunk["policy_indices"]
                     values = chunk["values"]
+                    weights = chunk["weights"]
                 except MemoryError:
                     # Memory fragmentation - force cleanup and retry
                     gc.collect()
@@ -518,6 +636,7 @@ class StreamingTrainer:
                     states = chunk["states"]
                     policy_indices = chunk["policy_indices"]
                     values = chunk["values"]
+                    weights = chunk["weights"]
 
                 # Start prefetching next chunk in background
                 if chunk_idx + 1 < len(train_chunks):
@@ -532,6 +651,7 @@ class StreamingTrainer:
                 states = states[indices]
                 policy_indices = policy_indices[indices]
                 values = values[indices]
+                weights = weights[indices]
 
                 # Create mini-batches with gradient accumulation
                 n_batches = len(states) // self.batch_size
@@ -569,6 +689,13 @@ class StreamingTrainer:
                     )
                     batch_policies.scatter_(1, batch_policy_indices.unsqueeze(1), 1.0)
 
+                    # Tactical weights for this batch
+                    batch_weights = (
+                        torch.from_numpy(weights[start:end])
+                        .float()
+                        .to(self.device, non_blocking=True)
+                    )
+
                     # Check if this is the last batch in accumulation cycle or chunk
                     is_accumulation_step = (batch_idx + 1) % accum_steps == 0
                     is_last_batch = batch_idx == n_batches - 1
@@ -596,20 +723,27 @@ class StreamingTrainer:
                                 pred_policies, min=-50, max=50
                             )
 
-                            policy_loss = nn.functional.cross_entropy(
+                            # Policy loss with tactical weighting
+                            policy_loss_unreduced = nn.functional.cross_entropy(
                                 pred_policies_clamped,
                                 batch_policies,
-                                label_smoothing=0.2,
+                                label_smoothing=0.1,
+                                reduction="none",
                             )
+                            policy_loss = (policy_loss_unreduced * batch_weights).mean()
 
-                            # Value loss: WDL cross-entropy
+                            # Value loss: WDL cross-entropy with tactical weighting
                             wdl_targets = values_to_wdl_targets(batch_values)
-                            wdl_logits_clamped = torch.clamp(wdl_logits, min=-50, max=50)
-                            value_loss = nn.functional.cross_entropy(
+                            wdl_logits_clamped = torch.clamp(
+                                wdl_logits, min=-50, max=50
+                            )
+                            value_loss_unreduced = nn.functional.cross_entropy(
                                 wdl_logits_clamped,
                                 wdl_targets,
                                 label_smoothing=0.1,
+                                reduction="none",
                             )
+                            value_loss = (value_loss_unreduced * batch_weights).mean()
 
                             # Compute entropy bonus for policy diversity (numerically stable)
                             # Use log_softmax which is more stable than softmax + log
@@ -688,16 +822,25 @@ class StreamingTrainer:
                             pred_policies, min=-50, max=50
                         )
 
-                        policy_loss = nn.functional.cross_entropy(
-                            pred_policies_clamped, batch_policies, label_smoothing=0.2
+                        # Policy loss with tactical weighting
+                        policy_loss_unreduced = nn.functional.cross_entropy(
+                            pred_policies_clamped,
+                            batch_policies,
+                            label_smoothing=0.1,
+                            reduction="none",
                         )
+                        policy_loss = (policy_loss_unreduced * batch_weights).mean()
 
-                        # Value loss: WDL cross-entropy
+                        # Value loss: WDL cross-entropy with tactical weighting
                         wdl_targets = values_to_wdl_targets(batch_values)
                         wdl_logits_clamped = torch.clamp(wdl_logits, min=-50, max=50)
-                        value_loss = nn.functional.cross_entropy(
-                            wdl_logits_clamped, wdl_targets, label_smoothing=0.1
+                        value_loss_unreduced = nn.functional.cross_entropy(
+                            wdl_logits_clamped,
+                            wdl_targets,
+                            label_smoothing=0.1,
+                            reduction="none",
                         )
+                        value_loss = (value_loss_unreduced * batch_weights).mean()
 
                         # Compute entropy bonus for policy diversity (numerically stable)
                         # Use log_softmax which is more stable than softmax + log
@@ -797,10 +940,42 @@ class StreamingTrainer:
                     flush=True,
                 )
 
+                # Save checkpoint every 10 chunks (and at least 60 seconds apart)
+                should_save_checkpoint = (
+                    (chunk_idx + 1) % 10 == 0 or chunk_idx == len(train_chunks) - 1
+                )
+
+                if should_save_checkpoint:
+                    # Wait for previous checkpoint save to complete if still running
+                    if checkpoint_future is not None:
+                        try:
+                            checkpoint_future.result(timeout=5)  # Wait max 5 seconds
+                        except concurrent.futures.TimeoutError:
+                            pass  # Continue even if previous save is slow
+
+                    # Save checkpoint asynchronously
+                    checkpoint_future = executor.submit(
+                        self._save_latest_checkpoint_async,
+                        epoch,
+                        chunk_idx,
+                        train_chunks,
+                        total_policy_loss,
+                        total_value_loss,
+                        total_batches,
+                    )
+                    last_checkpoint_time = time.time()
+
                 # Cleanup chunk data to prevent memory fragmentation
                 del chunk, states, policy_indices, values, indices
                 if chunk_idx % 5 == 0:  # Frequent lightweight cleanup
                     gc.collect(0)  # Generation 0 only (10x faster than full gc)
+
+            # Wait for final checkpoint save to complete
+            if checkpoint_future is not None:
+                try:
+                    checkpoint_future.result(timeout=10)
+                except concurrent.futures.TimeoutError:
+                    pass
 
         avg_policy = total_policy_loss / max(1, total_batches)
         avg_value = total_value_loss / max(1, total_batches)
@@ -880,7 +1055,7 @@ class StreamingTrainer:
 
                         pred_policies, _, wdl_logits = self.network(batch_states)
                         policy_loss = nn.functional.cross_entropy(
-                            pred_policies, batch_policies, label_smoothing=0.2
+                            pred_policies, batch_policies, label_smoothing=0.1
                         )
 
                         # Value loss: WDL cross-entropy
@@ -927,6 +1102,42 @@ class StreamingTrainer:
         avg_policy = total_policy_loss / max(1, total_batches)
         avg_value = total_value_loss / max(1, total_batches)
         return avg_policy + avg_value, avg_policy, avg_value
+
+    def _save_latest_checkpoint_async(
+        self,
+        epoch: int,
+        chunk_idx: int,
+        train_chunks_order: List[str],
+        total_policy_loss: float,
+        total_value_loss: float,
+        total_batches: int,
+    ) -> None:
+        """Save latest checkpoint asynchronously with intra-epoch state."""
+        try:
+            state = {
+                "epoch": epoch,
+                "chunk_idx": chunk_idx,
+                "train_chunks_order": train_chunks_order,
+                "total_policy_loss": total_policy_loss,
+                "total_value_loss": total_value_loss,
+                "total_batches": total_batches,
+                "rng_state": self._rng.bit_generator.state,  # Save for reference, but epoch seed is primary
+                "best_val_loss": self.best_val_loss,
+                "best_count": self.best_count,
+                "epochs_without_improvement": self.epochs_without_improvement,
+                "optimizer_state": self.optimizer.state_dict(),
+            }
+            if hasattr(self, "scheduler") and self.scheduler is not None:
+                state["scheduler_state"] = self.scheduler.state_dict()
+            if self.scaler is not None:
+                state["scaler_state"] = self.scaler.state_dict()
+
+            self.checkpoint_manager.save_latest_checkpoint(
+                self.checkpoint_name, self.network, state
+            )
+        except Exception as e:
+            # Don't crash training if checkpoint save fails
+            print(f"\n  WARNING: Failed to save latest checkpoint: {e}")
 
     def _save_checkpoint(
         self,

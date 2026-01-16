@@ -114,6 +114,66 @@ class CheckpointManager:
 
             return str(best_path)
 
+    def save_latest_checkpoint(
+        self,
+        name: str,
+        network: Any,
+        state: Optional[Dict] = None,
+    ) -> str:
+        """
+        Save a 'latest' checkpoint (overwrites previous latest).
+
+        This is used for intra-epoch checkpoints to allow resuming
+        from the middle of an epoch.
+
+        Args:
+            name: Base name (e.g., "pretrained").
+            network: Network to save (must have .save() or state_dict()).
+            state: Optional training state dict (can include epoch, chunk_idx, etc.).
+
+        Returns:
+            Path to saved checkpoint.
+        """
+        with self._lock:
+            # Always overwrite latest checkpoint
+            latest_path = self.checkpoint_dir / f"{name}_latest_network.pt"
+            self._save_network(network, latest_path)
+
+            if state:
+                latest_state_path = self.checkpoint_dir / f"{name}_latest_state.pkl"
+                self._save_pickle(state, latest_state_path)
+
+            self._log(f"Saved {latest_path.name} (latest checkpoint)")
+
+            return str(latest_path)
+
+    def load_latest_checkpoint(self, name: str) -> Optional[Dict]:
+        """
+        Load the latest checkpoint.
+
+        Args:
+            name: Base name (e.g., "pretrained").
+
+        Returns:
+            Dict with 'network_path', 'state', or None if not found.
+        """
+        network_path = self.checkpoint_dir / f"{name}_latest_network.pt"
+        state_path = self.checkpoint_dir / f"{name}_latest_state.pkl"
+
+        if not network_path.exists():
+            return None
+
+        result = {
+            "network_path": str(network_path),
+            "state": None,
+        }
+
+        if state_path.exists():
+            result["state"] = self._load_pickle_safe(state_path)
+
+        self._log(f"Loaded checkpoint: {name}_latest")
+        return result
+
     def _cleanup_best_checkpoints(self, name: str) -> None:
         """Remove old best checkpoints, keeping milestones + last 5."""
         # Find all numbered best checkpoints

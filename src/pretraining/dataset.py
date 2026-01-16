@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, IterableDataset
 
 from .pgn_processor import PGNProcessor
 from .chunk_manager import ChunkManager, DEFAULT_CHUNK_SIZE
+from .tactical_weighting import calculate_tactical_weight
 
 import sys
 
@@ -133,7 +134,10 @@ class ChessPositionDataset(Dataset):
 
             value = outcome if board.turn else -outcome
 
-            chunk_manager.add_example(state, move_idx, value)
+            # Calculate tactical weight for this position
+            weight = calculate_tactical_weight(board, move)
+
+            chunk_manager.add_example(state, move_idx, value, weight=weight)
             position_count += 1
 
             if self.verbose and position_count % 50000 == 0:

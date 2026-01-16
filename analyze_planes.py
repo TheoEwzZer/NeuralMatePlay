@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analyze and visualize the 68 input planes of the neural network.
+Analyze and visualize the 72 input planes of the neural network.
 
 Usage:
     python analyze_planes.py                     # Analyze starting position
@@ -22,7 +22,7 @@ import numpy as np
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from alphazero.spatial_encoding import encode_board_with_history, PositionHistory
+from alphazero.spatial_encoding import encode_board_with_history, PositionHistory, get_num_planes
 
 
 # Plane descriptions (from perspective of player to move)
@@ -73,6 +73,12 @@ def get_plane_descriptions(white_to_move: bool = True) -> dict:
     descs[66] = "Semantic: Weak Squares"
     descs[67] = "Semantic: Center Control"
 
+    # Tactical planes
+    descs[68] = "Tactical: Pinned Pieces"
+    descs[69] = "Tactical: Hanging Pieces"
+    descs[70] = "Tactical: Attacking Pieces"
+    descs[71] = "Tactical: Trapped Pieces"
+
     return descs
 
 
@@ -89,9 +95,9 @@ def plane_to_ascii(plane: np.ndarray) -> str:
             val = plane[rank, file]
             if val == 0:
                 row += ". "
-            elif val == 1.0:
+            elif np.isclose(val, 1.0, rtol=1e-09, atol=1e-09):
                 row += "# "
-            elif val == 0.5:
+            elif np.isclose(val, 0.5, rtol=1e-09, atol=1e-09):
                 row += "o "
             else:
                 # Show as decimal for normalized values
@@ -174,8 +180,9 @@ def analyze_from_pgn(pgn_path: str, max_positions: int = 1000) -> dict:
     print(f"Analyzing positions from: {pgn_path}")
 
     # Track per-plane stats across all positions
+    num_planes = get_num_planes()
     plane_usage = {
-        i: {"nonzero_count": 0, "total_sum": 0.0, "positions": 0} for i in range(68)
+        i: {"nonzero_count": 0, "total_sum": 0.0, "positions": 0} for i in range(num_planes)
     }
 
     positions_analyzed = 0
@@ -205,7 +212,7 @@ def analyze_from_pgn(pgn_path: str, max_positions: int = 1000) -> dict:
                 planes = history.encode()
 
                 # Update stats
-                for i in range(68):
+                for i in range(num_planes):
                     plane = planes[i]
                     nonzero = np.count_nonzero(plane)
                     plane_usage[i]["nonzero_count"] += 1 if nonzero > 0 else 0
@@ -312,8 +319,9 @@ def print_pgn_summary(plane_usage: dict) -> None:
 
     rarely_used = []
     never_used = []
+    num_planes = get_num_planes()
 
-    for i in range(68):
+    for i in range(num_planes):
         usage = plane_usage[i]
         desc = PLANE_DESCRIPTIONS.get(i, f"Plane {i}")
         total = usage["positions"]
@@ -343,7 +351,7 @@ def print_pgn_summary(plane_usage: dict) -> None:
     print("=" * 90)
 
     # Summary
-    print(f"\nTotal planes: 68")
+    print(f"\nTotal planes: {num_planes}")
     print(
         f"Always used (>50%): {sum(1 for u in plane_usage.values() if u['positions'] > 0 and u['nonzero_count']/u['positions'] >= 0.5)}"
     )
@@ -413,10 +421,13 @@ def show_gui(
     # Current plane index
     current_plane = tk.IntVar(value=0)
 
+    num_planes = get_num_planes()
+    max_plane_idx = num_planes - 1
+
     # Title
     title_label = tk.Label(
         root,
-        text=f"68 Input Planes - {title}",
+        text=f"{num_planes} Input Planes - {title}",
         font=FONTS["title"],
         fg=COLORS["text_primary"],
         bg=COLORS["bg_primary"],
@@ -593,7 +604,7 @@ def show_gui(
     slider = ttk.Scale(
         slider_frame,
         from_=0,
-        to=67,
+        to=max_plane_idx,
         orient=tk.HORIZONTAL,
         variable=current_plane,
         command=on_slider_change,
@@ -619,7 +630,7 @@ def show_gui(
         draw_board(idx)
 
     def next_plane():
-        idx = min(67, current_plane.get() + 1)
+        idx = min(max_plane_idx, current_plane.get() + 1)
         current_plane.set(idx)
         slider.set(idx)
         draw_board(idx)
@@ -704,9 +715,9 @@ def show_gui(
             slider.set(0)
             draw_board(0)
         elif event.keysym == "End":
-            current_plane.set(67)
-            slider.set(67)
-            draw_board(67)
+            current_plane.set(max_plane_idx)
+            slider.set(max_plane_idx)
+            draw_board(max_plane_idx)
 
     root.bind("<Key>", on_key)
 
@@ -719,7 +730,7 @@ def show_gui(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyze and visualize the 68 input planes"
+        description="Analyze and visualize the 72 input planes"
     )
     parser.add_argument(
         "--fen",

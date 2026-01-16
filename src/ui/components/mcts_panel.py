@@ -30,6 +30,7 @@ class MCTSMoveStats:
     wdl: np.ndarray = field(
         default_factory=lambda: np.array([0.33, 0.34, 0.33], dtype=np.float32)
     )  # [P(win), P(draw), P(loss)]
+    opponent_mate_in: Optional[int] = None  # Forced mate for opponent after this move
 
 
 class MCTSPanel(tk.Frame):
@@ -200,6 +201,7 @@ class MCTSPanel(tk.Frame):
                     q_value=stat.get("q_value", 0.0),
                     prior=stat.get("prior", 0.0),
                     wdl=wdl,
+                    opponent_mate_in=stat.get("opponent_mate_in"),
                 )
             )
 
@@ -351,6 +353,19 @@ class MCTSPanel(tk.Frame):
             anchor="e",
         )
         prior_label.pack(side=tk.LEFT, padx=2)
+
+        # Opponent forced mate indicator (shown in red)
+        if stat.opponent_mate_in is not None:
+            mate_text = f"#-{stat.opponent_mate_in}" if stat.opponent_mate_in > 0 else "#"
+            mate_label = tk.Label(
+                row,
+                text=mate_text,
+                font=("Consolas", 9, "bold"),
+                fg=COLORS["q_value_negative"],
+                bg=bg,
+                anchor="w",
+            )
+            mate_label.pack(side=tk.LEFT, padx=(5, 2))
 
         # Hover effect
         def on_enter(e, r=row, b=bg):

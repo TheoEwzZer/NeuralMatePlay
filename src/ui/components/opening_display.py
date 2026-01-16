@@ -802,10 +802,14 @@ class OpeningDisplay(tk.Frame):
         temp_board = chess.Board()
         moves = []
 
-        for move in board.move_stack:
-            san = temp_board.san(move)
-            moves.append(san)
-            temp_board.push(move)
+        try:
+            for move in board.move_stack:
+                san = temp_board.san(move)
+                moves.append(san)
+                temp_board.push(move)
+        except (AssertionError, ValueError):
+            # Position was set from editor, moves don't match standard start
+            return ""
 
         return " ".join(moves)
 

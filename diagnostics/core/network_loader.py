@@ -75,7 +75,7 @@ def analyze_network_architecture(network, results: TestResults):
     config = network.get_config()
 
     print(subheader("Configuration"))
-    print("  Input planes:       68")
+    print(f"  Input planes:       {network.num_input_planes}")
     print(f"  Filters:            {config['num_filters']}")
     print(f"  Residual blocks:    {config['num_residual_blocks']}")
     print(f"  Policy size:        {config['policy_size']}")
@@ -90,7 +90,7 @@ def analyze_network_architecture(network, results: TestResults):
     print(f"  Model size (approx):   {total_params * 4 / 1024 / 1024:.1f} MB")
 
     # Store for LLM
-    results.add_diagnostic("architecture", "input_planes", 68)
+    results.add_diagnostic("architecture", "input_planes", network.num_input_planes)
     results.add_diagnostic("architecture", "filters", config["num_filters"])
     results.add_diagnostic(
         "architecture", "residual_blocks", config["num_residual_blocks"]

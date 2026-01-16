@@ -172,6 +172,11 @@ class ChessGameApp:
         self.training_thread: threading.Thread | None = None
         self.training_cancelled = False
 
+        # Editor mode state
+        self.app_mode = "play"  # "play" or "editor"
+        self.editor_selected_piece: chess.Piece | None = None
+        self.editor_palette_buttons: dict = {}
+
         self._create_ui()
         self._bind_keyboard_shortcuts()
         self._load_network()
@@ -263,6 +268,56 @@ class ChessGameApp:
         )
         self.load_btn.pack(side="left")
 
+        # Mode toggle (Play / Editor)
+        mode_toggle_frame = tk.Frame(left_btns, bg=COLORS["bg_primary"])
+        mode_toggle_frame.pack(side="left", padx=(20, 0))
+
+        tk.Label(
+            mode_toggle_frame,
+            text="Mode:",
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(side="left", padx=(0, 5))
+
+        self.app_mode_var = tk.StringVar(value="play")
+
+        self.play_mode_btn = tk.Radiobutton(
+            mode_toggle_frame,
+            text="Play",
+            variable=self.app_mode_var,
+            value="play",
+            command=self._on_app_mode_change,
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_primary"],
+            selectcolor=COLORS["bg_tertiary"],
+            activebackground=COLORS["bg_primary"],
+            activeforeground=COLORS["accent"],
+            font=FONTS["body_bold"],
+            indicatoron=0,
+            padx=10,
+            pady=3,
+        )
+        self.play_mode_btn.pack(side="left")
+
+        self.editor_mode_btn = tk.Radiobutton(
+            mode_toggle_frame,
+            text="Editor",
+            variable=self.app_mode_var,
+            value="editor",
+            command=self._on_app_mode_change,
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_primary"],
+            selectcolor=COLORS["bg_tertiary"],
+            activebackground=COLORS["bg_primary"],
+            activeforeground=COLORS["accent"],
+            font=FONTS["body_bold"],
+            indicatoron=0,
+            padx=10,
+            pady=3,
+        )
+        self.editor_mode_btn.pack(side="left")
+
         # Tooltips
         create_tooltip(self.new_game_btn, "Start a new game (Ctrl+N)")
         create_tooltip(self.back_btn, "Go back one move (Ctrl+Z / ←)")
@@ -298,36 +353,44 @@ class ChessGameApp:
         left_panel.pack(side="left", fill="y", padx=(0, 15))
         left_panel.pack_propagate(False)
 
+        # Play mode content
+        self.play_left_content = tk.Frame(left_panel, bg=COLORS["bg_primary"])
+        self.play_left_content.pack(fill="both", expand=True)
+
         # Black player info (top, opponent when playing white)
         self.black_player_info = PlayerInfo(
-            left_panel,
+            self.play_left_content,
             color=chess.BLACK,
             name="AI",
         )
         self.black_player_info.pack(fill="x", pady=(0, 10))
 
         # Opening display
-        self.opening_display = OpeningDisplay(left_panel)
+        self.opening_display = OpeningDisplay(self.play_left_content)
         self.opening_display.pack(fill="x", pady=(0, 10))
 
         # Phase indicator
-        self.phase_indicator = PhaseIndicator(left_panel)
+        self.phase_indicator = PhaseIndicator(self.play_left_content)
         self.phase_indicator.pack(fill="x", pady=(0, 10))
 
         # Spacer
-        spacer = tk.Frame(left_panel, bg=COLORS["bg_primary"])
+        spacer = tk.Frame(self.play_left_content, bg=COLORS["bg_primary"])
         spacer.pack(fill="both", expand=True)
 
         # White player info (bottom, you when playing white)
         self.white_player_info = PlayerInfo(
-            left_panel,
+            self.play_left_content,
             color=chess.WHITE,
             name="You",
         )
         self.white_player_info.pack(fill="x", pady=(10, 0))
 
         # Game mode selection (collapsed panel)
-        self._create_mode_panel(left_panel)
+        self._create_mode_panel(self.play_left_content)
+
+        # Editor mode content (initially hidden)
+        self.editor_left_content = tk.Frame(left_panel, bg=COLORS["bg_primary"])
+        self._create_editor_panel(self.editor_left_content)
 
     def _create_mode_panel(self, parent: tk.Widget) -> None:
         """Create the game mode selection panel."""
@@ -467,6 +530,252 @@ class ChessGameApp:
         self.sim_var.set(value)
         self._on_simulations_change(str(value))
 
+    def _create_editor_panel(self, parent: tk.Widget) -> None:
+        """Create the position editor panel with piece palette and controls."""
+        from .styles import PIECE_UNICODE
+
+        # Piece palette
+        palette_panel = create_panel(parent, title="Pieces")
+        palette_panel.pack(fill="x", pady=(0, 10))
+
+        palette_content = tk.Frame(palette_panel, bg=COLORS["bg_secondary"])
+        palette_content.pack(fill="x", padx=10, pady=(0, 10))
+
+        # White pieces label
+        tk.Label(
+            palette_content,
+            text="White",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(anchor="w")
+
+        # White pieces grid (2 rows of 3)
+        white_grid = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
+        white_grid.pack(pady=(0, 5))
+
+        white_pieces = [
+            (chess.KING, "K"), (chess.QUEEN, "Q"), (chess.ROOK, "R"),
+            (chess.BISHOP, "B"), (chess.KNIGHT, "N"), (chess.PAWN, "P"),
+        ]
+        for i, (piece_type, symbol) in enumerate(white_pieces):
+            btn = tk.Button(
+                white_grid,
+                text=PIECE_UNICODE.get(symbol, symbol),
+                command=lambda pt=piece_type: self._select_editor_piece(chess.WHITE, pt),
+                bg=COLORS["bg_tertiary"],
+                fg=COLORS["text_primary"],
+                font=("Segoe UI Symbol", 16),
+                width=2,
+                relief="flat",
+                cursor="hand2",
+            )
+            btn.grid(row=i // 3, column=i % 3, padx=2, pady=2)
+            self.editor_palette_buttons[f"w{symbol}"] = btn
+
+        # Black pieces label
+        tk.Label(
+            palette_content,
+            text="Black",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(anchor="w")
+
+        # Black pieces grid (2 rows of 3)
+        black_grid = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
+        black_grid.pack(pady=(0, 5))
+
+        black_pieces = [
+            (chess.KING, "k"), (chess.QUEEN, "q"), (chess.ROOK, "r"),
+            (chess.BISHOP, "b"), (chess.KNIGHT, "n"), (chess.PAWN, "p"),
+        ]
+        for i, (piece_type, symbol) in enumerate(black_pieces):
+            btn = tk.Button(
+                black_grid,
+                text=PIECE_UNICODE.get(symbol, symbol),
+                command=lambda pt=piece_type: self._select_editor_piece(chess.BLACK, pt),
+                bg=COLORS["bg_tertiary"],
+                fg=COLORS["text_primary"],
+                font=("Segoe UI Symbol", 16),
+                width=2,
+                relief="flat",
+                cursor="hand2",
+            )
+            btn.grid(row=i // 3, column=i % 3, padx=2, pady=2)
+            self.editor_palette_buttons[f"b{symbol.lower()}"] = btn
+
+        # Eraser button
+        eraser_frame = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
+        eraser_frame.pack(fill="x")
+
+        self.eraser_btn = tk.Button(
+            eraser_frame,
+            text="🗑 Eraser (Right-click)",
+            command=self._select_editor_eraser,
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
+            font=FONTS["small"],
+            relief="flat",
+            cursor="hand2",
+        )
+        self.eraser_btn.pack(fill="x")
+
+        # Position controls panel
+        controls_panel = create_panel(parent, title="Position")
+        controls_panel.pack(fill="x", pady=(0, 10))
+
+        controls_content = tk.Frame(controls_panel, bg=COLORS["bg_secondary"])
+        controls_content.pack(fill="x", padx=10, pady=(0, 10))
+
+        # Turn to move
+        turn_frame = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
+        turn_frame.pack(fill="x", pady=(0, 5))
+
+        tk.Label(
+            turn_frame,
+            text="Turn:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(side="left")
+
+        self.editor_turn_var = tk.StringVar(value="white")
+
+        tk.Radiobutton(
+            turn_frame,
+            text="White",
+            variable=self.editor_turn_var,
+            value="white",
+            command=self._on_editor_position_change,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            selectcolor=COLORS["bg_tertiary"],
+            font=FONTS["small"],
+        ).pack(side="left", padx=(5, 0))
+
+        tk.Radiobutton(
+            turn_frame,
+            text="Black",
+            variable=self.editor_turn_var,
+            value="black",
+            command=self._on_editor_position_change,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            selectcolor=COLORS["bg_tertiary"],
+            font=FONTS["small"],
+        ).pack(side="left", padx=(5, 0))
+
+        # Castling rights
+        castle_frame = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
+        castle_frame.pack(fill="x", pady=(0, 5))
+
+        tk.Label(
+            castle_frame,
+            text="Castling:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(anchor="w")
+
+        castle_checks = tk.Frame(castle_frame, bg=COLORS["bg_secondary"])
+        castle_checks.pack(fill="x")
+
+        self.castle_wk_var = tk.BooleanVar(value=True)
+        self.castle_wq_var = tk.BooleanVar(value=True)
+        self.castle_bk_var = tk.BooleanVar(value=True)
+        self.castle_bq_var = tk.BooleanVar(value=True)
+
+        for text, var in [("W O-O", self.castle_wk_var), ("W O-O-O", self.castle_wq_var),
+                          ("B O-O", self.castle_bk_var), ("B O-O-O", self.castle_bq_var)]:
+            tk.Checkbutton(
+                castle_checks,
+                text=text,
+                variable=var,
+                command=self._on_editor_position_change,
+                bg=COLORS["bg_secondary"],
+                fg=COLORS["text_primary"],
+                selectcolor=COLORS["bg_tertiary"],
+                font=("Segoe UI", 8),
+            ).pack(side="left")
+
+        # FEN display
+        fen_frame = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
+        fen_frame.pack(fill="x", pady=(5, 0))
+
+        tk.Label(
+            fen_frame,
+            text="FEN:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small"],
+        ).pack(anchor="w")
+
+        self.editor_fen_var = tk.StringVar(value=chess.STARTING_FEN)
+        self.editor_fen_entry = tk.Entry(
+            fen_frame,
+            textvariable=self.editor_fen_var,
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
+            font=("Consolas", 8),
+            insertbackground=COLORS["text_primary"],
+        )
+        self.editor_fen_entry.pack(fill="x", pady=(2, 0))
+
+        tk.Button(
+            fen_frame,
+            text="Load FEN",
+            command=self._load_editor_fen,
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
+            font=FONTS["small"],
+            relief="flat",
+            cursor="hand2",
+        ).pack(fill="x", pady=(3, 0))
+
+        # Action buttons
+        actions_panel = create_panel(parent, title="Actions")
+        actions_panel.pack(fill="x", pady=(0, 10))
+
+        actions_content = tk.Frame(actions_panel, bg=COLORS["bg_secondary"])
+        actions_content.pack(fill="x", padx=10, pady=(0, 10))
+
+        tk.Button(
+            actions_content,
+            text="Clear Board",
+            command=self._editor_clear_board,
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
+            font=FONTS["small"],
+            relief="flat",
+            cursor="hand2",
+        ).pack(fill="x", pady=(0, 3))
+
+        tk.Button(
+            actions_content,
+            text="Reset to Start",
+            command=self._editor_reset_position,
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
+            font=FONTS["small"],
+            relief="flat",
+            cursor="hand2",
+        ).pack(fill="x", pady=(0, 3))
+
+        # Start game button (prominent)
+        self.start_game_btn = tk.Button(
+            actions_content,
+            text="▶ Start Game!",
+            command=self._start_game_from_editor,
+            bg=COLORS["accent"],
+            fg=COLORS["text_primary"],
+            font=FONTS["body_bold"],
+            relief="flat",
+            cursor="hand2",
+            pady=8,
+        )
+        self.start_game_btn.pack(fill="x", pady=(5, 0))
+
     def _create_center_panel(self, parent: tk.Widget) -> None:
         """Create the center panel with board and eval bar."""
         center_panel = tk.Frame(parent, bg=COLORS["bg_primary"])
@@ -575,8 +884,8 @@ class ChessGameApp:
 
         def get_history_length(network):
             planes = network.num_input_planes
-            # 68 planes = (history_length + 1) * 12 + 20
-            return (planes - 20) // 12 - 1
+            # 72 planes = (history_length + 1) * 12 + 24 (metadata + semantic + tactical)
+            return (planes - 24) // 12 - 1
 
         if self.use_pure_mcts:
             try:
@@ -1709,6 +2018,275 @@ class ChessGameApp:
     def _stop_training(self) -> None:
         """Stop training."""
         self.training_cancelled = True
+
+    # ==================== Editor Mode Methods ====================
+
+    def _on_app_mode_change(self) -> None:
+        """Handle switch between Play and Editor mode."""
+        mode = self.app_mode_var.get()
+        self.app_mode = mode
+
+        if mode == "editor":
+            # Switch to editor mode
+            self.play_left_content.pack_forget()
+            self.editor_left_content.pack(fill="both", expand=True)
+
+            # Enable editor mode on board widget
+            self.board_widget.editor_mode = True
+            self.board_widget.on_position_changed = self._on_editor_position_change
+
+            # Cancel any AI thinking
+            self.ai_cancelled = True
+            self.ai_thinking = False
+            self.thinking_indicator.stop()
+            self.thinking_indicator.pack_forget()
+
+            # Update status
+            self.status_label.configure(
+                text="Editor Mode - Place pieces", fg=COLORS["accent"]
+            )
+
+            # Sync editor controls with current board state
+            self._sync_editor_controls_from_board()
+
+        else:
+            # Switch to play mode
+            self.editor_left_content.pack_forget()
+            self.play_left_content.pack(fill="both", expand=True)
+
+            # Disable editor mode
+            self.board_widget.editor_mode = False
+            self.board_widget.on_position_changed = None
+            self.board_widget.selected_piece_to_place = None
+
+            # Clear editor selection highlight
+            self._clear_palette_highlight()
+
+            # Update status
+            self._update_game_info()
+
+    def _select_editor_piece(self, color: chess.Color, piece_type: int) -> None:
+        """Select a piece from the palette to place on the board."""
+        piece = chess.Piece(piece_type, color)
+        self.editor_selected_piece = piece
+        self.board_widget.selected_piece_to_place = piece
+
+        # Highlight selected button
+        self._update_palette_highlight(color, piece_type)
+
+    def _select_editor_eraser(self) -> None:
+        """Select eraser mode (right-click to remove pieces)."""
+        self.editor_selected_piece = None
+        self.board_widget.selected_piece_to_place = None
+        self._clear_palette_highlight()
+
+        # Highlight eraser button
+        self.eraser_btn.configure(bg=COLORS["accent"])
+
+    def _update_palette_highlight(self, color: chess.Color, piece_type: int) -> None:
+        """Highlight the selected piece in the palette."""
+        self._clear_palette_highlight()
+
+        # Map piece type to symbol
+        piece_symbols = {
+            chess.KING: "K", chess.QUEEN: "Q", chess.ROOK: "R",
+            chess.BISHOP: "B", chess.KNIGHT: "N", chess.PAWN: "P",
+        }
+        symbol = piece_symbols.get(piece_type, "")
+
+        if color == chess.WHITE:
+            key = f"w{symbol}"
+        else:
+            key = f"b{symbol.lower()}"
+
+        if key in self.editor_palette_buttons:
+            self.editor_palette_buttons[key].configure(bg=COLORS["accent"])
+
+    def _clear_palette_highlight(self) -> None:
+        """Clear all palette button highlights."""
+        for btn in self.editor_palette_buttons.values():
+            btn.configure(bg=COLORS["bg_tertiary"])
+        self.eraser_btn.configure(bg=COLORS["bg_tertiary"])
+
+    def _on_editor_position_change(self) -> None:
+        """Called when the board position changes in editor mode."""
+        self._update_editor_fen()
+
+    def _sync_editor_controls_from_board(self) -> None:
+        """Sync editor controls (turn, castling) from current board state."""
+        board = self.board_widget.get_board()
+
+        # Sync turn
+        self.editor_turn_var.set("white" if board.turn == chess.WHITE else "black")
+
+        # Sync castling rights
+        self.castle_wk_var.set(board.has_kingside_castling_rights(chess.WHITE))
+        self.castle_wq_var.set(board.has_queenside_castling_rights(chess.WHITE))
+        self.castle_bk_var.set(board.has_kingside_castling_rights(chess.BLACK))
+        self.castle_bq_var.set(board.has_queenside_castling_rights(chess.BLACK))
+
+        # Update FEN display
+        self._update_editor_fen()
+
+    def _update_editor_fen(self) -> None:
+        """Update the FEN display in editor panel."""
+        board = self.board_widget.get_board().copy()
+
+        # Apply turn from editor control
+        board.turn = chess.WHITE if self.editor_turn_var.get() == "white" else chess.BLACK
+
+        # Apply castling rights from editor controls
+        castling = ""
+        if self.castle_wk_var.get():
+            castling += "K"
+        if self.castle_wq_var.get():
+            castling += "Q"
+        if self.castle_bk_var.get():
+            castling += "k"
+        if self.castle_bq_var.get():
+            castling += "q"
+        board.set_castling_fen(castling or "-")
+
+        self.editor_fen_var.set(board.fen())
+
+    def _load_editor_fen(self) -> None:
+        """Load a position from the FEN entry field."""
+        fen = self.editor_fen_var.get().strip()
+        if not fen:
+            messagebox.showwarning("Invalid FEN", "Please enter a FEN string.")
+            return
+
+        try:
+            board = chess.Board(fen)
+            self.board_widget.set_board(board)
+            self.board_widget._draw_board()
+
+            # Sync controls from loaded FEN
+            self._sync_editor_controls_from_board()
+
+        except ValueError as e:
+            messagebox.showerror("Invalid FEN", f"Could not parse FEN:\n{e}")
+
+    def _editor_clear_board(self) -> None:
+        """Clear all pieces from the board."""
+        board = self.board_widget.get_board()
+        board.clear()
+        self.board_widget.set_board(board)
+        self.board_widget._draw_board()
+        self._update_editor_fen()
+
+    def _editor_reset_position(self) -> None:
+        """Reset to the starting position."""
+        board = chess.Board()
+        self.board_widget.set_board(board)
+        self.board_widget._draw_board()
+        self._sync_editor_controls_from_board()
+
+    def _start_game_from_editor(self) -> None:
+        """Start a game from the current editor position."""
+        board = self.board_widget.get_board().copy()
+
+        # Apply turn from editor
+        board.turn = chess.WHITE if self.editor_turn_var.get() == "white" else chess.BLACK
+
+        # Apply castling rights
+        castling = ""
+        if self.castle_wk_var.get():
+            castling += "K"
+        if self.castle_wq_var.get():
+            castling += "Q"
+        if self.castle_bk_var.get():
+            castling += "k"
+        if self.castle_bq_var.get():
+            castling += "q"
+        board.set_castling_fen(castling or "-")
+
+        # Validate position
+        if not self._validate_editor_position(board):
+            return
+
+        # Set the board with applied settings
+        self.board_widget.set_board(board)
+
+        # Switch to play mode
+        self.app_mode_var.set("play")
+        self._on_app_mode_change()
+
+        # Clear MCTS cache for new position
+        if self.mcts is not None:
+            self.mcts.clear_cache()
+
+        # Reset game state
+        self.undone_moves.clear()
+        self.eval_history.clear()
+        self.mcts_panel.clear()
+        self.search_tree_panel.clear()
+        self.eval_bar.clear()
+        self.eval_graph.clear()
+        self.value_label.configure(text="0.00", fg=COLORS["text_primary"])
+        self.opening_display.clear()
+        self.move_list.clear()
+
+        # Reset time control if enabled
+        self._init_time_control()
+
+        # Update displays
+        self._update_game_info()
+
+        # Trigger AI move if it's AI's turn
+        if self.game_mode == "human_vs_ai":
+            if board.turn != self.human_color:
+                self.turn_start_time = time.time()
+                self._trigger_ai_move()
+        elif self.game_mode == "ai_vs_ai":
+            self.turn_start_time = time.time()
+            self._trigger_ai_move()
+
+    def _validate_editor_position(self, board: chess.Board) -> bool:
+        """Validate the editor position before starting a game."""
+        errors = []
+
+        # Check for both kings
+        white_kings = len(board.pieces(chess.KING, chess.WHITE))
+        black_kings = len(board.pieces(chess.KING, chess.BLACK))
+
+        if white_kings == 0:
+            errors.append("White king is missing")
+        elif white_kings > 1:
+            errors.append("Multiple white kings")
+
+        if black_kings == 0:
+            errors.append("Black king is missing")
+        elif black_kings > 1:
+            errors.append("Multiple black kings")
+
+        # Check for pawns on first/last rank
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece and piece.piece_type == chess.PAWN:
+                rank = chess.square_rank(square)
+                if rank == 0 or rank == 7:
+                    errors.append(f"Pawn on invalid rank at {chess.square_name(square)}")
+
+        # Check if opponent king is in check (illegal position)
+        if white_kings == 1 and black_kings == 1:
+            # Temporarily flip turn to check if opponent is in check
+            test_board = board.copy()
+            test_board.turn = not board.turn
+            if test_board.is_check():
+                opponent = "White" if board.turn == chess.BLACK else "Black"
+                errors.append(f"{opponent} king would be in check (illegal)")
+
+        if errors:
+            messagebox.showerror(
+                "Invalid Position",
+                "Cannot start game:\n\n• " + "\n• ".join(errors)
+            )
+            return False
+
+        return True
+
+    # ==================== End Editor Mode Methods ====================
 
     def run(self) -> None:
         """Run the application main loop."""

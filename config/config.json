@@ -19,8 +19,8 @@
     "max_games": null,
     "max_positions": null,
     "skip_first_n_moves": 0,
-    "value_loss_weight": 2.0,
-    "entropy_coefficient": 0.01,
+    "value_loss_weight": 1.5,
+    "entropy_coefficient": 0.03,
     "prefetch_workers": 2,
     "gradient_accumulation_steps": 2
   },
