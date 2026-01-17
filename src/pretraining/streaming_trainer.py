@@ -921,8 +921,10 @@ class StreamingTrainer:
                             )
 
                 # Progress update with average time per chunk
+                # Use chunks processed since resume, not total chunk index
                 elapsed = time.time() - epoch_start_time
-                avg_time_per_chunk = elapsed / (chunk_idx + 1)
+                chunks_processed = chunk_idx - start_chunk_idx + 1
+                avg_time_per_chunk = elapsed / chunks_processed
                 eta_seconds = avg_time_per_chunk * (len(train_chunks) - chunk_idx - 1)
                 eta_h = int(eta_seconds // 3600)
                 eta_min = int((eta_seconds % 3600) // 60)
