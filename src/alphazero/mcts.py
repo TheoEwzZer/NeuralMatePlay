@@ -417,7 +417,12 @@ class MCTS:
 
         # Build history: start with initial history and root position
         # history_boards will be [current, T-1, T-2, ...] at the end
-        history_boards = [root_board.copy()] + self._initial_history[:self.history_length]
+        # Take the LAST history_length positions and reverse to get [T-1, T-2, T-3] order
+        if self._initial_history:
+            recent_history = list(reversed(self._initial_history[-self.history_length:]))
+        else:
+            recent_history = []
+        history_boards = [root_board.copy()] + recent_history
 
         # Selection: traverse tree to leaf
         while node.is_expanded and node.children:
@@ -767,7 +772,12 @@ class MCTS:
             # Use provided history or create from initial_history
             if history_boards is None:
                 # Build history from initial_history (for root node)
-                history_boards = [board] + self._initial_history[:self.history_length]
+                # Take the LAST history_length positions and reverse to get [T-1, T-2, T-3] order
+                if self._initial_history:
+                    recent_history = list(reversed(self._initial_history[-self.history_length:]))
+                else:
+                    recent_history = []
+                history_boards = [board] + recent_history
 
             # Pad if needed
             if len(history_boards) < self.history_length + 1:

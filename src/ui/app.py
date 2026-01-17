@@ -142,6 +142,10 @@ class ChessGameApp:
         # Move history for back/forward navigation
         self.undone_moves: list = []
 
+        # Full game history for MCTS (all positions from start, not limited to 3)
+        # This is needed because MCTS takes _initial_history[:3] (first 3 positions)
+        self.game_positions: list = []  # [pos_initial, pos_after_move1, ...]
+
         # Evaluation history for graph
         self.eval_history: List[float] = []
 
@@ -925,6 +929,8 @@ class ChessGameApp:
                     uncertainty_weight=0.2,
                     draw_sibling_fpu=True,
                 )
+                # Initialize game history with starting position
+                self.game_positions = [self.board_widget.get_board().copy()]
                 self.network_status.configure(
                     text=f"Loaded: {os.path.basename(self.network_path)}",
                     fg=COLORS["success"],
@@ -951,6 +957,8 @@ class ChessGameApp:
                     uncertainty_weight=0.2,
                     draw_sibling_fpu=True,
                 )
+                # Initialize game history with starting position
+                self.game_positions = [self.board_widget.get_board().copy()]
                 self.network_status.configure(
                     text="Untrained network (random)",
                     fg=COLORS["warning"],
@@ -1056,6 +1064,9 @@ class ChessGameApp:
 
         self.board_widget.reset()
 
+        # Reset game history for new game
+        self.game_positions = [self.board_widget.get_board().copy()]
+
         # Reset all analysis panels
         self.mcts_panel.clear()
         self.search_tree_panel.clear()
@@ -1091,6 +1102,23 @@ class ChessGameApp:
         self.board_widget.drag_piece = None
         self.board_widget._draw_board()
 
+    def _rebuild_game_positions(self) -> None:
+        """Rebuild game positions from current board state.
+
+        Called after undo/redo to ensure history is consistent.
+        Reconstructs all positions from the move stack.
+        """
+        board = self.board_widget.get_board()
+        move_stack = list(board.move_stack)
+
+        # Create a fresh board and replay to get all positions
+        temp_board = chess.Board()
+        self.game_positions = [temp_board.copy()]  # Starting position
+
+        for move in move_stack:
+            temp_board.push(move)
+            self.game_positions.append(temp_board.copy())
+
     def _back_one_move(self) -> None:
         """Go back one move (or move pair in human vs AI)."""
         if self.ai_thinking or self.board_widget.is_animating:
@@ -1125,6 +1153,7 @@ class ChessGameApp:
                             )
                             self._update_game_info()
                             self._update_eval_for_position()
+                            self._rebuild_game_positions()
 
                         self.board_widget.animate_move(
                             human_move,
@@ -1152,6 +1181,7 @@ class ChessGameApp:
                         )
                         self._update_game_info()
                         self._update_eval_for_position()
+                        self._rebuild_game_positions()
 
                     self.board_widget.animate_move(
                         human_move,
@@ -1170,6 +1200,7 @@ class ChessGameApp:
                     board.peek() if board.move_stack else None
                 )
                 self._update_game_info()
+                self._rebuild_game_positions()
                 self._update_eval_for_position()
 
             self.board_widget.animate_move(
@@ -1212,6 +1243,7 @@ class ChessGameApp:
                     self.board_widget.set_last_move(ai_move)
                     self._update_game_info()
                     self._update_eval_for_position()
+                    self._rebuild_game_positions()
 
                     if (
                         self.game_mode == "human_vs_ai"
@@ -1228,6 +1260,7 @@ class ChessGameApp:
                 self.board_widget.set_last_move(human_move)
                 self._update_game_info()
                 self._update_eval_for_position()
+                self._rebuild_game_positions()
 
         self.board_widget.animate_move(
             human_move, duration_ms=anim_duration, on_complete=after_human_move
@@ -1534,9 +1567,12 @@ class ChessGameApp:
         self.undone_moves.clear()
         self._update_game_info()
 
+        # Update game history
+        board = self.board_widget.get_board()
+        self.game_positions.append(board.copy())
+
         # Tree reuse: preserve subtree for next AI search
         if self.mcts is not None:
-            board = self.board_widget.get_board()
             self.mcts.advance_root(board)
 
         # Update evaluation
@@ -1621,6 +1657,9 @@ class ChessGameApp:
         board.push(move)
         self.board_widget.push_move(move)
 
+        # Update game history
+        self.game_positions.append(board.copy())
+
         # Update UI
         self._update_game_info()
         self.turn_start_time = time.time()
@@ -1647,7 +1686,11 @@ class ChessGameApp:
             if self.use_pure_mcts and self.pure_mcts_player is not None:
                 move = self.pure_mcts_player.select_move(board)
             else:
-                move = self.mcts.get_best_move(board, add_noise=False)
+                # Pass full game history to MCTS (excluding current position)
+                # IMPORTANT: MCTS does _initial_history[:history_length], taking first positions
+                # So we pass all positions from game start in order [pos_initial, pos_after_move1, ...]
+                history_boards = self.game_positions[:-1] if len(self.game_positions) > 1 else None
+                move = self.mcts.get_best_move(board, add_noise=False, history_boards=history_boards)
 
                 # Capture MCTS statistics for display
                 mcts_stats = self.mcts.get_root_statistics(board)
@@ -1787,6 +1830,9 @@ class ChessGameApp:
                 self.board_widget.set_board(board)
                 self.board_widget.set_last_move(move)
                 self._update_game_info()
+
+                # Update game history
+                self.game_positions.append(board.copy())
 
                 # Tree reuse: preserve subtree for next search
                 if self.mcts is not None:
