@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .device import get_device
+from .device import get_device, supports_mixed_precision
 from .move_encoding import MOVE_ENCODING_SIZE
 
 
@@ -374,13 +374,20 @@ class DualHeadNetwork(nn.Module):
             - value: float in [-1, +1]
         """
         self.eval()
+        device = get_device()
+        use_amp = device.type == "cuda" and supports_mixed_precision()
+
         with torch.inference_mode():
             # Add batch dimension, use non_blocking for async transfer
             x = torch.from_numpy(state).unsqueeze(0)
-            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
+            dtype = torch.float16 if use_amp else torch.float32
+            x = x.to(device, dtype=dtype, non_blocking=True)
 
-            # FP16 inference for speed
-            with torch.amp.autocast(device_type="cuda"):
+            # FP16 inference for speed (if available)
+            if use_amp:
+                with torch.amp.autocast(device_type="cuda"):
+                    policy_logits, value, _ = self(x)
+            else:
                 policy_logits, value, _ = self(x)
 
             # Clamp logits for numerical stability and apply softmax
@@ -402,13 +409,20 @@ class DualHeadNetwork(nn.Module):
             - values: numpy array of shape (batch,)
         """
         self.eval()
-        with torch.inference_mode():
-            # Use non_blocking for async transfer, FP16 for speed
-            x = torch.from_numpy(states)
-            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
+        device = get_device()
+        use_amp = device.type == "cuda" and supports_mixed_precision()
 
-            # FP16 inference for speed
-            with torch.amp.autocast(device_type="cuda"):
+        with torch.inference_mode():
+            # Use non_blocking for async transfer
+            x = torch.from_numpy(states)
+            dtype = torch.float16 if use_amp else torch.float32
+            x = x.to(device, dtype=dtype, non_blocking=True)
+
+            # FP16 inference for speed (if available)
+            if use_amp:
+                with torch.amp.autocast(device_type="cuda"):
+                    policy_logits, values, _ = self(x)
+            else:
                 policy_logits, values, _ = self(x)
 
             # Clamp logits for numerical stability and apply softmax
@@ -433,11 +447,18 @@ class DualHeadNetwork(nn.Module):
             - wdl_probs: numpy array of shape (3,) with [P(win), P(draw), P(loss)]
         """
         self.eval()
+        device = get_device()
+        use_amp = device.type == "cuda" and supports_mixed_precision()
+
         with torch.inference_mode():
             x = torch.from_numpy(state).unsqueeze(0)
-            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
+            dtype = torch.float16 if use_amp else torch.float32
+            x = x.to(device, dtype=dtype, non_blocking=True)
 
-            with torch.amp.autocast(device_type="cuda"):
+            if use_amp:
+                with torch.amp.autocast(device_type="cuda"):
+                    policy_logits, value, wdl_logits = self(x)
+            else:
                 policy_logits, value, wdl_logits = self(x)
 
             policy_logits = torch.clamp(policy_logits, min=-50, max=50)
@@ -466,11 +487,18 @@ class DualHeadNetwork(nn.Module):
             - wdl_probs: numpy array of shape (batch, 3) with [P(win), P(draw), P(loss)]
         """
         self.eval()
+        device = get_device()
+        use_amp = device.type == "cuda" and supports_mixed_precision()
+
         with torch.inference_mode():
             x = torch.from_numpy(states)
-            x = x.to(get_device(), dtype=torch.float16, non_blocking=True)
+            dtype = torch.float16 if use_amp else torch.float32
+            x = x.to(device, dtype=dtype, non_blocking=True)
 
-            with torch.amp.autocast(device_type="cuda"):
+            if use_amp:
+                with torch.amp.autocast(device_type="cuda"):
+                    policy_logits, values, wdl_logits = self(x)
+            else:
                 policy_logits, values, wdl_logits = self(x)
 
             policy_logits = torch.clamp(policy_logits, min=-50, max=50)
