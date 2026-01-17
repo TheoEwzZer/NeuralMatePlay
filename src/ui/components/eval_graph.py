@@ -7,6 +7,8 @@ Line chart showing evaluation history over the game.
 import tkinter as tk
 from typing import List, Optional, Tuple
 
+import numpy as np
+
 try:
     from ..styles import COLORS, FONTS
 except ImportError:
@@ -42,6 +44,7 @@ class EvalGraph(tk.Canvas):
         self._width = width
         self._height = height
         self._eval_history: List[float] = []
+        self._wdl_history: List[Optional[np.ndarray]] = []  # WDL for each move
         self._current_move = 0
         self._max_eval = 1.0  # Fixed scaling -1 to +1
         self._min_eval = -1.0
@@ -50,7 +53,7 @@ class EvalGraph(tk.Canvas):
         self._margin_left = 30
         self._margin_right = 10
         self._margin_top = 15
-        self._margin_bottom = 20
+        self._margin_bottom = 25  # Extra space for win rate display
 
         # Bind mouse events for tooltips
         self.bind("<Motion>", self._on_mouse_move)
@@ -176,8 +179,9 @@ class EvalGraph(tk.Canvas):
             fill=COLORS["text_secondary"],
         )
 
-        # X-axis label (move number)
+        # X-axis label (move number) and Win Rate
         if len(self._eval_history) > 0:
+            # Move number on the right
             self.create_text(
                 self._width - 5,
                 self._height - 5,
@@ -186,6 +190,22 @@ class EvalGraph(tk.Canvas):
                 fill=COLORS["text_muted"],
                 anchor="se",
             )
+
+            # Win Rate on the left (current position)
+            if 0 < self._current_move <= len(self._wdl_history):
+                wdl = self._wdl_history[self._current_move - 1]
+                if wdl is not None:
+                    wr_text = self._readable_wdl(wdl)
+                    expectation = wdl[0] + 0.5 * wdl[1]
+                    wr_color = self._get_wr_color(expectation)
+                    self.create_text(
+                        plot_left + 5,
+                        self._height - 5,
+                        text=f"WR: {wr_text}",
+                        font=("Segoe UI", 9, "bold"),
+                        fill=wr_color,
+                        anchor="sw",
+                    )
 
     def _draw_eval_line(self) -> None:
         """Draw the evaluation line."""
@@ -349,6 +369,26 @@ class EvalGraph(tk.Canvas):
         normalized = (clamped - self._min_eval) / (self._max_eval - self._min_eval)
         return plot_bottom - normalized * plot_height
 
+    def _readable_wdl(self, wdl: np.ndarray) -> str:
+        """Convert WDL array to expectation percentage.
+
+        Args:
+            wdl: Array [P(win), P(draw), P(loss)]
+
+        Returns:
+            Expectation as percentage string (e.g., "65.3%")
+        """
+        expectation = wdl[0] + 0.5 * wdl[1]
+        return f"{expectation * 100:.1f}%"
+
+    def _get_wr_color(self, expectation: float) -> str:
+        """Get color based on win rate expectation (0-1 scale)."""
+        if expectation > 0.55:
+            return COLORS["q_value_positive"]
+        elif expectation < 0.45:
+            return COLORS["q_value_negative"]
+        return COLORS["text_secondary"]
+
     def _on_mouse_move(self, event: tk.Event) -> None:
         """Handle mouse movement for tooltips."""
         # Find closest data point
@@ -373,10 +413,18 @@ class EvalGraph(tk.Canvas):
             idx = int(ratio * (num_moves - 1) + 0.5)
             idx = max(0, min(num_moves - 1, idx))
 
-        # Show tooltip
+        # Show tooltip with eval and WDL if available
         eval_val = self._eval_history[idx]
         move_num = idx + 1
-        self._show_tooltip(event.x, event.y, f"Move {move_num}: {eval_val:+.2f}")
+        tooltip_text = f"Move {move_num}: {eval_val:+.2f}"
+
+        # Add win rate if WDL is available
+        if idx < len(self._wdl_history) and self._wdl_history[idx] is not None:
+            wdl = self._wdl_history[idx]
+            wr_text = self._readable_wdl(wdl)
+            tooltip_text += f" (WR: {wr_text})"
+
+        self._show_tooltip(event.x, event.y, tooltip_text)
 
     def _on_mouse_leave(self, event: tk.Event) -> None:
         """Hide tooltip when mouse leaves."""
@@ -416,25 +464,38 @@ class EvalGraph(tk.Canvas):
         self.delete("tooltip_bg")
         self._tooltip_id = None
 
-    def add_evaluation(self, value: float) -> None:
+    def add_evaluation(
+        self, value: float, wdl: Optional[np.ndarray] = None
+    ) -> None:
         """
         Add a new evaluation point.
 
         Args:
             value: Evaluation value (-1 to +1)
+            wdl: Optional WDL array [P(win), P(draw), P(loss)]
         """
         self._eval_history.append(value)
+        self._wdl_history.append(wdl)
         self._current_move = len(self._eval_history)
         self._draw_graph()
 
-    def set_history(self, history: List[float]) -> None:
+    def set_history(
+        self,
+        history: List[float],
+        wdl_history: Optional[List[Optional[np.ndarray]]] = None,
+    ) -> None:
         """
         Set the complete evaluation history.
 
         Args:
             history: List of evaluation values
+            wdl_history: Optional list of WDL arrays
         """
         self._eval_history = list(history)
+        if wdl_history is not None:
+            self._wdl_history = list(wdl_history)
+        else:
+            self._wdl_history = [None] * len(history)
         self._current_move = len(self._eval_history)
         self._draw_graph()
 
@@ -451,6 +512,7 @@ class EvalGraph(tk.Canvas):
     def clear(self) -> None:
         """Reset the graph for a new game."""
         self._eval_history = []
+        self._wdl_history = []
         self._current_move = 0
         self._max_eval = 1.0
         self._min_eval = -1.0

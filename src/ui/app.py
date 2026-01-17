@@ -17,6 +17,8 @@ import json
 import time
 import math
 
+import numpy as np
+
 try:
     import chess
 except ImportError:
@@ -148,6 +150,7 @@ class ChessGameApp:
 
         # Evaluation history for graph
         self.eval_history: List[float] = []
+        self.wdl_history: List[Optional[np.ndarray]] = []  # WDL for each eval
 
         # Move timing
         self.turn_start_time: float = time.time()
@@ -1061,6 +1064,7 @@ class ChessGameApp:
 
         self.undone_moves.clear()
         self.eval_history.clear()
+        self.wdl_history.clear()
 
         self.board_widget.reset()
 
@@ -1825,6 +1829,13 @@ class ChessGameApp:
 
         if move in board.legal_moves:
 
+            # Extract WDL from best move for eval graph
+            best_wdl = None
+            if mcts_stats and "wdl" in mcts_stats[0]:
+                best_wdl = mcts_stats[0]["wdl"]
+                if not isinstance(best_wdl, np.ndarray):
+                    best_wdl = np.array(best_wdl, dtype=np.float32)
+
             def on_animation_complete():
                 board.push(move)
                 self.board_widget.set_board(board)
@@ -1838,8 +1849,8 @@ class ChessGameApp:
                 if self.mcts is not None:
                     self.mcts.advance_root(board)
 
-                # Update evaluation after AI move
-                self._update_eval_after_move(ai_value=root_value)
+                # Update evaluation after AI move (with WDL for win rate display)
+                self._update_eval_after_move(ai_value=root_value, wdl=best_wdl)
 
                 updated_board = self.board_widget.get_board()
                 if updated_board.is_game_over():
@@ -1858,7 +1869,9 @@ class ChessGameApp:
         else:
             self._update_game_info()
 
-    def _update_eval_after_move(self, ai_value: float = None) -> None:
+    def _update_eval_after_move(
+        self, ai_value: float = None, wdl: Optional[np.ndarray] = None
+    ) -> None:
         """Update evaluation displays after a move."""
         # Only update eval graph after AI moves (when ai_value is provided)
         if ai_value is None:
@@ -1873,7 +1886,8 @@ class ChessGameApp:
 
         # Add to eval history and update graph
         self.eval_history.append(display_eval)
-        self.eval_graph.add_evaluation(display_eval)
+        self.wdl_history.append(wdl)
+        self.eval_graph.add_evaluation(display_eval, wdl)
 
     def _update_eval_for_position(self) -> None:
         """Update evaluation for current position (after back/forward)."""
@@ -1884,7 +1898,8 @@ class ChessGameApp:
         if move_index < len(self.eval_history):
             # Trim eval history to current position
             self.eval_history = self.eval_history[:move_index]
-            self.eval_graph.set_history(self.eval_history)
+            self.wdl_history = self.wdl_history[:move_index]
+            self.eval_graph.set_history(self.eval_history, self.wdl_history)
 
         if self.eval_history:
             self.eval_bar.set_evaluation(self.eval_history[-1] * 10)
@@ -2265,6 +2280,7 @@ class ChessGameApp:
         # Reset game state
         self.undone_moves.clear()
         self.eval_history.clear()
+        self.wdl_history.clear()
         self.mcts_panel.clear()
         self.search_tree_panel.clear()
         self.eval_bar.clear()

@@ -99,9 +99,10 @@ class MCTSPanel(tk.Frame):
             ("Visits", 48, "e"),
             ("%", 40, "e"),
             ("Q-value", 55, "e"),
-            ("W", 45, "e"),
-            ("D", 45, "e"),
-            ("L", 45, "e"),
+            ("WR%", 48, "e"),
+            ("W", 40, "e"),
+            ("D", 40, "e"),
+            ("L", 40, "e"),
             ("Prior", 45, "e"),
         ]
 
@@ -300,6 +301,21 @@ class MCTSPanel(tk.Frame):
         )
         q_label.pack(side=tk.LEFT, padx=2)
 
+        # Win Rate (expectation percentage)
+        wr_text = self._readable_wdl(stat.wdl)
+        wr_expectation = stat.wdl[0] + 0.5 * stat.wdl[1]
+        wr_color = self._get_win_color(wr_expectation * 2 - 1)  # Map 0-1 to -1,+1
+        wr_label = tk.Label(
+            row,
+            text=wr_text,
+            font=("Consolas", 9, "bold"),
+            fg=wr_color,
+            bg=bg,
+            width=6,
+            anchor="e",
+        )
+        wr_label.pack(side=tk.LEFT, padx=2)
+
         # W, D, L as separate columns
         win_pct = stat.wdl[0] * 100
         draw_pct = stat.wdl[1] * 100
@@ -398,6 +414,19 @@ class MCTSPanel(tk.Frame):
         elif q_value < -0.1:
             return COLORS["q_value_negative"]
         return COLORS["text_secondary"]
+
+    def _readable_wdl(self, wdl: np.ndarray) -> str:
+        """Convert WDL array to expectation percentage.
+
+        Args:
+            wdl: Array [P(win), P(draw), P(loss)]
+
+        Returns:
+            Expectation as percentage string (e.g., "65.3%")
+        """
+        # Expectation = P(win) + 0.5 * P(draw)
+        expectation = wdl[0] + 0.5 * wdl[1]
+        return f"{expectation * 100:.1f}%"
 
     def clear(self) -> None:
         """Clear the panel."""
