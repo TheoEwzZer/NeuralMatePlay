@@ -40,6 +40,7 @@ class PretrainingConfig:
     skip_first_n_moves: int = 8
     value_loss_weight: float = 5.0  # Weight for value loss to prevent collapse
     entropy_coefficient: float = 0.01  # Entropy bonus to encourage policy diversity
+    label_smoothing: float = 0.05  # Label smoothing factor for cross-entropy loss
     prefetch_workers: int = 2  # Number of prefetch threads for chunk loading
     gradient_accumulation_steps: int = (
         1  # Accumulate gradients over N steps (effective batch = batch_size * N)

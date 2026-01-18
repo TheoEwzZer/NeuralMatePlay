@@ -160,6 +160,7 @@ class StreamingTrainer:
         resume_from: Optional[str] = None,
         value_loss_weight: float = 5.0,
         entropy_coefficient: float = 0.01,
+        label_smoothing: float = 0.05,
         prefetch_workers: int = 2,
         gradient_accumulation_steps: int = 1,
         # Training dynamics (prevent catastrophic forgetting)
@@ -186,12 +187,14 @@ class StreamingTrainer:
             value_loss_weight: Weight for value loss relative to policy loss (default 5.0).
                               Higher values give more importance to value head training.
             entropy_coefficient: Coefficient for entropy bonus to encourage policy diversity.
+            label_smoothing: Label smoothing factor for cross-entropy loss (default 0.05).
             prefetch_workers: Number of background threads for chunk prefetching (default 2).
             gradient_accumulation_steps: Accumulate gradients over N steps before optimizer update.
         """
         self.network = network
         self.value_loss_weight = value_loss_weight
         self.entropy_coefficient = entropy_coefficient
+        self.label_smoothing = label_smoothing
         self.prefetch_workers = prefetch_workers
         self.gradient_accumulation_steps = gradient_accumulation_steps
         # Training dynamics parameters
@@ -727,7 +730,7 @@ class StreamingTrainer:
                             policy_loss_unreduced = nn.functional.cross_entropy(
                                 pred_policies_clamped,
                                 batch_policies,
-                                label_smoothing=0.1,
+                                label_smoothing=self.label_smoothing,
                                 reduction="none",
                             )
                             policy_loss = (policy_loss_unreduced * batch_weights).mean()
@@ -740,7 +743,7 @@ class StreamingTrainer:
                             value_loss_unreduced = nn.functional.cross_entropy(
                                 wdl_logits_clamped,
                                 wdl_targets,
-                                label_smoothing=0.1,
+                                label_smoothing=self.label_smoothing,
                                 reduction="none",
                             )
                             value_loss = (value_loss_unreduced * batch_weights).mean()
@@ -826,7 +829,7 @@ class StreamingTrainer:
                         policy_loss_unreduced = nn.functional.cross_entropy(
                             pred_policies_clamped,
                             batch_policies,
-                            label_smoothing=0.1,
+                            label_smoothing=self.label_smoothing,
                             reduction="none",
                         )
                         policy_loss = (policy_loss_unreduced * batch_weights).mean()
@@ -837,7 +840,7 @@ class StreamingTrainer:
                         value_loss_unreduced = nn.functional.cross_entropy(
                             wdl_logits_clamped,
                             wdl_targets,
-                            label_smoothing=0.1,
+                            label_smoothing=self.label_smoothing,
                             reduction="none",
                         )
                         value_loss = (value_loss_unreduced * batch_weights).mean()
@@ -1057,13 +1060,13 @@ class StreamingTrainer:
 
                         pred_policies, _, wdl_logits = self.network(batch_states)
                         policy_loss = nn.functional.cross_entropy(
-                            pred_policies, batch_policies, label_smoothing=0.1
+                            pred_policies, batch_policies, label_smoothing=self.label_smoothing
                         )
 
                         # Value loss: WDL cross-entropy
                         wdl_targets = values_to_wdl_targets(batch_values)
                         value_loss = nn.functional.cross_entropy(
-                            wdl_logits, wdl_targets, label_smoothing=0.1
+                            wdl_logits, wdl_targets, label_smoothing=self.label_smoothing
                         )
 
                         # Skip NaN losses in validation

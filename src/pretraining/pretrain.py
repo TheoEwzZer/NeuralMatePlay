@@ -283,6 +283,7 @@ def pretrain(
         print("\nUsing streaming trainer (memory efficient)...")
         print(f"  Value loss weight: {cfg.value_loss_weight}")
         print(f"  Entropy coefficient: {cfg.entropy_coefficient}")
+        print(f"  Label smoothing: {cfg.label_smoothing}")
         print(f"  Prefetch workers: {cfg.prefetch_workers}")
         print(f"  Gradient accumulation steps: {cfg.gradient_accumulation_steps}")
         trainer = StreamingTrainer(
@@ -297,6 +298,7 @@ def pretrain(
             resume_from=resume_from,
             value_loss_weight=cfg.value_loss_weight,
             entropy_coefficient=cfg.entropy_coefficient,
+            label_smoothing=cfg.label_smoothing,
             prefetch_workers=cfg.prefetch_workers,
             gradient_accumulation_steps=cfg.gradient_accumulation_steps,
             # Training dynamics (prevent catastrophic forgetting)
