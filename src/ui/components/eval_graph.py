@@ -192,20 +192,20 @@ class EvalGraph(tk.Canvas):
             )
 
             # Win Rate on the left (current position)
-            if 0 < self._current_move <= len(self._wdl_history):
-                wdl = self._wdl_history[self._current_move - 1]
-                if wdl is not None:
-                    wr_text = self._readable_wdl(wdl)
-                    expectation = wdl[0] + 0.5 * wdl[1]
-                    wr_color = self._get_wr_color(expectation)
-                    self.create_text(
-                        plot_left + 5,
-                        self._height - 5,
-                        text=f"WR: {wr_text}",
-                        font=("Segoe UI", 9, "bold"),
-                        fill=wr_color,
-                        anchor="sw",
-                    )
+            if 0 < self._current_move <= len(self._eval_history):
+                eval_val = self._eval_history[self._current_move - 1]
+                wr_text = self._value_to_winrate(eval_val)
+                # Convert value (-1 to +1) to expectation (0 to 1) for color
+                expectation = (eval_val + 1) / 2
+                wr_color = self._get_wr_color(expectation)
+                self.create_text(
+                    plot_left + 5,
+                    self._height - 5,
+                    text=f"WR: {wr_text}",
+                    font=("Segoe UI", 9, "bold"),
+                    fill=wr_color,
+                    anchor="sw",
+                )
 
     def _draw_eval_line(self) -> None:
         """Draw the evaluation line."""
@@ -369,17 +369,18 @@ class EvalGraph(tk.Canvas):
         normalized = (clamped - self._min_eval) / (self._max_eval - self._min_eval)
         return plot_bottom - normalized * plot_height
 
-    def _readable_wdl(self, wdl: np.ndarray) -> str:
-        """Convert WDL array to expectation percentage.
+    def _value_to_winrate(self, value: float) -> str:
+        """Convert value (-1 to +1) to win rate percentage.
 
         Args:
-            wdl: Array [P(win), P(draw), P(loss)]
+            value: Evaluation value from -1 (loss) to +1 (win)
 
         Returns:
-            Expectation as percentage string (e.g., "65.3%")
+            Win rate as percentage string (e.g., "65.3%")
         """
-        expectation = wdl[0] + 0.5 * wdl[1]
-        return f"{expectation * 100:.1f}%"
+        # value = -1 -> 0%, value = 0 -> 50%, value = +1 -> 100%
+        win_rate = (value + 1) / 2
+        return f"{win_rate * 100:.1f}%"
 
     def _get_wr_color(self, expectation: float) -> str:
         """Get color based on win rate expectation (0-1 scale)."""
@@ -413,16 +414,11 @@ class EvalGraph(tk.Canvas):
             idx = int(ratio * (num_moves - 1) + 0.5)
             idx = max(0, min(num_moves - 1, idx))
 
-        # Show tooltip with eval and WDL if available
+        # Show tooltip with eval and win rate
         eval_val = self._eval_history[idx]
         move_num = idx + 1
-        tooltip_text = f"Move {move_num}: {eval_val:+.2f}"
-
-        # Add win rate if WDL is available
-        if idx < len(self._wdl_history) and self._wdl_history[idx] is not None:
-            wdl = self._wdl_history[idx]
-            wr_text = self._readable_wdl(wdl)
-            tooltip_text += f" (WR: {wr_text})"
+        wr_text = self._value_to_winrate(eval_val)
+        tooltip_text = f"Move {move_num}: {eval_val:+.2f} (WR: {wr_text})"
 
         self._show_tooltip(event.x, event.y, tooltip_text)
 

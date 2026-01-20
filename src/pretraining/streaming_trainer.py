@@ -50,6 +50,95 @@ def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
     return torch.clamp(wdl_targets, min=0, max=2)
 
 
+def adaptive_label_smoothing(
+    base_smoothing: float, weights: torch.Tensor, min_smoothing: float = 0.02, max_smoothing: float = 0.15
+) -> torch.Tensor:
+    """
+    Calculate adaptive label smoothing based on tactical weights.
+
+    Higher weights (tactical/rare positions) get more smoothing to encourage
+    better generalization on complex patterns. Lower weights (simple positions)
+    get base smoothing.
+
+    The intuition: rare/tactical positions benefit from more regularization
+    because they represent edge cases where the model should be less confident
+    and explore alternative moves.
+
+    Args:
+        base_smoothing: Base label smoothing value (e.g., 0.05)
+        weights: Tactical weights tensor of shape (batch,), typically in [1.0, 5.0]
+        min_smoothing: Minimum smoothing (floor)
+        max_smoothing: Maximum smoothing (ceiling)
+
+    Returns:
+        Per-sample smoothing values of shape (batch,)
+
+    Formula: smoothing = base * (1.0 + 0.5 * (weight - 1.0))
+    Examples:
+        weight=1.0 → smoothing=0.05 (base)
+        weight=2.0 → smoothing=0.075
+        weight=3.0 → smoothing=0.10
+        weight=5.0 → smoothing=0.15 (capped)
+    """
+    adaptive = base_smoothing * (1.0 + 0.5 * (weights - 1.0))
+    return torch.clamp(adaptive, min=min_smoothing, max=max_smoothing)
+
+
+def adaptive_cross_entropy_with_smoothing(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    smoothing_values: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Cross-entropy loss with per-sample adaptive label smoothing.
+
+    Standard cross_entropy with label_smoothing applies uniform smoothing.
+    This function allows different smoothing per sample based on position complexity.
+
+    Formula per sample:
+        loss = (1 - s) * (-log_prob[true_class]) + s * mean(-log_prob)
+             = -log_prob[true_class] + s * (log_prob[true_class] - mean(log_prob))
+
+    where s is the per-sample smoothing value.
+
+    Args:
+        logits: Model predictions of shape (batch, num_classes)
+        targets: One-hot encoded targets of shape (batch, num_classes) OR
+                 class indices of shape (batch,)
+        smoothing_values: Per-sample smoothing values of shape (batch,)
+
+    Returns:
+        Per-sample cross-entropy losses of shape (batch,)
+    """
+    # Convert one-hot to indices if needed
+    if targets.dim() == 2:
+        # targets is one-hot encoded
+        target_indices = targets.argmax(dim=1)
+    else:
+        target_indices = targets
+
+    # Compute log softmax for numerical stability
+    log_probs = nn.functional.log_softmax(logits, dim=-1)
+
+    # For each sample, compute smoothed loss:
+    # loss = (1 - smoothing) * -log_prob[true_class] + smoothing * mean(-log_prob)
+    # Equivalently: loss = -log_prob[true_class] + smoothing * (log_prob[true_class] - mean(log_prob))
+
+    # Get log prob of true class
+    true_class_log_prob = log_probs.gather(1, target_indices.unsqueeze(1)).squeeze(1)
+
+    # Mean of all log probs (for uniform distribution part)
+    mean_log_prob = log_probs.mean(dim=1)
+
+    # Smoothed loss per sample
+    # (1 - s) * (-true_log_prob) + s * (-mean_log_prob)
+    # = -true_log_prob + s * true_log_prob - s * mean_log_prob
+    # = -true_log_prob + s * (true_log_prob - mean_log_prob)
+    losses = -true_class_log_prob + smoothing_values * (true_class_log_prob - mean_log_prob)
+
+    return losses
+
+
 class SafeGradScaler(GradScaler):
     """
     GradScaler with maximum scale cap to prevent overflow in float16.
@@ -726,25 +815,29 @@ class StreamingTrainer:
                                 pred_policies, min=-50, max=50
                             )
 
-                            # Policy loss with tactical weighting
-                            policy_loss_unreduced = nn.functional.cross_entropy(
+                            # Compute adaptive label smoothing based on tactical weights
+                            # Higher weights (rare/tactical positions) get more smoothing
+                            smoothing_values = adaptive_label_smoothing(
+                                self.label_smoothing, batch_weights
+                            )
+
+                            # Policy loss with adaptive smoothing and tactical weighting
+                            policy_loss_unreduced = adaptive_cross_entropy_with_smoothing(
                                 pred_policies_clamped,
                                 batch_policies,
-                                label_smoothing=self.label_smoothing,
-                                reduction="none",
+                                smoothing_values,
                             )
                             policy_loss = (policy_loss_unreduced * batch_weights).mean()
 
-                            # Value loss: WDL cross-entropy with tactical weighting
+                            # Value loss: WDL cross-entropy with adaptive smoothing
                             wdl_targets = values_to_wdl_targets(batch_values)
                             wdl_logits_clamped = torch.clamp(
                                 wdl_logits, min=-50, max=50
                             )
-                            value_loss_unreduced = nn.functional.cross_entropy(
+                            value_loss_unreduced = adaptive_cross_entropy_with_smoothing(
                                 wdl_logits_clamped,
                                 wdl_targets,
-                                label_smoothing=self.label_smoothing,
-                                reduction="none",
+                                smoothing_values,
                             )
                             value_loss = (value_loss_unreduced * batch_weights).mean()
 
@@ -760,12 +853,18 @@ class StreamingTrainer:
                             # Clamp entropy to a safe range
                             entropy = torch.clamp(entropy, min=0.0, max=20.0)
 
-                            # Combined loss with entropy bonus (subtract to maximize entropy)
+                            # Adaptive entropy coefficient: more entropy for tactical positions
+                            # This encourages exploration of alternative moves in complex positions
+                            adaptive_entropy_coef = self.entropy_coefficient * (
+                                1.0 + 0.3 * (batch_weights.mean() - 1.0)
+                            )
+
+                            # Combined loss with adaptive entropy bonus (subtract to maximize entropy)
                             # Scale loss for gradient accumulation
                             loss = (
                                 policy_loss
                                 + self.value_loss_weight * value_loss
-                                - self.entropy_coefficient * entropy
+                                - adaptive_entropy_coef * entropy
                             ) / accum_steps
 
                             # Final safety check - clamp total loss
@@ -825,23 +924,27 @@ class StreamingTrainer:
                             pred_policies, min=-50, max=50
                         )
 
-                        # Policy loss with tactical weighting
-                        policy_loss_unreduced = nn.functional.cross_entropy(
+                        # Compute adaptive label smoothing based on tactical weights
+                        # Higher weights (rare/tactical positions) get more smoothing
+                        smoothing_values = adaptive_label_smoothing(
+                            self.label_smoothing, batch_weights
+                        )
+
+                        # Policy loss with adaptive smoothing and tactical weighting
+                        policy_loss_unreduced = adaptive_cross_entropy_with_smoothing(
                             pred_policies_clamped,
                             batch_policies,
-                            label_smoothing=self.label_smoothing,
-                            reduction="none",
+                            smoothing_values,
                         )
                         policy_loss = (policy_loss_unreduced * batch_weights).mean()
 
-                        # Value loss: WDL cross-entropy with tactical weighting
+                        # Value loss: WDL cross-entropy with adaptive smoothing
                         wdl_targets = values_to_wdl_targets(batch_values)
                         wdl_logits_clamped = torch.clamp(wdl_logits, min=-50, max=50)
-                        value_loss_unreduced = nn.functional.cross_entropy(
+                        value_loss_unreduced = adaptive_cross_entropy_with_smoothing(
                             wdl_logits_clamped,
                             wdl_targets,
-                            label_smoothing=self.label_smoothing,
-                            reduction="none",
+                            smoothing_values,
                         )
                         value_loss = (value_loss_unreduced * batch_weights).mean()
 
@@ -857,12 +960,18 @@ class StreamingTrainer:
                         # Clamp entropy to a safe range
                         entropy = torch.clamp(entropy, min=0.0, max=20.0)
 
-                        # Combined loss with entropy bonus (subtract to maximize entropy)
+                        # Adaptive entropy coefficient: more entropy for tactical positions
+                        # This encourages exploration of alternative moves in complex positions
+                        adaptive_entropy_coef = self.entropy_coefficient * (
+                            1.0 + 0.3 * (batch_weights.mean() - 1.0)
+                        )
+
+                        # Combined loss with adaptive entropy bonus (subtract to maximize entropy)
                         # Scale loss for gradient accumulation
                         loss = (
                             policy_loss
                             + self.value_loss_weight * value_loss
-                            - self.entropy_coefficient * entropy
+                            - adaptive_entropy_coef * entropy
                         ) / accum_steps
 
                         # Final safety check - clamp total loss
