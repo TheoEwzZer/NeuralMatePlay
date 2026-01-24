@@ -516,8 +516,7 @@ class MCTS:
         if node.is_expanded:
             return
 
-        # Store initial value and WDL
-        node.visit_count = 1
+        # Store initial value and WDL (visit_count will be set by backpropagation)
         node.total_value = value
         node.total_wdl = wdl.copy()
 
@@ -1196,11 +1195,14 @@ class MCTS:
         """Recursively compute max depth from a node."""
         if not node.children:
             return 0
-        max_child_depth = 0
+        max_child_depth = -1  # -1 means no visited children yet
         for child in node.children.values():
             if child.visit_count > 0:
                 child_depth = self._compute_tree_depth(child)
                 max_child_depth = max(max_child_depth, child_depth)
+        # Only count this level if at least one child was visited
+        if max_child_depth == -1:
+            return 0
         return 1 + max_child_depth
 
     def get_max_branching_factor(self, board: chess.Board) -> int:
