@@ -117,6 +117,8 @@ class TacticalReplayBuffer:
 
     Uses proportional sampling: keeps top N positions from EACH chunk to ensure
     uniform coverage of the entire dataset.
+
+    Optimized: Uses pre-allocated numpy arrays for O(1) access instead of Python lists.
     """
 
     def __init__(
@@ -136,10 +138,14 @@ class TacticalReplayBuffer:
         self.capacity = capacity
         self.threshold = weight_threshold
         self.positions_per_chunk = max(1, capacity // max(1, num_chunks))
-        self.states: List[np.ndarray] = []
-        self.policies: List[int] = []
-        self.values: List[float] = []
-        self.weights: List[float] = []
+
+        # Pre-allocated numpy arrays for fast access
+        self.states = np.zeros((capacity, 72, 8, 8), dtype=np.float32)
+        self.policies = np.zeros(capacity, dtype=np.int32)
+        self.values = np.zeros(capacity, dtype=np.float32)
+        self.weights = np.zeros(capacity, dtype=np.float32)
+
+        self._size = 0  # Current number of positions in buffer
 
     def add_batch(
         self,
@@ -178,11 +184,13 @@ class TacticalReplayBuffer:
 
         added = 0
         for i in top_indices:
-            if len(self.states) < self.capacity:
-                self.states.append(states[i].copy())
-                self.policies.append(int(policies[i]))
-                self.values.append(float(values[i]))
-                self.weights.append(float(weights[i]))
+            if self._size < self.capacity:
+                idx = self._size
+                self.states[idx] = states[i]
+                self.policies[idx] = policies[i]
+                self.values[idx] = values[i]
+                self.weights[idx] = weights[i]
+                self._size += 1
                 added += 1
 
         return added
@@ -198,32 +206,33 @@ class TacticalReplayBuffer:
         Returns:
             Tuple of (states, policy_indices, values, weights) or None if empty
         """
-        if len(self.states) == 0:
+        if self._size == 0:
             return None
 
-        n = min(n, len(self.states))
-        indices = np.random.choice(len(self.states), n, replace=False)
+        n = min(n, self._size)
+        indices = np.random.choice(self._size, n, replace=False)
 
+        # Fast numpy array indexing (O(1) per element)
         states = torch.from_numpy(
-            np.stack([self.states[i] for i in indices])
-        ).float().to(device, non_blocking=True)
+            self.states[indices].copy()
+        ).to(device, non_blocking=True)
 
-        policies = torch.tensor(
-            [self.policies[i] for i in indices], dtype=torch.long, device=device
-        )
+        policies = torch.from_numpy(
+            self.policies[indices].copy()
+        ).long().to(device, non_blocking=True)
 
-        values = torch.tensor(
-            [self.values[i] for i in indices], dtype=torch.float32, device=device
-        )
+        values = torch.from_numpy(
+            self.values[indices].copy()
+        ).to(device, non_blocking=True)
 
-        weights = torch.tensor(
-            [self.weights[i] for i in indices], dtype=torch.float32, device=device
-        )
+        weights = torch.from_numpy(
+            self.weights[indices].copy()
+        ).to(device, non_blocking=True)
 
         return states, policies, values, weights
 
     def __len__(self) -> int:
-        return len(self.states)
+        return self._size
 
 
 class EWCRegularizer:
