@@ -118,7 +118,8 @@ class TacticalReplayBuffer:
     Uses proportional sampling: keeps top N positions from EACH chunk to ensure
     uniform coverage of the entire dataset.
 
-    Optimized: Uses pre-allocated numpy arrays for O(1) access instead of Python lists.
+    Optimized: Single contiguous array with doubling growth strategy.
+    Starts small (1k) and doubles when full, up to max capacity.
     """
 
     def __init__(
@@ -128,7 +129,7 @@ class TacticalReplayBuffer:
         num_chunks: int,
     ):
         """
-        Initialize replay buffer.
+        Initialize replay buffer with fixed pre-allocation.
 
         Args:
             capacity: Maximum number of positions to store
@@ -139,13 +140,30 @@ class TacticalReplayBuffer:
         self.threshold = weight_threshold
         self.positions_per_chunk = max(1, capacity // max(1, num_chunks))
 
-        # Pre-allocated numpy arrays for fast access
+        # Pre-allocate full capacity upfront (no growth = no warmup slowdown)
+        self._allocated = capacity
         self.states = np.zeros((capacity, 72, 8, 8), dtype=np.float32)
         self.policies = np.zeros(capacity, dtype=np.int32)
         self.values = np.zeros(capacity, dtype=np.float32)
         self.weights = np.zeros(capacity, dtype=np.float32)
 
         self._size = 0  # Current number of positions in buffer
+
+        # Reusable cache (avoid GPU memory fragmentation)
+        self._chunk_cache = None
+        self._chunk_cache_idx = 0
+
+        # GPU cache pré-alloué (créé au premier appel de pre_sample_for_chunk)
+        self._gpu_cache_states = None
+        self._gpu_cache_policies = None
+        self._gpu_cache_values = None
+        self._gpu_cache_weights = None
+        self._gpu_cache_size = 0
+        self._gpu_cache_device = None
+        self._chunk_cache_valid_size = 0
+
+        # Random number generator
+        self._rng = np.random.default_rng(42)
 
     def add_batch(
         self,
@@ -182,18 +200,18 @@ class TacticalReplayBuffer:
         sorted_order = np.argsort(tactical_weights)[::-1]  # Descending
         top_indices = tactical_indices[sorted_order[:self.positions_per_chunk]]
 
-        added = 0
-        for i in top_indices:
-            if self._size < self.capacity:
-                idx = self._size
-                self.states[idx] = states[i]
-                self.policies[idx] = policies[i]
-                self.values[idx] = values[i]
-                self.weights[idx] = weights[i]
-                self._size += 1
-                added += 1
+        # Vectorized batch insert
+        n_to_add = min(len(top_indices), self.capacity - self._size)
+        if n_to_add > 0:
+            insert_indices = top_indices[:n_to_add]
+            end_idx = self._size + n_to_add
+            self.states[self._size:end_idx] = states[insert_indices]
+            self.policies[self._size:end_idx] = policies[insert_indices]
+            self.values[self._size:end_idx] = values[insert_indices]
+            self.weights[self._size:end_idx] = weights[insert_indices]
+            self._size = end_idx
 
-        return added
+        return n_to_add
 
     def sample(self, n: int, device: torch.device) -> Optional[Tuple[torch.Tensor, ...]]:
         """
@@ -210,26 +228,131 @@ class TacticalReplayBuffer:
             return None
 
         n = min(n, self._size)
-        indices = np.random.choice(self._size, n, replace=False)
+        indices = self._rng.choice(self._size, n, replace=False)
 
-        # Fast numpy array indexing (O(1) per element)
-        states = torch.from_numpy(
+        # Direct numpy fancy indexing (fast, contiguous memory)
+        sampled_states = torch.from_numpy(
             self.states[indices].copy()
         ).to(device, non_blocking=True)
 
-        policies = torch.from_numpy(
+        sampled_policies = torch.from_numpy(
             self.policies[indices].copy()
         ).long().to(device, non_blocking=True)
 
-        values = torch.from_numpy(
+        sampled_values = torch.from_numpy(
             self.values[indices].copy()
         ).to(device, non_blocking=True)
 
-        weights = torch.from_numpy(
+        sampled_weights = torch.from_numpy(
             self.weights[indices].copy()
         ).to(device, non_blocking=True)
 
-        return states, policies, values, weights
+        return sampled_states, sampled_policies, sampled_values, sampled_weights
+
+    def _ensure_gpu_cache(self, size: int, device: torch.device) -> None:
+        """Alloue ou réalloue le cache GPU si nécessaire."""
+        if (
+            self._gpu_cache_states is not None
+            and self._gpu_cache_size >= size
+            and self._gpu_cache_device == device
+        ):
+            return  # Cache déjà OK
+
+        # Libérer l'ancien cache
+        if self._gpu_cache_states is not None:
+            del self._gpu_cache_states, self._gpu_cache_policies
+            del self._gpu_cache_values, self._gpu_cache_weights
+            torch.cuda.empty_cache()
+
+        # Allouer avec 20% de marge
+        alloc_size = int(size * 1.2)
+        self._gpu_cache_states = torch.empty(
+            (alloc_size, 72, 8, 8), dtype=torch.float32, device=device
+        )
+        self._gpu_cache_policies = torch.empty(alloc_size, dtype=torch.long, device=device)
+        self._gpu_cache_values = torch.empty(alloc_size, dtype=torch.float32, device=device)
+        self._gpu_cache_weights = torch.empty(alloc_size, dtype=torch.float32, device=device)
+        self._gpu_cache_size = alloc_size
+        self._gpu_cache_device = device
+
+    def pre_sample_for_chunk(self, total_samples: int, device: torch.device) -> None:
+        """
+        Pre-sample avec tensors GPU persistants (temps constant).
+
+        Uses CONTIGUOUS sampling for cache efficiency: picks a random start
+        position and reads a contiguous block. Much faster than scattered indices.
+
+        Args:
+            total_samples: Total number of samples needed for the chunk
+            device: Device to place tensors on
+        """
+        self._chunk_cache = None
+        self._chunk_cache_idx = 0
+        self._chunk_cache_valid_size = 0
+
+        if self._size == 0 or total_samples <= 0:
+            return
+
+        total_samples = min(total_samples, self._size)
+
+        # S'assurer que le cache GPU est alloué
+        self._ensure_gpu_cache(total_samples, device)
+
+        # Contiguous sampling: random start, read sequential block (cache-friendly)
+        max_start = max(0, self._size - total_samples)
+        start_idx = self._rng.integers(0, max_start + 1) if max_start > 0 else 0
+        end_idx = start_idx + total_samples
+
+        # Copier dans le cache GPU pré-alloué (PAS de nouvelle allocation)
+        self._gpu_cache_states[:total_samples].copy_(
+            torch.from_numpy(self.states[start_idx:end_idx])
+        )
+        self._gpu_cache_policies[:total_samples].copy_(
+            torch.from_numpy(self.policies[start_idx:end_idx].astype(np.int64))
+        )
+        self._gpu_cache_values[:total_samples].copy_(
+            torch.from_numpy(self.values[start_idx:end_idx])
+        )
+        self._gpu_cache_weights[:total_samples].copy_(
+            torch.from_numpy(self.weights[start_idx:end_idx])
+        )
+
+        # Créer les vues (pas de copie)
+        self._chunk_cache = (
+            self._gpu_cache_states[:total_samples],
+            self._gpu_cache_policies[:total_samples],
+            self._gpu_cache_values[:total_samples],
+            self._gpu_cache_weights[:total_samples],
+        )
+        self._chunk_cache_valid_size = total_samples
+
+    def get_batch_from_cache(self, n: int) -> Optional[Tuple[torch.Tensor, ...]]:
+        """
+        Get next batch from pre-sampled cache (O(1), pas de transfer).
+
+        Args:
+            n: Number of positions to get
+
+        Returns:
+            Tuple of (states, policy_indices, values, weights) or None if cache empty
+        """
+        if self._chunk_cache is None:
+            return None
+
+        cache_size = self._chunk_cache_valid_size
+
+        if self._chunk_cache_idx >= cache_size:
+            return None
+
+        end_idx = min(self._chunk_cache_idx + n, cache_size)
+        batch = (
+            self._chunk_cache[0][self._chunk_cache_idx:end_idx],
+            self._chunk_cache[1][self._chunk_cache_idx:end_idx],
+            self._chunk_cache[2][self._chunk_cache_idx:end_idx],
+            self._chunk_cache[3][self._chunk_cache_idx:end_idx],
+        )
+        self._chunk_cache_idx = end_idx
+        return batch
 
     def __len__(self) -> int:
         return self._size
@@ -1179,6 +1302,16 @@ class StreamingTrainer:
                 n_batches = len(states) // self.batch_size
                 accum_steps = self.gradient_accumulation_steps
 
+                # Pre-sample replay buffer for entire chunk (1 call vs 31 calls)
+                if (
+                    self.tactical_replay_enabled
+                    and self.tactical_replay_buffer is not None
+                    and len(self.tactical_replay_buffer) > 0
+                ):
+                    replay_size_per_batch = int(self.batch_size * self.tactical_replay_ratio)
+                    total_replay_samples = replay_size_per_batch * n_batches
+                    self.tactical_replay_buffer.pre_sample_for_chunk(total_replay_samples, self.device)
+
                 # Zero gradients at the start of each chunk
                 self.optimizer.zero_grad()
 
@@ -1218,7 +1351,8 @@ class StreamingTrainer:
                         .to(self.device, non_blocking=True)
                     )
 
-                    # Mix with replay buffer if enabled (25% from buffer by default)
+                    # Mix with replay buffer if enabled (20% from buffer by default)
+                    # Uses pre-sampled cache for O(1) access (no CPU/GPU transfer per batch)
                     if (
                         self.tactical_replay_enabled
                         and self.tactical_replay_buffer is not None
@@ -1226,7 +1360,7 @@ class StreamingTrainer:
                     ):
                         replay_size = int(batch_size_actual * self.tactical_replay_ratio)
                         if replay_size > 0:
-                            replay_data = self.tactical_replay_buffer.sample(replay_size, self.device)
+                            replay_data = self.tactical_replay_buffer.get_batch_from_cache(replay_size)
                             if replay_data is not None:
                                 r_states, r_policies_idx, r_values, r_weights = replay_data
                                 # Reconstruct one-hot for replay policies
