@@ -192,7 +192,9 @@ class MoveList(tk.Frame):
             return
 
         # Build rows (each row = 1 full move: white + black)
-        for i in range(0, len(self._moves), 2):
+        # Use min of both lists to avoid index errors
+        num_moves = min(len(self._moves), len(self._sans))
+        for i in range(0, num_moves, 2):
             move_num = i // 2 + 1
             self._create_move_row(i, move_num, bg)
 
@@ -229,7 +231,7 @@ class MoveList(tk.Frame):
         self._move_labels.append(white_label)
 
         # Black's move (if exists)
-        if index + 1 < len(self._moves):
+        if index + 1 < len(self._sans):
             black_san = self._sans[index + 1]
             black_is_current = index + 1 == self._current_index
 
