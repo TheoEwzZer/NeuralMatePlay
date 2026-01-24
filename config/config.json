@@ -23,7 +23,19 @@
     "value_loss_weight": 1.5,
     "entropy_coefficient": 0.01,
     "prefetch_workers": 2,
-    "gradient_accumulation_steps": 2
+    "gradient_accumulation_steps": 2,
+    "tactical_replay_enabled": true,
+    "tactical_replay_ratio": 0.20,
+    "tactical_replay_threshold": 1.5,
+    "tactical_replay_capacity": 100000,
+    "teacher_enabled": false,
+    "teacher_path": null,
+    "teacher_alpha": 0.6,
+    "teacher_temperature": 2.0,
+    "ewc_enabled": false,
+    "ewc_lambda": 0.4,
+    "ewc_start_epoch": 2,
+    "ewc_fisher_samples": 10000
   },
   "training": {
     "checkpoint_path": "checkpoints",
@@ -69,8 +81,8 @@
     "veto_critical_purge_ratio": 0.5
   },
   "network": {
-    "num_filters": 192,
-    "num_residual_blocks": 12,
+    "num_filters": 128,
+    "num_residual_blocks": 8,
     "history_length": 3
   }
 }

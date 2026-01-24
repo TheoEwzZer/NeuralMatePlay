@@ -14,8 +14,8 @@ from typing import Optional, List
 class NetworkConfig:
     """Neural network architecture configuration."""
 
-    num_filters: int = 192
-    num_residual_blocks: int = 12
+    num_filters: int = 128
+    num_residual_blocks: int = 8
     history_length: int = 3  # Fixed at 3 (4 positions total)
 
 
@@ -52,6 +52,24 @@ class PretrainingConfig:
     lr_decay_patience: int = 5  # Epochs before LR decay triggers
     min_learning_rate: float = 1e-5  # Minimum LR floor
     checkpoint_keep_last: int = 10  # Keep last N checkpoints
+
+    # Anti-forgetting: Tactical Replay Buffer
+    tactical_replay_enabled: bool = True  # Enable tactical position replay
+    tactical_replay_ratio: float = 0.25  # 25% of batch from replay buffer
+    tactical_replay_threshold: float = 1.5  # Min weight to store in buffer
+    tactical_replay_capacity: int = 100000  # Max positions in buffer
+
+    # Anti-forgetting: Knowledge Distillation
+    teacher_enabled: bool = True  # Enable distillation from teacher network
+    teacher_path: Optional[str] = None  # Path to teacher network (e.g., epoch 1)
+    teacher_alpha: float = 0.6  # Weight for soft loss (0.6 = 60% soft, 40% hard)
+    teacher_temperature: float = 2.0  # Softmax temperature for distillation
+
+    # Anti-forgetting: EWC (Elastic Weight Consolidation)
+    ewc_enabled: bool = True  # Enable EWC regularization
+    ewc_lambda: float = 0.4  # EWC regularization strength
+    ewc_start_epoch: int = 2  # First epoch to apply EWC (after Fisher computed)
+    ewc_fisher_samples: int = 10000  # Samples for Fisher Information estimation
 
     def get_pgn_paths(self) -> List[str]:
         """Get all PGN paths as a list (handles both legacy and new format)."""

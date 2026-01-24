@@ -51,18 +51,17 @@ def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
 
 
 def adaptive_label_smoothing(
-    base_smoothing: float, weights: torch.Tensor, min_smoothing: float = 0.02, max_smoothing: float = 0.15
+    base_smoothing: float, weights: torch.Tensor, min_smoothing: float = 0.01, max_smoothing: float = 0.08
 ) -> torch.Tensor:
     """
     Calculate adaptive label smoothing based on tactical weights.
 
-    Higher weights (tactical/rare positions) get more smoothing to encourage
-    better generalization on complex patterns. Lower weights (simple positions)
-    get base smoothing.
+    INVERSED: High weight → LOW smoothing (more confidence on tactical positions)
+    Low weight → HIGH smoothing (regularization on simple positions)
 
-    The intuition: rare/tactical positions benefit from more regularization
-    because they represent edge cases where the model should be less confident
-    and explore alternative moves.
+    The intuition: tactical/rare positions (high weight) should have MORE confidence
+    because these are the critical patterns the model must learn decisively.
+    Simple positions can afford more smoothing/regularization.
 
     Args:
         base_smoothing: Base label smoothing value (e.g., 0.05)
@@ -73,15 +72,278 @@ def adaptive_label_smoothing(
     Returns:
         Per-sample smoothing values of shape (batch,)
 
-    Formula: smoothing = base * (1.0 + 0.5 * (weight - 1.0))
+    Formula: smoothing = base / (1.0 + 0.5 * (weight - 1.0))
     Examples:
         weight=1.0 → smoothing=0.05 (base)
-        weight=2.0 → smoothing=0.075
-        weight=3.0 → smoothing=0.10
-        weight=5.0 → smoothing=0.15 (capped)
+        weight=2.0 → smoothing=0.033
+        weight=3.0 → smoothing=0.025
+        weight=5.0 → smoothing=0.017
     """
-    adaptive = base_smoothing * (1.0 + 0.5 * (weights - 1.0))
+    decay_factor = 1.0 / (1.0 + 0.5 * (weights - 1.0))
+    adaptive = base_smoothing * decay_factor
     return torch.clamp(adaptive, min=min_smoothing, max=max_smoothing)
+
+
+def distillation_loss(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    temperature: float = 2.0,
+) -> torch.Tensor:
+    """
+    KL divergence loss between student and teacher for knowledge distillation.
+
+    Uses soft targets from teacher to transfer knowledge and prevent forgetting.
+
+    Args:
+        student_logits: Student model logits of shape (batch, num_classes)
+        teacher_logits: Teacher model logits of shape (batch, num_classes)
+        temperature: Softmax temperature (higher = softer distributions)
+
+    Returns:
+        Scalar KL divergence loss
+    """
+    student_log_probs = nn.functional.log_softmax(student_logits / temperature, dim=-1)
+    teacher_probs = nn.functional.softmax(teacher_logits / temperature, dim=-1)
+    return nn.functional.kl_div(
+        student_log_probs, teacher_probs, reduction='batchmean'
+    ) * (temperature ** 2)
+
+
+class TacticalReplayBuffer:
+    """
+    Buffer for storing tactical/critical positions to prevent catastrophic forgetting.
+
+    Positions with high tactical weights are stored and re-injected into training
+    batches to ensure the model doesn't forget rare but important patterns.
+    """
+
+    def __init__(self, capacity: int = 100000, weight_threshold: float = 1.5):
+        """
+        Initialize replay buffer.
+
+        Args:
+            capacity: Maximum number of positions to store
+            weight_threshold: Minimum weight for a position to be stored
+        """
+        self.capacity = capacity
+        self.threshold = weight_threshold
+        self.states: List[np.ndarray] = []
+        self.policies: List[int] = []
+        self.values: List[float] = []
+        self.weights: List[float] = []
+        self._position = 0  # For circular buffer
+
+    def add_batch(
+        self,
+        states: np.ndarray,
+        policies: np.ndarray,
+        values: np.ndarray,
+        weights: np.ndarray,
+    ) -> int:
+        """
+        Add positions from a batch that meet the weight threshold.
+
+        Args:
+            states: State arrays of shape (batch, planes, 8, 8)
+            policies: Policy indices of shape (batch,)
+            values: Value targets of shape (batch,)
+            weights: Tactical weights of shape (batch,)
+
+        Returns:
+            Number of positions added
+        """
+        mask = weights >= self.threshold
+        if not mask.any():
+            return 0
+
+        added = 0
+        for i in np.where(mask)[0]:
+            if len(self.states) < self.capacity:
+                self.states.append(states[i].copy())
+                self.policies.append(int(policies[i]))
+                self.values.append(float(values[i]))
+                self.weights.append(float(weights[i]))
+            else:
+                # Circular buffer replacement
+                idx = self._position % self.capacity
+                self.states[idx] = states[i].copy()
+                self.policies[idx] = int(policies[i])
+                self.values[idx] = float(values[i])
+                self.weights[idx] = float(weights[i])
+                self._position += 1
+            added += 1
+
+        return added
+
+    def sample(self, n: int, device: torch.device) -> Optional[Tuple[torch.Tensor, ...]]:
+        """
+        Sample n positions from the buffer.
+
+        Args:
+            n: Number of positions to sample
+            device: Device to place tensors on
+
+        Returns:
+            Tuple of (states, policy_indices, values, weights) or None if empty
+        """
+        if len(self.states) == 0:
+            return None
+
+        n = min(n, len(self.states))
+        indices = np.random.choice(len(self.states), n, replace=False)
+
+        states = torch.from_numpy(
+            np.stack([self.states[i] for i in indices])
+        ).float().to(device, non_blocking=True)
+
+        policies = torch.tensor(
+            [self.policies[i] for i in indices], dtype=torch.long, device=device
+        )
+
+        values = torch.tensor(
+            [self.values[i] for i in indices], dtype=torch.float32, device=device
+        )
+
+        weights = torch.tensor(
+            [self.weights[i] for i in indices], dtype=torch.float32, device=device
+        )
+
+        return states, policies, values, weights
+
+    def __len__(self) -> int:
+        return len(self.states)
+
+
+class EWCRegularizer:
+    """
+    Elastic Weight Consolidation (EWC) regularizer to prevent catastrophic forgetting.
+
+    After completing an epoch, computes Fisher Information Matrix diagonal to identify
+    important weights. Then penalizes changes to these weights in subsequent epochs.
+    """
+
+    def __init__(self, lambda_ewc: float = 0.4):
+        """
+        Initialize EWC regularizer.
+
+        Args:
+            lambda_ewc: Regularization strength (higher = more protection)
+        """
+        self.lambda_ewc = lambda_ewc
+        self.fisher: dict = {}
+        self.optimal_params: dict = {}
+        self._computed = False
+
+    def compute_fisher(
+        self,
+        network: nn.Module,
+        dataloader_fn,
+        num_samples: int = 10000,
+        device: torch.device = None,
+    ) -> None:
+        """
+        Compute Fisher Information Matrix diagonal after training epoch.
+
+        Args:
+            network: Neural network to compute Fisher for
+            dataloader_fn: Function that yields batches (states, policies, values, weights)
+            num_samples: Number of samples to use for estimation
+            device: Device for computation
+        """
+        network.eval()
+
+        # Initialize Fisher and store optimal params
+        for name, param in network.named_parameters():
+            if param.requires_grad:
+                self.fisher[name] = torch.zeros_like(param)
+                self.optimal_params[name] = param.clone().detach()
+
+        samples_processed = 0
+        for states, policy_indices, values, weights in dataloader_fn():
+            if samples_processed >= num_samples:
+                break
+
+            batch_size = states.shape[0]
+
+            # Forward pass
+            network.zero_grad()
+            pred_policies, _, wdl_logits = network(states)
+
+            # Compute log probability of actual moves (supervised signal)
+            log_probs = nn.functional.log_softmax(pred_policies, dim=-1)
+            selected_log_probs = log_probs.gather(1, policy_indices.unsqueeze(1)).squeeze(1)
+
+            # Weight by tactical importance
+            weighted_log_prob = (selected_log_probs * weights).sum()
+
+            # Backward to get gradients
+            weighted_log_prob.backward()
+
+            # Accumulate squared gradients (Fisher diagonal)
+            for name, param in network.named_parameters():
+                if param.grad is not None and name in self.fisher:
+                    self.fisher[name] += param.grad.pow(2) * batch_size
+
+            samples_processed += batch_size
+
+        # Normalize by number of samples
+        for name in self.fisher:
+            self.fisher[name] /= max(1, samples_processed)
+
+        self._computed = True
+        network.train()
+
+        print(f"  EWC Fisher computed on {samples_processed} samples")
+
+    def penalty(self, network: nn.Module) -> torch.Tensor:
+        """
+        Compute EWC penalty: sum of F_i * (theta_i - theta*_i)^2
+
+        Args:
+            network: Current network
+
+        Returns:
+            EWC penalty loss (scalar tensor)
+        """
+        if not self._computed:
+            return torch.tensor(0.0)
+
+        penalty = torch.tensor(0.0, device=next(network.parameters()).device)
+        for name, param in network.named_parameters():
+            if name in self.fisher:
+                penalty = penalty + (
+                    self.fisher[name] * (param - self.optimal_params[name]).pow(2)
+                ).sum()
+
+        return self.lambda_ewc * penalty
+
+    def save(self, path: str) -> None:
+        """Save Fisher and optimal params to file."""
+        torch.save({
+            'fisher': self.fisher,
+            'optimal_params': self.optimal_params,
+            'lambda_ewc': self.lambda_ewc,
+            'computed': self._computed,
+        }, path)
+
+    def load(self, path: str) -> bool:
+        """Load Fisher and optimal params from file. Returns True if successful."""
+        if not os.path.exists(path):
+            return False
+        try:
+            data = torch.load(path, map_location='cpu')
+            self.fisher = data['fisher']
+            self.optimal_params = data['optimal_params']
+            self.lambda_ewc = data.get('lambda_ewc', self.lambda_ewc)
+            self._computed = data.get('computed', True)
+            return True
+        except Exception as e:
+            print(f"  Warning: Failed to load EWC state: {e}")
+            return False
+
+    @property
+    def is_computed(self) -> bool:
+        return self._computed
 
 
 def adaptive_cross_entropy_with_smoothing(
@@ -259,6 +521,21 @@ class StreamingTrainer:
         lr_decay_patience: int = 5,
         min_learning_rate: float = 1e-5,
         checkpoint_keep_last: int = 10,
+        # Anti-forgetting: Tactical Replay Buffer
+        tactical_replay_enabled: bool = True,
+        tactical_replay_ratio: float = 0.25,
+        tactical_replay_threshold: float = 1.5,
+        tactical_replay_capacity: int = 100000,
+        # Anti-forgetting: Knowledge Distillation
+        teacher_enabled: bool = True,
+        teacher_path: Optional[str] = None,
+        teacher_alpha: float = 0.6,
+        teacher_temperature: float = 2.0,
+        # Anti-forgetting: EWC
+        ewc_enabled: bool = True,
+        ewc_lambda: float = 0.4,
+        ewc_start_epoch: int = 2,
+        ewc_fisher_samples: int = 10000,
     ):
         """
         Initialize streaming trainer.
@@ -279,6 +556,18 @@ class StreamingTrainer:
             label_smoothing: Label smoothing factor for cross-entropy loss (default 0.05).
             prefetch_workers: Number of background threads for chunk prefetching (default 2).
             gradient_accumulation_steps: Accumulate gradients over N steps before optimizer update.
+            tactical_replay_enabled: Enable tactical replay buffer.
+            tactical_replay_ratio: Ratio of batch from replay buffer (0.25 = 25%).
+            tactical_replay_threshold: Min weight to store position in buffer.
+            tactical_replay_capacity: Max positions in replay buffer.
+            teacher_enabled: Enable knowledge distillation from teacher network.
+            teacher_path: Path to teacher network checkpoint.
+            teacher_alpha: Distillation loss weight (0.6 = 60% soft, 40% hard).
+            teacher_temperature: Softmax temperature for distillation.
+            ewc_enabled: Enable EWC regularization.
+            ewc_lambda: EWC regularization strength.
+            ewc_start_epoch: First epoch to apply EWC (after computing Fisher).
+            ewc_fisher_samples: Number of samples for Fisher estimation.
         """
         self.network = network
         self.value_loss_weight = value_loss_weight
@@ -293,6 +582,39 @@ class StreamingTrainer:
         self.lr_decay_patience = lr_decay_patience
         self.min_learning_rate = min_learning_rate
         self.checkpoint_keep_last = checkpoint_keep_last
+
+        # Anti-forgetting: Tactical Replay Buffer
+        self.tactical_replay_enabled = tactical_replay_enabled
+        self.tactical_replay_ratio = tactical_replay_ratio
+        self.tactical_replay_buffer = None
+        if tactical_replay_enabled:
+            self.tactical_replay_buffer = TacticalReplayBuffer(
+                capacity=tactical_replay_capacity,
+                weight_threshold=tactical_replay_threshold,
+            )
+
+        # Anti-forgetting: Knowledge Distillation
+        self.teacher_enabled = teacher_enabled
+        self.teacher_alpha = teacher_alpha
+        self.teacher_temperature = teacher_temperature
+        self.teacher_network = None
+        if teacher_enabled and teacher_path and os.path.exists(teacher_path):
+            try:
+                self.teacher_network = DualHeadNetwork.load(teacher_path)
+                self.teacher_network.eval()
+                print(f"Teacher network loaded from: {teacher_path}")
+            except Exception as e:
+                print(f"Warning: Failed to load teacher network: {e}")
+                self.teacher_enabled = False
+
+        # Anti-forgetting: EWC
+        self.ewc_enabled = ewc_enabled
+        self.ewc_start_epoch = ewc_start_epoch
+        self.ewc_fisher_samples = ewc_fisher_samples
+        self.ewc_regularizer = EWCRegularizer(lambda_ewc=ewc_lambda) if ewc_enabled else None
+        self.ewc_path = os.path.join(
+            os.path.dirname(output_path) or "models", "ewc_state.pt"
+        )
         self.chunks_dir = chunks_dir
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -543,6 +865,20 @@ class StreamingTrainer:
         """
         self.network.to(self.device)
 
+        # Move teacher network to device if enabled
+        if self.teacher_enabled and self.teacher_network is not None:
+            self.teacher_network.to(self.device)
+            self.teacher_network.eval()
+
+        # Load EWC state if available (from previous training run)
+        if self.ewc_enabled and self.ewc_regularizer is not None:
+            if self.ewc_regularizer.load(self.ewc_path):
+                # Move Fisher matrices and optimal params to device
+                for name in self.ewc_regularizer.fisher:
+                    self.ewc_regularizer.fisher[name] = self.ewc_regularizer.fisher[name].to(self.device)
+                    self.ewc_regularizer.optimal_params[name] = self.ewc_regularizer.optimal_params[name].to(self.device)
+                print(f"Loaded EWC state from: {self.ewc_path}")
+
         # Enable TensorFloat32 for faster matmul on Ampere+ GPUs (RTX 30xx, 40xx)
         torch.set_float32_matmul_precision("high")
 
@@ -576,8 +912,25 @@ class StreamingTrainer:
 
         print("\nStarting streaming training...")
         print(f"Device: {self.device}, Mixed precision: {self.use_amp}")
+
+        # Print anti-forgetting features status
+        print("\nAnti-forgetting features:")
+        if self.tactical_replay_enabled:
+            print(f"  - Tactical Replay Buffer: ENABLED (ratio={self.tactical_replay_ratio})")
+        else:
+            print("  - Tactical Replay Buffer: DISABLED")
+        if self.teacher_enabled and self.teacher_network is not None:
+            print(f"  - Knowledge Distillation: ENABLED (alpha={self.teacher_alpha}, T={self.teacher_temperature})")
+        else:
+            print("  - Knowledge Distillation: DISABLED")
+        if self.ewc_enabled:
+            ewc_status = "ACTIVE" if self.ewc_regularizer.is_computed else f"starts epoch {self.ewc_start_epoch}"
+            print(f"  - EWC Regularization: ENABLED ({ewc_status})")
+        else:
+            print("  - EWC Regularization: DISABLED")
+
         if self.start_epoch > 0:
-            print(f"Resuming from epoch {self.start_epoch + 1}/{epochs}")
+            print(f"\nResuming from epoch {self.start_epoch + 1}/{epochs}")
 
         for epoch in range(self.start_epoch, epochs):
             epoch_start = time.time()
@@ -618,6 +971,49 @@ class StreamingTrainer:
                 f"  Val   - Loss: {val_loss:.4f} (P: {val_policy_loss:.4f}, V: {val_value_loss:.4f})"
             )
             print(f"  LR: {current_lr:.6f}")
+
+            # Print anti-forgetting stats
+            if self.tactical_replay_enabled and self.tactical_replay_buffer:
+                print(f"  Replay buffer: {len(self.tactical_replay_buffer)}/{self.tactical_replay_buffer.capacity} positions")
+
+            # Compute EWC Fisher after first epoch (or ewc_start_epoch - 1)
+            if (
+                self.ewc_enabled
+                and self.ewc_regularizer is not None
+                and not self.ewc_regularizer.is_computed
+                and epoch + 1 == self.ewc_start_epoch - 1
+            ):
+                print("  Computing EWC Fisher Information Matrix...")
+
+                def fisher_dataloader():
+                    """Generator for Fisher computation using tactical positions."""
+                    for chunk_path in self.train_chunks[:10]:  # Use first 10 chunks
+                        chunk = ChunkManager.load_chunk(chunk_path)
+                        states = torch.from_numpy(chunk["states"]).float().to(self.device)
+                        policy_indices = torch.from_numpy(chunk["policy_indices"]).long().to(self.device)
+                        values = torch.from_numpy(chunk["values"]).float().to(self.device)
+                        weights = torch.from_numpy(chunk["weights"]).float().to(self.device)
+                        # Only use tactical positions (high weight)
+                        mask = weights >= 1.5
+                        if mask.any():
+                            for i in range(0, mask.sum().item(), self.batch_size):
+                                end = min(i + self.batch_size, mask.sum().item())
+                                indices = torch.where(mask)[0][i:end]
+                                yield (
+                                    states[indices],
+                                    policy_indices[indices],
+                                    values[indices],
+                                    weights[indices],
+                                )
+
+                self.ewc_regularizer.compute_fisher(
+                    self.network,
+                    fisher_dataloader,
+                    num_samples=self.ewc_fisher_samples,
+                    device=self.device,
+                )
+                self.ewc_regularizer.save(self.ewc_path)
+                print(f"  EWC state saved to: {self.ewc_path}")
 
             # Save best model
             if val_loss < self.best_val_loss:
@@ -745,6 +1141,10 @@ class StreamingTrainer:
                 values = values[indices]
                 weights = weights[indices]
 
+                # Add tactical positions to replay buffer
+                if self.tactical_replay_enabled and self.tactical_replay_buffer is not None:
+                    self.tactical_replay_buffer.add_batch(states, policy_indices, values, weights)
+
                 # Create mini-batches with gradient accumulation
                 n_batches = len(states) // self.batch_size
                 accum_steps = self.gradient_accumulation_steps
@@ -787,6 +1187,30 @@ class StreamingTrainer:
                         .float()
                         .to(self.device, non_blocking=True)
                     )
+
+                    # Mix with replay buffer if enabled (25% from buffer by default)
+                    if (
+                        self.tactical_replay_enabled
+                        and self.tactical_replay_buffer is not None
+                        and len(self.tactical_replay_buffer) > 0
+                    ):
+                        replay_size = int(batch_size_actual * self.tactical_replay_ratio)
+                        if replay_size > 0:
+                            replay_data = self.tactical_replay_buffer.sample(replay_size, self.device)
+                            if replay_data is not None:
+                                r_states, r_policies_idx, r_values, r_weights = replay_data
+                                # Reconstruct one-hot for replay policies
+                                r_policies = torch.zeros(
+                                    len(r_policies_idx), MOVE_ENCODING_SIZE, device=self.device
+                                )
+                                r_policies.scatter_(1, r_policies_idx.unsqueeze(1), 1.0)
+                                # Concatenate with current batch
+                                batch_states = torch.cat([batch_states, r_states], dim=0)
+                                batch_policies = torch.cat([batch_policies, r_policies], dim=0)
+                                batch_values = torch.cat([batch_values, r_values], dim=0)
+                                batch_policy_indices = torch.cat([batch_policy_indices, r_policies_idx], dim=0)
+                                batch_weights = torch.cat([batch_weights, r_weights], dim=0)
+                                batch_size_actual = len(batch_states)
 
                     # Check if this is the last batch in accumulation cycle or chunk
                     is_accumulation_step = (batch_idx + 1) % accum_steps == 0
@@ -859,13 +1283,43 @@ class StreamingTrainer:
                                 1.0 + 0.3 * (batch_weights.mean() - 1.0)
                             )
 
-                            # Combined loss with adaptive entropy bonus (subtract to maximize entropy)
-                            # Scale loss for gradient accumulation
-                            loss = (
+                            # Combined base loss with adaptive entropy bonus
+                            hard_loss = (
                                 policy_loss
                                 + self.value_loss_weight * value_loss
                                 - adaptive_entropy_coef * entropy
-                            ) / accum_steps
+                            )
+
+                            # Knowledge Distillation loss
+                            distill_loss = torch.tensor(0.0, device=self.device)
+                            if self.teacher_enabled and self.teacher_network is not None:
+                                with torch.no_grad():
+                                    teacher_policies, _, teacher_wdl = self.teacher_network(batch_states)
+                                    teacher_policies_clamped = torch.clamp(teacher_policies, min=-50, max=50)
+                                # Policy distillation
+                                distill_loss = distillation_loss(
+                                    pred_policies_clamped,
+                                    teacher_policies_clamped,
+                                    temperature=self.teacher_temperature,
+                                )
+                                # Blend hard and soft losses
+                                loss = (1.0 - self.teacher_alpha) * hard_loss + self.teacher_alpha * distill_loss
+                            else:
+                                loss = hard_loss
+
+                            # EWC regularization (protects important weights)
+                            ewc_penalty = torch.tensor(0.0, device=self.device)
+                            if (
+                                self.ewc_enabled
+                                and self.ewc_regularizer is not None
+                                and self.ewc_regularizer.is_computed
+                                and epoch + 1 >= self.ewc_start_epoch
+                            ):
+                                ewc_penalty = self.ewc_regularizer.penalty(self.network)
+                                loss = loss + ewc_penalty
+
+                            # Scale loss for gradient accumulation
+                            loss = loss / accum_steps
 
                             # Final safety check - clamp total loss
                             loss = torch.clamp(loss, min=-100, max=100)
@@ -966,13 +1420,43 @@ class StreamingTrainer:
                             1.0 + 0.3 * (batch_weights.mean() - 1.0)
                         )
 
-                        # Combined loss with adaptive entropy bonus (subtract to maximize entropy)
-                        # Scale loss for gradient accumulation
-                        loss = (
+                        # Combined base loss with adaptive entropy bonus
+                        hard_loss = (
                             policy_loss
                             + self.value_loss_weight * value_loss
                             - adaptive_entropy_coef * entropy
-                        ) / accum_steps
+                        )
+
+                        # Knowledge Distillation loss
+                        distill_loss = torch.tensor(0.0, device=self.device)
+                        if self.teacher_enabled and self.teacher_network is not None:
+                            with torch.no_grad():
+                                teacher_policies, _, teacher_wdl = self.teacher_network(batch_states)
+                                teacher_policies_clamped = torch.clamp(teacher_policies, min=-50, max=50)
+                            # Policy distillation
+                            distill_loss = distillation_loss(
+                                pred_policies_clamped,
+                                teacher_policies_clamped,
+                                temperature=self.teacher_temperature,
+                            )
+                            # Blend hard and soft losses
+                            loss = (1.0 - self.teacher_alpha) * hard_loss + self.teacher_alpha * distill_loss
+                        else:
+                            loss = hard_loss
+
+                        # EWC regularization (protects important weights)
+                        ewc_penalty = torch.tensor(0.0, device=self.device)
+                        if (
+                            self.ewc_enabled
+                            and self.ewc_regularizer is not None
+                            and self.ewc_regularizer.is_computed
+                            and epoch + 1 >= self.ewc_start_epoch
+                        ):
+                            ewc_penalty = self.ewc_regularizer.penalty(self.network)
+                            loss = loss + ewc_penalty
+
+                        # Scale loss for gradient accumulation
+                        loss = loss / accum_steps
 
                         # Final safety check - clamp total loss
                         loss = torch.clamp(loss, min=-100, max=100)

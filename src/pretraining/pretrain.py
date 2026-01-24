@@ -167,9 +167,15 @@ def pretrain(
         total_position_count = 0
         total_games_count = chunk_manager._games_processed
 
+        # Track cumulative totals for display (including pre-resume data)
+        initial_positions = chunk_manager._total_examples  # Positions from previous run
+        # Include games from both completed files AND partial file
+        initial_games = chunk_manager._games_processed + current_file_games
+
         for file_idx, pgn_file in enumerate(files_to_process):
             # Check if we're resuming this specific file
             skip_games = 0
+            file_start_time = time.time()
             if current_file and pgn_file == current_file:
                 skip_games = current_file_games
                 print(
@@ -179,6 +185,10 @@ def pretrain(
                 print(
                     f"\n[File {file_idx + 1}/{len(files_to_process)}] Processing: {pgn_file}"
                 )
+
+            # Suppress chunk_manager verbose output during progress
+            chunk_manager.verbose = False
+            last_chunk_count = chunk_manager._chunk_count
 
             # Track current file for crash recovery
             chunk_manager.set_current_file(pgn_file, skip_games)
@@ -224,17 +234,51 @@ def pretrain(
                 file_position_count += 1
                 total_position_count += 1
 
-                if file_position_count % 50000 == 0:
+                # Update progress on same line (every new chunk)
+                current_chunks = chunk_manager._chunk_count
+                if current_chunks > last_chunk_count:
+                    last_chunk_count = current_chunks
+                    file_elapsed = time.time() - file_start_time
+                    progress = processor.progress
+                    if progress > 0.001:  # At least 0.1% to estimate
+                        file_eta_seconds = (file_elapsed / progress) - file_elapsed
+                        if file_eta_seconds > 3600:
+                            eta_str = f"{file_eta_seconds/3600:.1f}h"
+                        elif file_eta_seconds > 60:
+                            eta_str = f"{file_eta_seconds/60:.0f}m"
+                        else:
+                            eta_str = f"{file_eta_seconds:.0f}s"
+                    else:
+                        eta_str = "..."
+                    speed = file_position_count / file_elapsed if file_elapsed > 0 else 0
+                    # Show cumulative totals
+                    cumul_pos = initial_positions + total_position_count
+                    cumul_games = initial_games + total_games_count + processor.games_processed
                     print(
-                        f"  {file_position_count:,} positions, {processor.games_processed} games, {processor.progress:.1%}"
+                        f"\r  {cumul_pos:,} pos | {cumul_games:,} games | "
+                        f"{current_chunks} chunks | {progress:.1%} | {speed:.0f} pos/s | ETA: {eta_str}    ",
+                        end="",
+                        flush=True,
                     )
 
             # Track this file as processed
             processed_files.add(pgn_file)
             total_games_count += processor.games_processed + skip_games
             chunk_manager.clear_current_file()  # File fully processed
+            file_time = time.time() - file_start_time
+            final_chunks = chunk_manager._chunk_count
+            if file_time > 60:
+                time_str = f"{file_time/60:.1f}m"
+            else:
+                time_str = f"{file_time:.0f}s"
+            # Print final summary with cumulative totals
+            cumul_pos = initial_positions + total_position_count
+            cumul_games = initial_games + total_games_count
             print(
-                f"  Completed: {file_position_count:,} positions from {processor.games_processed} games"
+                f"\n  File done: +{file_position_count:,} pos, +{processor.games_processed} games in {time_str}"
+            )
+            print(
+                f"  Total: {cumul_pos:,} positions, {cumul_games:,} games, {final_chunks} chunks"
             )
 
             # Check global position limit
@@ -308,6 +352,21 @@ def pretrain(
             lr_decay_patience=cfg.lr_decay_patience,
             min_learning_rate=cfg.min_learning_rate,
             checkpoint_keep_last=cfg.checkpoint_keep_last,
+            # Anti-forgetting: Tactical Replay Buffer
+            tactical_replay_enabled=cfg.tactical_replay_enabled,
+            tactical_replay_ratio=cfg.tactical_replay_ratio,
+            tactical_replay_threshold=cfg.tactical_replay_threshold,
+            tactical_replay_capacity=cfg.tactical_replay_capacity,
+            # Anti-forgetting: Knowledge Distillation
+            teacher_enabled=cfg.teacher_enabled,
+            teacher_path=cfg.teacher_path,
+            teacher_alpha=cfg.teacher_alpha,
+            teacher_temperature=cfg.teacher_temperature,
+            # Anti-forgetting: EWC
+            ewc_enabled=cfg.ewc_enabled,
+            ewc_lambda=cfg.ewc_lambda,
+            ewc_start_epoch=cfg.ewc_start_epoch,
+            ewc_fisher_samples=cfg.ewc_fisher_samples,
         )
         return trainer.train(cfg.epochs)
 
