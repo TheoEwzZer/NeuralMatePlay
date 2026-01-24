@@ -1531,12 +1531,25 @@ class StreamingTrainer:
                     else f"{eta_min}m{eta_sec:02d}s"
                 )
                 pct = (chunk_idx + 1) * 100 // len(train_chunks)
-                print(
+
+                # Build progress line with optional buffer info
+                progress_line = (
                     f"\rEpoch {epoch+1}/{total_epochs} train {pct}% (chunk {chunk_idx+1}/{len(train_chunks)}) "
-                    f"[{avg_time_per_chunk:.1f}s/chunk, ETA {eta_str}]   ",
-                    end="",
-                    flush=True,
+                    f"[{avg_time_per_chunk:.1f}s/chunk, ETA {eta_str}]"
                 )
+
+                # Show buffer progress only when not full
+                if (
+                    self.tactical_replay_enabled
+                    and self.tactical_replay_buffer is not None
+                    and len(self.tactical_replay_buffer) < self.tactical_replay_buffer.capacity
+                ):
+                    buf_size = len(self.tactical_replay_buffer)
+                    buf_cap = self.tactical_replay_buffer.capacity
+                    buf_pct = buf_size * 100 // buf_cap
+                    progress_line += f" Buffer: {buf_size:,}/{buf_cap:,} ({buf_pct}%)"
+
+                print(progress_line + "   ", end="", flush=True)
 
                 # Save checkpoint every 10 chunks (and at least 60 seconds apart)
                 should_save_checkpoint = (

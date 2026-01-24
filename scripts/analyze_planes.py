@@ -20,7 +20,7 @@ import chess.pgn
 import numpy as np
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from alphazero.spatial_encoding import encode_board_with_history, PositionHistory, get_num_planes
 

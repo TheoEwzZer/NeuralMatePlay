@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 from torch.amp import autocast, GradScaler
 
-sys.path.insert(0, "src")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from alphazero import DualHeadNetwork, get_device, supports_mixed_precision
 from alphazero.move_encoding import MOVE_ENCODING_SIZE
 
