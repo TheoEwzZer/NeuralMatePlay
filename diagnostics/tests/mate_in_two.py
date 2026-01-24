@@ -16,59 +16,114 @@ from ..core import (
 )
 
 
-# Test positions with mate in 2
+# Test positions with mate in 2 (17 positions like mate_in_one)
 TEST_POSITIONS = [
-    # === QUEEN MATES ===
+    # === QUEEN SACRIFICE MATES (4 positions) ===
     {
-        "name": "Queen Sacrifice Mate",
+        "name": "Scholar's Mate Pattern",
         "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 0 1",
-        "first_move": "h5f7",  # Qxf7+
-        "description": "Qxf7+ Kxf7, then mate follows",
+        "first_move": "h5f7",
+        "description": "Qxf7+ Ke7, Qxe5#",
     },
     {
-        "name": "Back Rank Setup",
-        "fen": "6k1/5ppp/8/8/8/8/5PPP/R3R1K1 w - - 0 1",
-        "first_move": "e1e8",  # Re8+
-        "description": "Re8+ Rxe8, Ra8#",
+        "name": "Queen Sacrifice Back Rank",
+        "fen": "r1b2rk1/ppppqppp/2n5/8/8/8/PPPP1PPP/R1BQR1K1 w - - 0 1",
+        "first_move": "e1e7",
+        "description": "Rxe7 Rxe7, Qd8#",
     },
     {
-        "name": "Queen Corridor",
+        "name": "Queen Corridor Setup",
         "fen": "6k1/5ppp/8/8/8/5Q2/5PPP/6K1 w - - 0 1",
-        "first_move": "f3f6",  # Qf6
-        "description": "Qf6 threatens Qg7#",
-    },
-    # === ROOK MATES ===
-    {
-        "name": "Double Rook Mate",
-        "fen": "6k1/5ppp/8/8/8/8/5PPP/R5RK w - - 0 1",
-        "first_move": "a1a8",  # Ra8+
-        "description": "Ra8+ Rxa8, Rg8#",
+        "first_move": "f3f6",
+        "description": "Qf6 gxf6, Qg7#",
     },
     {
-        "name": "Rook Lift",
-        "fen": "6k1/5ppp/4R3/8/8/8/5PPP/6K1 w - - 0 1",
-        "first_move": "e6e8",  # Re8+
-        "description": "Re8+ Kh7, Rh8#",
+        "name": "Queen and Bishop Mate",
+        "fen": "r1bqk2r/ppp2ppp/2n5/3np3/2B5/5Q2/PPPP1PPP/RNB1K2R w KQkq - 0 1",
+        "first_move": "f3f7",
+        "description": "Qxf7+ Kd8, Qf8#",
     },
-    # === KNIGHT MATES ===
+    # === BACK RANK MATES (4 positions) ===
     {
-        "name": "Smothered Mate Setup",
-        "fen": "r4rk1/5Npp/8/8/8/8/5PPP/6K1 w - - 0 1",
-        "first_move": "f7h6",  # Nh6+
-        "description": "Nh6+ Kh8, Qg8# (or similar)",
+        "name": "Double Rook Back Rank",
+        "fen": "6k1/5ppp/8/8/8/8/5PPP/R3R1K1 w - - 0 1",
+        "first_move": "e1e8",
+        "description": "Re8+ Rxe8, Rxe8#",
     },
     {
-        "name": "Knight and Queen",
-        "fen": "r1bqkbnr/pppp1Npp/8/8/8/8/PPPPQPPP/RNB1KB1R b KQkq - 0 1",
-        "first_move": None,  # Black to move, evaluate position
-        "description": "White has Nxh8 or Qh5+ threats",
+        "name": "Rook and Queen Back Rank",
+        "fen": "3r2k1/5ppp/8/8/8/8/5PPP/3QR1K1 w - - 0 1",
+        "first_move": "d1d8",
+        "description": "Qxd8+ Rxd8, Rxd8#",
     },
-    # === BISHOP MATES ===
     {
-        "name": "Bishop and Queen",
-        "fen": "r1bqk2r/pppp1Bpp/2n2n2/2b1p3/4P3/3P4/PPP2PPP/RNBQK1NR b KQkq - 0 1",
-        "first_move": None,  # Evaluation position
-        "description": "After Bxf7+ Ke7",
+        "name": "Heavy Pieces Back Rank",
+        "fen": "2r3k1/5ppp/8/8/8/8/5PPP/R2Q2K1 w - - 0 1",
+        "first_move": "d1d8",
+        "description": "Qd8+ Rxd8, Rxd8#",
+    },
+    {
+        "name": "Rook Lift Back Rank",
+        "fen": "6k1/5ppp/4R3/8/8/8/5PPP/4R1K1 w - - 0 1",
+        "first_move": "e6e8",
+        "description": "Re8+ Rxe8, Rxe8#",
+    },
+    # === KNIGHT MATES (3 positions) ===
+    {
+        "name": "Smothered Mate Classic",
+        "fen": "6rk/6pp/8/6N1/8/8/8/6K1 w - - 0 1",
+        "first_move": "g5f7",
+        "description": "Nf7+ Kg8, Nh6#",
+    },
+    {
+        "name": "Knight Fork to Mate",
+        "fen": "r3k2r/ppp2ppp/8/4N3/8/8/PPP2PPP/R3K2R w KQkq - 0 1",
+        "first_move": "e5f7",
+        "description": "Nf7 Kd7, Nxh8#",
+    },
+    {
+        "name": "Double Knight Mate",
+        "fen": "4k3/8/5N2/4N3/8/8/8/4K3 w - - 0 1",
+        "first_move": "f6d7",
+        "description": "Nd7 Kf7, Ne5#",
+    },
+    # === BISHOP MATES (2 positions) ===
+    {
+        "name": "Bishop and Rook Mate",
+        "fen": "4k3/8/4B3/8/8/8/8/4RK2 w - - 0 1",
+        "first_move": "e1e8",
+        "description": "Re8+ Kd7, Rd8#",
+    },
+    {
+        "name": "Two Bishops Mate",
+        "fen": "4k3/8/3BB3/8/8/8/8/4K3 w - - 0 1",
+        "first_move": "d6c7",
+        "description": "Bc7 Kf7, Bd5#",
+    },
+    # === SPECIAL PATTERNS (4 positions) ===
+    {
+        "name": "Arabian Mate Setup",
+        "fen": "7k/8/5N1R/8/8/8/8/6K1 w - - 0 1",
+        "first_move": "h6h7",
+        "description": "Rh7+ Kg8, Rg7#",
+    },
+    {
+        "name": "Anastasia's Mate Setup",
+        "fen": "4rrk1/5Npp/8/8/8/8/5PPP/R5K1 w - - 0 1",
+        "first_move": "a1a8",
+        "description": "Ra8 Rxa8, Nh6#",
+    },
+    {
+        "name": "Opera Mate Setup",
+        "fen": "3rkb1r/ppp2ppp/8/8/8/8/PPP2PPP/R1B1R1K1 w - - 0 1",
+        "first_move": "e1e8",
+        "description": "Re8+ Bxe8, Rxe8#",
+    },
+    {
+        "name": "Boden's Mate Setup",
+        "fen": "2kr4/ppp5/8/8/2B5/1B6/PPP5/2K5 w - - 0 1",
+        "first_move": "c4a6",
+        "description": "Ba6+ bxa6, Bxa6#",
     },
 ]
 

@@ -37,29 +37,35 @@ from .bishop_quality import test_bishop_quality
 from .prophylaxis import test_prophylaxis
 from .history_comparison import test_history_comparison
 
-# All tests in order
+# All tests in order with importance weights
+# Weights reflect importance for WINNING games (not just understanding positions)
+# Higher weight = more critical for actual game outcomes
 ALL_TESTS = [
-    # === CRITICAL TESTS ===
-    (test_free_capture, "Free Capture", 1.0),
-    (test_mate_in_one, "Mate in 1", 1.0),
-    (test_mate_in_two, "Mate in 2", 1.0),
-    (test_defense, "Defense", 1.0),
-    (test_check_response, "Check Response", 1.0),
-    (test_tactics, "Tactics", 1.0),
-    # === POSITIONAL TESTS ===
+    # === CRITICAL TACTICAL TESTS (x2-x3) ===
+    # These directly determine wins/losses
+    (test_free_capture, "Free Capture", 2.0),        # Must not miss free material
+    (test_mate_in_one, "Mate in 1", 3.0),            # Must find forced wins
+    (test_mate_in_two, "Mate in 2", 2.0),            # Must find forcing sequences
+    (test_defense, "Defense", 2.0),                  # Must defend threats
+    (test_check_response, "Check Response", 2.0),    # Must respond to checks
+    (test_tactics, "Tactics", 2.0),                  # Combinational play
+    # === SURVIVAL TESTS (x2-x3) ===
+    # Failing these = losing games
+    (test_king_safety, "King Safety", 3.0),          # CRITICAL: avoid getting mated
+    (test_trapped_pieces, "Trapped Pieces", 2.0),    # CRITICAL: avoid losing pieces
+    (test_pin_handling, "Pin Handling", 2.0),        # Pins lose material
+    # === POSITIONAL TESTS (x1) ===
+    # Important but won't directly lose you the game
     (test_endgame, "Endgame Understanding", 1.0),
     (test_development, "Opening Development", 1.0),
     (test_passed_pawn, "Passed Pawn", 1.0),
-    (test_king_safety, "King Safety", 1.0),
     (test_pawn_structure, "Pawn Structure", 1.0),
     (test_outposts, "Outposts", 1.0),
     (test_bishop_quality, "Bishop Quality", 1.0),
-    # === TACTICAL AWARENESS ===
-    (test_trapped_pieces, "Trapped Pieces", 1.0),
-    (test_pin_handling, "Pin Handling", 1.0),
     (test_tempo, "Tempo", 1.0),
     (test_prophylaxis, "Prophylaxis", 1.0),
-    # === ADVANCED CONCEPTS ===
+    # === ADVANCED CONCEPTS (x1) ===
+    # Rare situations, nice to have
     (test_zugzwang, "Zugzwang", 1.0),
     (test_fortress, "Fortress", 1.0),
     (test_exchange_eval, "Exchange Evaluation", 1.0),
