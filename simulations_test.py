@@ -45,8 +45,8 @@ def load_network(path: str) -> DualHeadNetwork:
     if "config" in checkpoint:
         config = checkpoint["config"]
         network = DualHeadNetwork(
-            num_filters=config.get("num_filters", 192),
-            num_residual_blocks=config.get("num_residual_blocks", 12),
+            num_filters=config.get("num_filters", 128),
+            num_residual_blocks=config.get("num_residual_blocks", 8),
             num_input_planes=get_num_planes(),
         )
     else:

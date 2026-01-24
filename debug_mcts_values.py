@@ -43,8 +43,8 @@ def load_network(path: str) -> DualHeadNetwork:
     config = checkpoint.get("config", {})
 
     network = DualHeadNetwork(
-        num_residual_blocks=config.get("num_residual_blocks", config.get("num_blocks", 12)),
-        num_filters=config.get("num_filters", 192),
+        num_residual_blocks=config.get("num_residual_blocks", config.get("num_blocks", 8)),
+        num_filters=config.get("num_filters", 128),
         num_input_planes=config.get("num_input_planes", 72),
     )
     network.load_state_dict(checkpoint["state_dict"])

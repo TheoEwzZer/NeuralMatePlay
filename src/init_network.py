@@ -23,7 +23,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Create default network (72 planes, 192 filters, 12 blocks)
+  # Create default network (72 planes, 128 filters, 8 blocks)
   ./neural_mate_init -o models/random.pt
 
   # Create with custom architecture
@@ -51,13 +51,13 @@ Examples:
         "--filters",
         type=int,
         default=None,
-        help="Number of filters in residual blocks (default: 192)",
+        help="Number of filters in residual blocks (default: 128)",
     )
     parser.add_argument(
         "--blocks",
         type=int,
         default=None,
-        help="Number of residual blocks (default: 12)",
+        help="Number of residual blocks (default: 8)",
     )
     parser.add_argument(
         "-f",
@@ -76,8 +76,8 @@ Examples:
         num_blocks = config.network.num_residual_blocks
     else:
         # Use defaults
-        num_filters = 192
-        num_blocks = 12
+        num_filters = 128
+        num_blocks = 8
 
     # Override with CLI arguments if provided
     if args.filters is not None:

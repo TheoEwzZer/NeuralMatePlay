@@ -261,8 +261,8 @@ class DualHeadNetwork(nn.Module):
     def __init__(
         self,
         num_input_planes: int = 72,
-        num_filters: int = 192,
-        num_residual_blocks: int = 12,
+        num_filters: int = 128,
+        num_residual_blocks: int = 8,
         policy_size: int = MOVE_ENCODING_SIZE,
         se_reduction: int = 8,
         attention_heads: int = 4,

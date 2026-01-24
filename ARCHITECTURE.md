@@ -24,7 +24,7 @@ NeuralMate2 est un moteur d'échecs par reinforcement learning qui combine :
 - **WDL Head** : Sortie Win/Draw/Loss au lieu d'un scalaire
 
 ```
-Input (72 planes) → Conv 3x3 → [SE-ResBlock × 10] → [SE-ResBlock + Attention × 2]
+Input (72 planes) → Conv 3x3 → [SE-ResBlock × 6] → [SE-ResBlock + Attention × 2]
     ↑                                                           ↓
     │                                             ┌─────────────┴─────────────┐
     │                                             ↓                           ↓
@@ -237,7 +237,7 @@ Le réseau utilise une **WDL Head** au lieu d'une sortie scalaire :
 ### Architecture
 
 ```
-Backbone features → Conv(192→8) → Flatten → FC(512→512) → FC(512→3) → Softmax
+Backbone features → Conv(128→8) → Flatten → FC(512→512) → FC(512→3) → Softmax
                                                                          ↓
                                                             [P(Win), P(Draw), P(Loss)]
 ```
@@ -272,8 +272,8 @@ wdl_loss = CrossEntropy(wdl_logits, wdl_target)
 | Paramètre        | Valeur  | Justification                                |
 | ---------------- | ------- | -------------------------------------------- |
 | **Input planes** | **72**  | 48 history + 12 metadata + 8 semantic + 4 tactical |
-| Residual blocks  | 12      | Bon ratio performance/vitesse                |
-| Filters          | 192     | Optimal pour RTX 3060                        |
+| Residual blocks  | 8       | Ratio optimal data/params (~10:1)            |
+| Filters          | 128     | 12.45M params, rapide pour MCTS              |
 | SE reduction     | 8       | Standard pour SE-ResNet                      |
 | Attention heads  | 4       | Multi-head attention spatiale                |
 | History length   | 3       | Détection répétitions + contexte (fixe)      |
