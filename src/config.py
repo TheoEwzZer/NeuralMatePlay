@@ -55,9 +55,9 @@ class PretrainingConfig:
 
     # Anti-forgetting: Tactical Replay Buffer
     tactical_replay_enabled: bool = True  # Enable tactical position replay
-    tactical_replay_ratio: float = 0.25  # 25% of batch from replay buffer
+    tactical_replay_ratio: float = 0.20  # 20% of batch from replay buffer
     tactical_replay_threshold: float = 1.5  # Min weight to store in buffer
-    tactical_replay_capacity: int = 100000  # Max positions in buffer
+    tactical_replay_capacity: int = 200000  # Max positions in buffer (35/chunk)
 
     # Anti-forgetting: Knowledge Distillation
     teacher_enabled: bool = True  # Enable distillation from teacher network

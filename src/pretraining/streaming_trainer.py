@@ -17,7 +17,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.amp import autocast, GradScaler
-from torch.utils.data import DataLoader, TensorDataset
 
 from .chunk_manager import ChunkManager
 
@@ -115,23 +114,32 @@ class TacticalReplayBuffer:
 
     Positions with high tactical weights are stored and re-injected into training
     batches to ensure the model doesn't forget rare but important patterns.
+
+    Uses proportional sampling: keeps top N positions from EACH chunk to ensure
+    uniform coverage of the entire dataset.
     """
 
-    def __init__(self, capacity: int = 100000, weight_threshold: float = 1.5):
+    def __init__(
+        self,
+        capacity: int,
+        weight_threshold: float,
+        num_chunks: int,
+    ):
         """
         Initialize replay buffer.
 
         Args:
             capacity: Maximum number of positions to store
             weight_threshold: Minimum weight for a position to be stored
+            num_chunks: Total number of chunks (for proportional allocation)
         """
         self.capacity = capacity
         self.threshold = weight_threshold
+        self.positions_per_chunk = max(1, capacity // max(1, num_chunks))
         self.states: List[np.ndarray] = []
         self.policies: List[int] = []
         self.values: List[float] = []
         self.weights: List[float] = []
-        self._position = 0  # For circular buffer
 
     def add_batch(
         self,
@@ -141,7 +149,10 @@ class TacticalReplayBuffer:
         weights: np.ndarray,
     ) -> int:
         """
-        Add positions from a batch that meet the weight threshold.
+        Add top N positions from a chunk based on tactical weight.
+
+        Only keeps the positions with highest weights (most tactical/critical).
+        This ensures uniform coverage across ALL chunks in the dataset.
 
         Args:
             states: State arrays of shape (batch, planes, 8, 8)
@@ -152,26 +163,27 @@ class TacticalReplayBuffer:
         Returns:
             Number of positions added
         """
+        # Filter by threshold
         mask = weights >= self.threshold
         if not mask.any():
             return 0
 
+        # Get indices of tactical positions
+        tactical_indices = np.nonzero(mask)[0]
+
+        # Sort by weight (descending) and take top N
+        tactical_weights = weights[tactical_indices]
+        sorted_order = np.argsort(tactical_weights)[::-1]  # Descending
+        top_indices = tactical_indices[sorted_order[:self.positions_per_chunk]]
+
         added = 0
-        for i in np.where(mask)[0]:
+        for i in top_indices:
             if len(self.states) < self.capacity:
                 self.states.append(states[i].copy())
                 self.policies.append(int(policies[i]))
                 self.values.append(float(values[i]))
                 self.weights.append(float(weights[i]))
-            else:
-                # Circular buffer replacement
-                idx = self._position % self.capacity
-                self.states[idx] = states[i].copy()
-                self.policies[idx] = int(policies[i])
-                self.values[idx] = float(values[i])
-                self.weights[idx] = float(weights[i])
-                self._position += 1
-            added += 1
+                added += 1
 
         return added
 
@@ -267,7 +279,7 @@ class EWCRegularizer:
 
             # Forward pass
             network.zero_grad()
-            pred_policies, _, wdl_logits = network(states)
+            pred_policies, _, _ = network(states)
 
             # Compute log probability of actual moves (supervised signal)
             log_probs = nn.functional.log_softmax(pred_policies, dim=-1)
@@ -586,12 +598,10 @@ class StreamingTrainer:
         # Anti-forgetting: Tactical Replay Buffer
         self.tactical_replay_enabled = tactical_replay_enabled
         self.tactical_replay_ratio = tactical_replay_ratio
+        self.tactical_replay_capacity = tactical_replay_capacity
+        self.tactical_replay_threshold = tactical_replay_threshold
         self.tactical_replay_buffer = None
-        if tactical_replay_enabled:
-            self.tactical_replay_buffer = TacticalReplayBuffer(
-                capacity=tactical_replay_capacity,
-                weight_threshold=tactical_replay_threshold,
-            )
+        # Buffer will be initialized in train() after we know num_chunks
 
         # Anti-forgetting: Knowledge Distillation
         self.teacher_enabled = teacher_enabled
@@ -864,6 +874,17 @@ class StreamingTrainer:
             Trained network.
         """
         self.network.to(self.device)
+
+        # Initialize Tactical Replay Buffer now that we know num_chunks
+        if self.tactical_replay_enabled and self.tactical_replay_buffer is None:
+            num_train_chunks = len(self.train_chunks)
+            self.tactical_replay_buffer = TacticalReplayBuffer(
+                capacity=self.tactical_replay_capacity,
+                weight_threshold=self.tactical_replay_threshold,
+                num_chunks=num_train_chunks,
+            )
+            positions_per_chunk = self.tactical_replay_buffer.positions_per_chunk
+            print(f"Replay Buffer: {self.tactical_replay_capacity:,} capacity, {positions_per_chunk} positions/chunk")
 
         # Move teacher network to device if enabled
         if self.teacher_enabled and self.teacher_network is not None:
