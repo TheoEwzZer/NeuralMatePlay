@@ -1493,9 +1493,6 @@ class StreamingTrainer:
 
                         # Skip backward if loss is NaN/Inf (prevents corrupting gradients)
                         if torch.isnan(loss) or torch.isinf(loss):
-                            print(
-                                f"\n  WARNING: Loss is NaN/Inf (scale={self.scaler.get_scale():.0f}), resetting scaler"
-                            )
                             self.optimizer.zero_grad()
                             self.scaler.reset_on_nan()
                             continue
