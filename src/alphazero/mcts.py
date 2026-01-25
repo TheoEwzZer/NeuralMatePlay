@@ -49,10 +49,12 @@ class MCTSNode:
 
     @property
     def q_value(self) -> float:
-        """Q(s, a) = W(s, a) / N(s, a) - mean value."""
+        """Q(s, a) = W(s, a) / N(s, a) - mean value, clamped to [-1, 1]."""
         if self.visit_count == 0:
             return 0.0
-        return self.total_value / self.visit_count
+        # Clamp to avoid numerical drift beyond valid range
+        raw_q: float = self.total_value / self.visit_count
+        return max(-1.0, min(1.0, raw_q))
 
     @property
     def wdl(self) -> np.ndarray:
