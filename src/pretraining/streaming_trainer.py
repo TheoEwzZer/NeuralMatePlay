@@ -618,7 +618,10 @@ class SafeGradScaler(GradScaler):
 
         # Reset internal growth tracker if it exists (PyTorch version dependent)
         if hasattr(self, "_growth_tracker") and self._growth_tracker is not None:
-            self._growth_tracker = 0
+            if isinstance(self._growth_tracker, torch.Tensor):
+                self._growth_tracker.zero_()
+            else:
+                self._growth_tracker = 0
 
     def get_nan_count(self) -> int:
         """Return the number of NaN occurrences."""
