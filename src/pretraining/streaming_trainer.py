@@ -1520,9 +1520,6 @@ class StreamingTrainer:
                                         break
 
                             if has_bad_grad:
-                                print(
-                                    f"\n  WARNING: NaN/Inf gradient in {bad_param_name} (scale={self.scaler.get_scale():.0f}), resetting scaler"
-                                )
                                 self.optimizer.zero_grad()
                                 self.scaler.reset_on_nan()
                                 self.scaler.update()
