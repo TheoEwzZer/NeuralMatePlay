@@ -289,6 +289,32 @@ class SearchTreePanel(tk.Frame):
         )
         prior_label.pack(side=tk.LEFT, padx=2)
 
+        # Forced mate indicators
+        our_mate_in = node.get("our_mate_in")
+        opponent_mate_in = node.get("opponent_mate_in")
+        if our_mate_in is not None:
+            # Winning mate (green)
+            mate_text = f"#{our_mate_in}" if our_mate_in > 1 else "#1"
+            mate_label = tk.Label(
+                node_frame,
+                text=mate_text,
+                font=("Consolas", 9, "bold"),
+                fg=COLORS["q_value_positive"],
+                bg=bg,
+            )
+            mate_label.pack(side=tk.LEFT, padx=2)
+        elif opponent_mate_in is not None:
+            # Losing mate (red)
+            mate_text = f"#-{opponent_mate_in}" if opponent_mate_in > 0 else "#"
+            mate_label = tk.Label(
+                node_frame,
+                text=mate_text,
+                font=("Consolas", 9, "bold"),
+                fg=COLORS["q_value_negative"],
+                bg=bg,
+            )
+            mate_label.pack(side=tk.LEFT, padx=2)
+
         # Hover effect
         def on_enter(e, f=node_frame):
             f.configure(bg=COLORS["move_hover"])

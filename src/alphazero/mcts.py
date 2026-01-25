@@ -180,17 +180,19 @@ class MCTS:
 
         total_visits = sum(child.visit_count for child in root.children.values())
 
-        # Check for winning moves (Q >= 0.9999 from our perspective = Q <= -0.9999 stored)
-        # Prioritize guaranteed wins (like checkmate) even if they have fewer visits
-        winning_moves = [
-            (move, child)
-            for move, child in root.children.items()
-            if child.visit_count > 0 and child.q_value <= -0.9999
-        ]
+        # Check for REAL winning moves: must be checkmate (not just high Q-value)
+        # Q-values > 1.0 are numerical errors, not real wins
+        winning_moves = []
+        for move, child in root.children.items():
+            if child.visit_count > 0:
+                test_board = board.copy()
+                test_board.push(move)
+                if test_board.is_checkmate():
+                    winning_moves.append((move, child))
 
         if winning_moves:
-            # Found winning move(s): select by Q-value, then prior as tiebreaker
-            best_move, _ = min(winning_moves, key=lambda x: (x[1].q_value, -x[1].prior))
+            # Found checkmate(s): select the one with most visits (most explored)
+            best_move, _ = max(winning_moves, key=lambda x: x[1].visit_count)
             idx = encode_move_from_perspective(best_move, flip)
             if idx is not None:
                 policy[idx] = 1.0
@@ -209,41 +211,67 @@ class MCTS:
                         if idx is not None:
                             policy[idx] = child.visit_count / total_visits
             else:
-                # Temperature 0: deterministic selection by visits, then Q-value
-                # Avoid moves that lead to forced mate for opponent
+                # Temperature 0: deterministic selection by visits
                 sorted_children = sorted(
                     [(m, c) for m, c in root.children.items() if c.visit_count > 0],
                     key=lambda x: (x[1].visit_count, -x[1].q_value),
                     reverse=True,
                 )
 
-                # Find the best move that doesn't lead to forced mate
                 best_move = None
-                losing_moves = []  # (move, mate_distance) for moves leading to mate
+                winning_mates = []  # (move, mate_distance) - mats pour nous
+                losing_mates = []   # (move, mate_distance, visits) - mats pour adversaire
+
+                # Analyser chaque coup
                 for move, child in sorted_children:
                     test_board = board.copy()
                     test_board.push(move)
-                    # Check if opponent has forced mate (depth limited to 5)
-                    opponent_mate = self._find_forced_mate(
-                        child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
-                    )
-                    if opponent_mate is None:
-                        # This move doesn't lead to forced mate - take it
-                        best_move = move
-                        break
-                    else:
-                        losing_moves.append((move, opponent_mate))
 
-                # If all moves lead to mate, choose the one with longest mate distance
-                if best_move is None:
-                    if losing_moves:
-                        # Sort by mate distance descending (longest first)
-                        losing_moves.sort(key=lambda x: -x[1])
-                        best_move = losing_moves[0][0]
-                    elif sorted_children:
+                    # Mat en 1 pour nous ? (100% fiable)
+                    if test_board.is_checkmate():
+                        winning_mates.append((move, 1))
+                        continue
+
+                    # Seulement si le coup a été suffisamment exploré (évite faux positifs)
+                    if child.visit_count >= 5:
+                        # Mat plus profond pour nous ? (via MCTS tree)
+                        our_mate = self._find_forced_mate(
+                            child, test_board, is_our_turn=False, our_moves=0, max_our_moves=5
+                        )
+                        if our_mate is not None:
+                            winning_mates.append((move, our_mate))
+                            continue
+
+                        # Mat pour l'adversaire ? (à éviter)
+                        opp_mate = self._find_forced_mate(
+                            child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                        )
+                        if opp_mate is not None:
+                            losing_mates.append((move, opp_mate, child.visit_count))
+
+                # Priorité 1: Jouer le mat le plus rapide pour nous
+                if winning_mates:
+                    winning_mates.sort(key=lambda x: x[1])
+                    best_move = winning_mates[0][0]
+                else:
+                    # Priorité 2: Coup le plus visité qui ne mène pas à un mat adverse
+                    dominated_moves = {m for m, _, _ in losing_mates}
+                    for move, child in sorted_children:
+                        if move not in dominated_moves:
+                            best_move = move
+                            break
+
+                    # Priorité 3: Tous les coups perdent → mat le plus loin, puis plus visité
+                    if best_move is None and losing_mates:
+                        # Trier par: mat_distance DESC (plus loin = mieux), puis visits DESC
+                        losing_mates.sort(key=lambda x: (-x[1], -x[2]))
+                        best_move = losing_mates[0][0]
+                        mate_dist = losing_mates[0][1]
+
+                    # Fallback: prendre le plus visité
+                    if best_move is None and sorted_children:
                         best_move = sorted_children[0][0]
 
-                # Encode the selected move in the policy
                 if best_move:
                     idx = encode_move_from_perspective(best_move, flip)
                     if idx is not None:
@@ -299,16 +327,16 @@ class MCTS:
         if move is None:
             root = self._get_or_create_node(board)
             if root.children:
-                # Check for winning moves first
-                winning = [
-                    (m, c)
-                    for m, c in root.children.items()
-                    if c.visit_count > 0 and c.q_value <= -0.9999
-                ]
-                if winning:
-                    # Use Q-value first, then prior as tiebreaker (network's preference)
-                    move = min(winning, key=lambda x: (x[1].q_value, -x[1].prior))[0]
-                else:
+                # Check for checkmate first
+                for m, c in root.children.items():
+                    if c.visit_count > 0:
+                        test_board = board.copy()
+                        test_board.push(m)
+                        if test_board.is_checkmate():
+                            move = m
+                            break
+                # Otherwise take most visited
+                if move is None:
                     move = max(root.children.items(), key=lambda x: x[1].visit_count)[0]
 
         return move
@@ -984,13 +1012,17 @@ class MCTS:
             if not visited_children:
                 break
 
-            # Check for winning moves first (Q <= -0.9999 = guaranteed win)
-            winning = [(m, c) for m, c in visited_children if c.q_value <= -0.9999]
-            if winning:
-                # Use Q-value first, then prior as tiebreaker (network's preference)
-                best_move, best_child = min(
-                    winning, key=lambda x: (x[1].q_value, -x[1].prior)
-                )
+            # Check for checkmate first
+            checkmate_move = None
+            for m, c in visited_children:
+                test_board = current_board.copy()
+                test_board.push(m)
+                if test_board.is_checkmate():
+                    checkmate_move = (m, c)
+                    break
+
+            if checkmate_move:
+                best_move, best_child = checkmate_move
             else:
                 # Get most visited move (use Q-value as tiebreaker: lower = better for us)
                 best_move, best_child = max(
@@ -1136,14 +1168,27 @@ class MCTS:
                 [child_wdl[2], child_wdl[1], child_wdl[0]], dtype=np.float32
             )
 
-            # Check if opponent has forced mate after this move
+            # Check for forced mates after this move
+            our_mate_in = None
             opponent_mate_in = None
-            if child.visit_count > 0:
-                test_board = board.copy()
-                test_board.push(move)
-                opponent_mate_in = self._find_forced_mate(
-                    child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+
+            test_board = board.copy()
+            test_board.push(move)
+
+            # Direct check: is this move checkmate? (mate in 1)
+            if test_board.is_checkmate():
+                our_mate_in = 1
+            elif child.visit_count > 0:
+                # Check deeper mates via MCTS tree
+                # Check if WE have a forced mate (good for us)
+                our_mate_in = self._find_forced_mate(
+                    child, test_board, is_our_turn=False, our_moves=0, max_our_moves=5
                 )
+                # Check if OPPONENT has a forced mate (bad for us)
+                if our_mate_in is None:
+                    opponent_mate_in = self._find_forced_mate(
+                        child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                    )
 
             stats.append(
                 {
@@ -1155,7 +1200,8 @@ class MCTS:
                     "prior": child.prior,
                     "total_value": child.total_value,
                     "wdl": flipped_wdl,  # [P(win), P(draw), P(loss)] for current player
-                    "opponent_mate_in": opponent_mate_in,  # Forced mate for opponent
+                    "our_mate_in": our_mate_in,  # Forced mate FOR US (winning)
+                    "opponent_mate_in": opponent_mate_in,  # Forced mate for opponent (losing)
                 }
             )
 
@@ -1372,11 +1418,33 @@ class MCTS:
         # Negate Q-value: stored Q is from opponent's perspective
         display_q = -node.q_value if node.visit_count > 0 else 0.0
 
+        # Check for forced mates at this node (only at root level)
+        our_mate_in = None
+        opponent_mate_in = None
+        if depth == 0:
+            next_board = board.copy()
+            next_board.push(move)
+
+            # Direct check: is this move checkmate?
+            if next_board.is_checkmate():
+                our_mate_in = 1
+            elif node.visit_count > 0:
+                # Check deeper mates via MCTS tree
+                our_mate_in = self._find_forced_mate(
+                    node, next_board, is_our_turn=False, our_moves=0, max_our_moves=5
+                )
+                if our_mate_in is None:
+                    opponent_mate_in = self._find_forced_mate(
+                        node, next_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                    )
+
         node_data = {
             "san": san_move,
             "visits": node.visit_count,
             "q_value": display_q,
             "prior": node.prior,
+            "our_mate_in": our_mate_in,
+            "opponent_mate_in": opponent_mate_in,
             "children": [],
         }
 

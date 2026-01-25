@@ -30,7 +30,8 @@ class MCTSMoveStats:
     wdl: np.ndarray = field(
         default_factory=lambda: np.array([0.33, 0.34, 0.33], dtype=np.float32)
     )  # [P(win), P(draw), P(loss)]
-    opponent_mate_in: Optional[int] = None  # Forced mate for opponent after this move
+    our_mate_in: Optional[int] = None  # Forced mate FOR US (winning move)
+    opponent_mate_in: Optional[int] = None  # Forced mate for opponent (losing move)
 
 
 class MCTSPanel(tk.Frame):
@@ -202,6 +203,7 @@ class MCTSPanel(tk.Frame):
                     q_value=stat.get("q_value", 0.0),
                     prior=stat.get("prior", 0.0),
                     wdl=wdl,
+                    our_mate_in=stat.get("our_mate_in"),
                     opponent_mate_in=stat.get("opponent_mate_in"),
                 )
             )
@@ -369,8 +371,21 @@ class MCTSPanel(tk.Frame):
         )
         prior_label.pack(side=tk.LEFT, padx=2)
 
-        # Opponent forced mate indicator (shown in red)
-        if stat.opponent_mate_in is not None:
+        # Forced mate indicators
+        if stat.our_mate_in is not None:
+            # Winning mate for current player (green)
+            mate_text = f"#{stat.our_mate_in}" if stat.our_mate_in > 1 else "#1"
+            mate_label = tk.Label(
+                row,
+                text=mate_text,
+                font=("Consolas", 9, "bold"),
+                fg=COLORS["q_value_positive"],
+                bg=bg,
+                anchor="w",
+            )
+            mate_label.pack(side=tk.LEFT, padx=(5, 2))
+        elif stat.opponent_mate_in is not None:
+            # Losing mate - opponent has forced mate (red)
             mate_text = f"#-{stat.opponent_mate_in}" if stat.opponent_mate_in > 0 else "#"
             mate_label = tk.Label(
                 row,
