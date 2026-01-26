@@ -298,23 +298,21 @@ class TacticalReplayBuffer:
         # S'assurer que le cache GPU est alloué
         self._ensure_gpu_cache(total_samples, device)
 
-        # Contiguous sampling: random start, read sequential block (cache-friendly)
-        max_start = max(0, self._size - total_samples)
-        start_idx = self._rng.integers(0, max_start + 1) if max_start > 0 else 0
-        end_idx = start_idx + total_samples
+        # Random sampling: diversité maximale (essentiel pour replay buffer!)
+        indices = self._rng.choice(self._size, size=total_samples, replace=False)
 
         # Copier dans le cache GPU pré-alloué (PAS de nouvelle allocation)
         self._gpu_cache_states[:total_samples].copy_(
-            torch.from_numpy(self.states[start_idx:end_idx])
+            torch.from_numpy(self.states[indices])
         )
         self._gpu_cache_policies[:total_samples].copy_(
-            torch.from_numpy(self.policies[start_idx:end_idx].astype(np.int64))
+            torch.from_numpy(self.policies[indices].astype(np.int64))
         )
         self._gpu_cache_values[:total_samples].copy_(
-            torch.from_numpy(self.values[start_idx:end_idx])
+            torch.from_numpy(self.values[indices])
         )
         self._gpu_cache_weights[:total_samples].copy_(
-            torch.from_numpy(self.weights[start_idx:end_idx])
+            torch.from_numpy(self.weights[indices])
         )
 
         # Créer les vues (pas de copie)
@@ -1072,7 +1070,7 @@ class StreamingTrainer:
         # Print anti-forgetting features status
         print("\nAnti-forgetting features:")
         if self.tactical_replay_enabled:
-            print(f"  - Tactical Replay Buffer: ENABLED (ratio={self.tactical_replay_ratio})")
+            print(f"  - Tactical Replay Buffer: ENABLED (ratio={self.tactical_replay_ratio}, starts epoch 2)")
         else:
             print("  - Tactical Replay Buffer: DISABLED")
         if self.teacher_enabled and self.teacher_network is not None:
@@ -1306,10 +1304,12 @@ class StreamingTrainer:
                 accum_steps = self.gradient_accumulation_steps
 
                 # Pre-sample replay buffer for entire chunk (1 call vs 31 calls)
+                # Only at epoch 2+ (epoch > 0) - epoch 1 just fills the buffer
                 if (
                     self.tactical_replay_enabled
                     and self.tactical_replay_buffer is not None
                     and len(self.tactical_replay_buffer) > 0
+                    and epoch > 0
                 ):
                     replay_size_per_batch = int(self.batch_size * self.tactical_replay_ratio)
                     total_replay_samples = replay_size_per_batch * n_batches
@@ -1355,11 +1355,13 @@ class StreamingTrainer:
                     )
 
                     # Mix with replay buffer if enabled (20% from buffer by default)
+                    # Only replay starting epoch 2 (epoch > 0) - epoch 1 just fills the buffer
                     # Uses pre-sampled cache for O(1) access (no CPU/GPU transfer per batch)
                     if (
                         self.tactical_replay_enabled
                         and self.tactical_replay_buffer is not None
                         and len(self.tactical_replay_buffer) > 0
+                        and epoch > 0  # Don't replay during epoch 1 - nothing to "remember" yet
                     ):
                         replay_size = int(batch_size_actual * self.tactical_replay_ratio)
                         if replay_size > 0:
