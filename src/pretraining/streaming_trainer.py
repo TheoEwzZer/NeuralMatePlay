@@ -681,6 +681,8 @@ class StreamingTrainer:
         ewc_lambda: float = 0.4,
         ewc_start_epoch: int = 2,
         ewc_fisher_samples: int = 10000,
+        # Testing
+        max_chunks: Optional[int] = None,
     ):
         """
         Initialize streaming trainer.
@@ -765,6 +767,7 @@ class StreamingTrainer:
         self.patience = patience
         self.output_path = output_path
         self.verbose = verbose
+        self.max_chunks = max_chunks
 
         # Get device and AMP settings
         self.device = get_device()
@@ -804,6 +807,11 @@ class StreamingTrainer:
         random.shuffle(self.chunk_paths)
         self.val_chunks = self.chunk_paths[:n_val]
         self.train_chunks = self.chunk_paths[n_val:]
+
+        # Limit chunks for quick testing
+        if self.max_chunks is not None:
+            self.train_chunks = self.train_chunks[:self.max_chunks]
+            self.val_chunks = self.val_chunks[:max(1, self.max_chunks // 10)]
 
         if verbose:
             print(f"Chunks: {len(self.train_chunks)} train, {len(self.val_chunks)} val")

@@ -367,6 +367,8 @@ def pretrain(
             ewc_lambda=cfg.ewc_lambda,
             ewc_start_epoch=cfg.ewc_start_epoch,
             ewc_fisher_samples=cfg.ewc_fisher_samples,
+            # Testing
+            max_chunks=cfg.max_chunks,
         )
         return trainer.train(cfg.epochs)
 
@@ -790,6 +792,12 @@ Examples:
         help="Directory for chunk files",
     )
     parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=None,
+        help="Maximum chunks to use per epoch (for quick testing)",
+    )
+    parser.add_argument(
         "--no-streaming",
         action="store_true",
         help="Disable streaming mode (loads all data into RAM)",
@@ -846,6 +854,8 @@ Examples:
         cfg.max_positions = args.max_positions
     if args.chunks_dir:
         cfg.chunks_dir = args.chunks_dir
+    if args.max_chunks:
+        cfg.max_chunks = args.max_chunks
 
     # Validate required fields
     pgn_paths = cfg.get_pgn_paths()

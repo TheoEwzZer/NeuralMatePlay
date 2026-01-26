@@ -71,6 +71,9 @@ class PretrainingConfig:
     ewc_start_epoch: int = 2  # First epoch to apply EWC (after Fisher computed)
     ewc_fisher_samples: int = 10000  # Samples for Fisher Information estimation
 
+    # Testing
+    max_chunks: Optional[int] = None  # Limit chunks per epoch (for quick testing)
+
     def get_pgn_paths(self) -> List[str]:
         """Get all PGN paths as a list (handles both legacy and new format)."""
         if self.pgn_paths:

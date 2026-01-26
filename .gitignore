@@ -74,3 +74,4 @@ data/
 # Models
 *.pkl
 *.pt
+models/anti_forgetting_test/
