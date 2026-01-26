@@ -32,6 +32,7 @@ class MCTSMoveStats:
     )  # [P(win), P(draw), P(loss)]
     our_mate_in: Optional[int] = None  # Forced mate FOR US (winning move)
     opponent_mate_in: Optional[int] = None  # Forced mate for opponent (losing move)
+    leads_to_draw_repetition: bool = False  # Move leads to draw by threefold repetition
 
 
 class MCTSPanel(tk.Frame):
@@ -205,6 +206,7 @@ class MCTSPanel(tk.Frame):
                     wdl=wdl,
                     our_mate_in=stat.get("our_mate_in"),
                     opponent_mate_in=stat.get("opponent_mate_in"),
+                    leads_to_draw_repetition=stat.get("leads_to_draw_repetition", False),
                 )
             )
 
@@ -396,6 +398,17 @@ class MCTSPanel(tk.Frame):
                 anchor="w",
             )
             mate_label.pack(side=tk.LEFT, padx=(5, 2))
+        elif stat.leads_to_draw_repetition:
+            # Draw by threefold repetition (orange)
+            rep_label = tk.Label(
+                row,
+                text="=rep",
+                font=("Consolas", 9, "bold"),
+                fg="#FFA500",  # Orange
+                bg=bg,
+                anchor="w",
+            )
+            rep_label.pack(side=tk.LEFT, padx=(5, 2))
 
         # Hover effect
         def on_enter(e, r=row, b=bg):

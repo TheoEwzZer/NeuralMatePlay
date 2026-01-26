@@ -223,6 +223,7 @@ class MCTS:
                 best_move = None
                 winning_mates = []  # (move, mate_distance) - mats pour nous
                 losing_mates = []   # (move, mate_distance, visits) - mats pour adversaire
+                repetition_draws = []  # (move, visits) - coups menant à nulle par répétition
 
                 # Analyser chaque coup
                 for move, child in sorted_children:
@@ -233,6 +234,11 @@ class MCTS:
                     if test_board.is_checkmate():
                         winning_mates.append((move, 1))
                         continue
+
+                    # Vérifier répétition triple (nulle)
+                    if test_board.is_repetition(3):
+                        repetition_draws.append((move, child.visit_count))
+                        # Ne pas "continue" ici, on vérifie aussi les mats plus bas
 
                     # Seulement si le coup a été suffisamment exploré (évite faux positifs)
                     if child.visit_count >= 5:
@@ -257,7 +263,15 @@ class MCTS:
                     best_move = winning_mates[0][0]
                 else:
                     # Priorité 2: Coup le plus visité qui ne mène pas à un mat adverse
+                    # NI à une nulle par répétition (si on ne perd pas gravement)
                     dominated_moves = {m for m, _, _ in losing_mates}
+
+                    # Si on ne perd pas gravement, éviter aussi les répétitions
+                    root_value = root.q_value
+                    if root_value > -0.50:
+                        repetition_moves = {m for m, _ in repetition_draws}
+                        dominated_moves = dominated_moves | repetition_moves
+
                     for move, child in sorted_children:
                         if move not in dominated_moves:
                             best_move = move
@@ -1177,6 +1191,9 @@ class MCTS:
             test_board = board.copy()
             test_board.push(move)
 
+            # Check if this move leads to draw by repetition
+            leads_to_draw_repetition = test_board.is_repetition(3)
+
             # Direct check: is this move checkmate? (mate in 1)
             if test_board.is_checkmate():
                 our_mate_in = 1
@@ -1204,6 +1221,7 @@ class MCTS:
                     "wdl": flipped_wdl,  # [P(win), P(draw), P(loss)] for current player
                     "our_mate_in": our_mate_in,  # Forced mate FOR US (winning)
                     "opponent_mate_in": opponent_mate_in,  # Forced mate for opponent (losing)
+                    "leads_to_draw_repetition": leads_to_draw_repetition,  # Draw by repetition
                 }
             )
 
