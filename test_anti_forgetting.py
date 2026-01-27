@@ -94,8 +94,8 @@ def run_training(
         config["pretraining"]["ewc_lambda"] = config_settings["ewc_lambda"]
 
     # Reduce buffer capacity and ratio for quick tests (fewer chunks = smaller buffer)
-    config["pretraining"]["tactical_replay_capacity"] = 10000  # 200 chunks × 35 = 7k max
-    config["pretraining"]["tactical_replay_ratio"] = 0.10  # 10% instead of 25%
+    config["pretraining"]["tactical_replay_capacity"] = chunks * 50
+    config["pretraining"]["tactical_replay_ratio"] = 0.10
 
     # Make sure we use existing chunks directory
     if "chunks_dir" not in config["pretraining"]:
@@ -204,7 +204,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python test_anti_forgetting.py                     # Full test (200 chunks, 5 epochs)
+  python test_anti_forgetting.py                     # Full test (400 chunks, 5 epochs)
   python test_anti_forgetting.py --chunks 50        # Quick test (50 chunks)
   python test_anti_forgetting.py --only NONE EWC    # Compare only NONE vs EWC
   python test_anti_forgetting.py --skip-training    # Only run diagnostics
@@ -218,8 +218,8 @@ Examples:
     parser.add_argument(
         "--chunks",
         type=int,
-        default=200,
-        help="Chunks per epoch (default: 200)"
+        default=400,
+        help="Chunks per epoch (default: 400)"
     )
     parser.add_argument(
         "--epochs",
