@@ -32,7 +32,7 @@
     "teacher_path": null,
     "teacher_alpha": 0.6,
     "teacher_temperature": 2.0,
-    "ewc_enabled": true,
+    "ewc_enabled": false,
     "ewc_lambda": 0.4,
     "ewc_start_epoch": 2,
     "ewc_fisher_samples": 10000
