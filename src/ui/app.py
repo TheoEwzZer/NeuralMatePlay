@@ -495,7 +495,7 @@ class ChessGameApp:
         self.sim_var = tk.IntVar(value=self.num_simulations)
         self.sim_slider = ttk.Scale(
             ai_content,
-            from_=50,
+            from_=1,
             to=2000,
             orient="horizontal",
             variable=self.sim_var,
@@ -507,7 +507,7 @@ class ChessGameApp:
         preset_frame = tk.Frame(ai_content, bg=COLORS["bg_secondary"])
         preset_frame.pack(fill="x", pady=(5, 0))
 
-        presets = [100, 200, 400, 800, 1600]
+        presets = [1, 100, 400, 800, 1600]
         for preset in presets:
             btn = tk.Button(
                 preset_frame,
@@ -562,14 +562,20 @@ class ChessGameApp:
         white_grid.pack(pady=(0, 5))
 
         white_pieces = [
-            (chess.KING, "K"), (chess.QUEEN, "Q"), (chess.ROOK, "R"),
-            (chess.BISHOP, "B"), (chess.KNIGHT, "N"), (chess.PAWN, "P"),
+            (chess.KING, "K"),
+            (chess.QUEEN, "Q"),
+            (chess.ROOK, "R"),
+            (chess.BISHOP, "B"),
+            (chess.KNIGHT, "N"),
+            (chess.PAWN, "P"),
         ]
         for i, (piece_type, symbol) in enumerate(white_pieces):
             btn = tk.Button(
                 white_grid,
                 text=PIECE_UNICODE.get(symbol, symbol),
-                command=lambda pt=piece_type: self._select_editor_piece(chess.WHITE, pt),
+                command=lambda pt=piece_type: self._select_editor_piece(
+                    chess.WHITE, pt
+                ),
                 bg=COLORS["bg_tertiary"],
                 fg=COLORS["text_primary"],
                 font=("Segoe UI Symbol", 16),
@@ -594,14 +600,20 @@ class ChessGameApp:
         black_grid.pack(pady=(0, 5))
 
         black_pieces = [
-            (chess.KING, "k"), (chess.QUEEN, "q"), (chess.ROOK, "r"),
-            (chess.BISHOP, "b"), (chess.KNIGHT, "n"), (chess.PAWN, "p"),
+            (chess.KING, "k"),
+            (chess.QUEEN, "q"),
+            (chess.ROOK, "r"),
+            (chess.BISHOP, "b"),
+            (chess.KNIGHT, "n"),
+            (chess.PAWN, "p"),
         ]
         for i, (piece_type, symbol) in enumerate(black_pieces):
             btn = tk.Button(
                 black_grid,
                 text=PIECE_UNICODE.get(symbol, symbol),
-                command=lambda pt=piece_type: self._select_editor_piece(chess.BLACK, pt),
+                command=lambda pt=piece_type: self._select_editor_piece(
+                    chess.BLACK, pt
+                ),
                 bg=COLORS["bg_tertiary"],
                 fg=COLORS["text_primary"],
                 font=("Segoe UI Symbol", 16),
@@ -693,8 +705,12 @@ class ChessGameApp:
         self.castle_bk_var = tk.BooleanVar(value=True)
         self.castle_bq_var = tk.BooleanVar(value=True)
 
-        for text, var in [("W O-O", self.castle_wk_var), ("W O-O-O", self.castle_wq_var),
-                          ("B O-O", self.castle_bk_var), ("B O-O-O", self.castle_bq_var)]:
+        for text, var in [
+            ("W O-O", self.castle_wk_var),
+            ("W O-O-O", self.castle_wq_var),
+            ("B O-O", self.castle_bk_var),
+            ("B O-O-O", self.castle_bq_var),
+        ]:
             tk.Checkbutton(
                 castle_checks,
                 text=text,
@@ -1693,8 +1709,12 @@ class ChessGameApp:
                 # Pass full game history to MCTS (excluding current position)
                 # IMPORTANT: MCTS does _initial_history[:history_length], taking first positions
                 # So we pass all positions from game start in order [pos_initial, pos_after_move1, ...]
-                history_boards = self.game_positions[:-1] if len(self.game_positions) > 1 else None
-                move = self.mcts.get_best_move(board, add_noise=False, history_boards=history_boards)
+                history_boards = (
+                    self.game_positions[:-1] if len(self.game_positions) > 1 else None
+                )
+                move = self.mcts.get_best_move(
+                    board, add_noise=False, history_boards=history_boards
+                )
 
                 # Capture MCTS statistics for display
                 mcts_stats = self.mcts.get_root_statistics(board)
@@ -2150,8 +2170,12 @@ class ChessGameApp:
 
         # Map piece type to symbol
         piece_symbols = {
-            chess.KING: "K", chess.QUEEN: "Q", chess.ROOK: "R",
-            chess.BISHOP: "B", chess.KNIGHT: "N", chess.PAWN: "P",
+            chess.KING: "K",
+            chess.QUEEN: "Q",
+            chess.ROOK: "R",
+            chess.BISHOP: "B",
+            chess.KNIGHT: "N",
+            chess.PAWN: "P",
         }
         symbol = piece_symbols.get(piece_type, "")
 
@@ -2194,7 +2218,9 @@ class ChessGameApp:
         board = self.board_widget.get_board().copy()
 
         # Apply turn from editor control
-        board.turn = chess.WHITE if self.editor_turn_var.get() == "white" else chess.BLACK
+        board.turn = (
+            chess.WHITE if self.editor_turn_var.get() == "white" else chess.BLACK
+        )
 
         # Apply castling rights from editor controls
         castling = ""
@@ -2248,7 +2274,9 @@ class ChessGameApp:
         board = self.board_widget.get_board().copy()
 
         # Apply turn from editor
-        board.turn = chess.WHITE if self.editor_turn_var.get() == "white" else chess.BLACK
+        board.turn = (
+            chess.WHITE if self.editor_turn_var.get() == "white" else chess.BLACK
+        )
 
         # Apply castling rights
         castling = ""
@@ -2328,7 +2356,9 @@ class ChessGameApp:
             if piece and piece.piece_type == chess.PAWN:
                 rank = chess.square_rank(square)
                 if rank == 0 or rank == 7:
-                    errors.append(f"Pawn on invalid rank at {chess.square_name(square)}")
+                    errors.append(
+                        f"Pawn on invalid rank at {chess.square_name(square)}"
+                    )
 
         # Check if opponent king is in check (illegal position)
         if white_kings == 1 and black_kings == 1:
@@ -2341,8 +2371,7 @@ class ChessGameApp:
 
         if errors:
             messagebox.showerror(
-                "Invalid Position",
-                "Cannot start game:\n\n• " + "\n• ".join(errors)
+                "Invalid Position", "Cannot start game:\n\n• " + "\n• ".join(errors)
             )
             return False
 
