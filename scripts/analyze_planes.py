@@ -22,7 +22,11 @@ import numpy as np
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from alphazero.spatial_encoding import encode_board_with_history, PositionHistory, get_num_planes
+from alphazero.spatial_encoding import (
+    encode_board_with_history,
+    PositionHistory,
+    get_num_planes,
+)
 
 
 # Plane descriptions (from perspective of player to move)
@@ -182,7 +186,8 @@ def analyze_from_pgn(pgn_path: str, max_positions: int = 1000) -> dict:
     # Track per-plane stats across all positions
     num_planes = get_num_planes()
     plane_usage = {
-        i: {"nonzero_count": 0, "total_sum": 0.0, "positions": 0} for i in range(num_planes)
+        i: {"nonzero_count": 0, "total_sum": 0.0, "positions": 0}
+        for i in range(num_planes)
     }
 
     positions_analyzed = 0

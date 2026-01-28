@@ -43,17 +43,17 @@ from .history_comparison import test_history_comparison
 ALL_TESTS = [
     # === CRITICAL TACTICAL TESTS (x2-x3) ===
     # These directly determine wins/losses
-    (test_free_capture, "Free Capture", 2.0),        # Must not miss free material
-    (test_mate_in_one, "Mate in 1", 3.0),            # Must find forced wins
-    (test_mate_in_two, "Mate in 2", 2.0),            # Must find forcing sequences
-    (test_defense, "Defense", 2.0),                  # Must defend threats
-    (test_check_response, "Check Response", 2.0),    # Must respond to checks
-    (test_tactics, "Tactics", 2.0),                  # Combinational play
+    (test_free_capture, "Free Capture", 2.0),  # Must not miss free material
+    (test_mate_in_one, "Mate in 1", 3.0),  # Must find forced wins
+    (test_mate_in_two, "Mate in 2", 2.0),  # Must find forcing sequences
+    (test_defense, "Defense", 2.0),  # Must defend threats
+    (test_check_response, "Check Response", 2.0),  # Must respond to checks
+    (test_tactics, "Tactics", 2.0),  # Combinational play
     # === SURVIVAL TESTS (x2-x3) ===
     # Failing these = losing games
-    (test_king_safety, "King Safety", 3.0),          # CRITICAL: avoid getting mated
-    (test_trapped_pieces, "Trapped Pieces", 2.0),    # CRITICAL: avoid losing pieces
-    (test_pin_handling, "Pin Handling", 2.0),        # Pins lose material
+    (test_king_safety, "King Safety", 3.0),  # CRITICAL: avoid getting mated
+    (test_trapped_pieces, "Trapped Pieces", 2.0),  # CRITICAL: avoid losing pieces
+    (test_pin_handling, "Pin Handling", 2.0),  # Pins lose material
     # === POSITIONAL TESTS (x1) ===
     # Important but won't directly lose you the game
     (test_endgame, "Endgame Understanding", 1.0),

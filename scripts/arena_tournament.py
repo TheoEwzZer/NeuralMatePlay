@@ -42,6 +42,7 @@ from diagnostics.core.colors import Colors, header, subheader
 @dataclass
 class PlayerStats:
     """Statistics for a single player in the tournament."""
+
     name: str
     checkpoint_num: int
     path: str
@@ -68,17 +69,23 @@ class PlayerStats:
         return self.points / self.games_played
 
 
-def load_checkpoints(checkpoint_dir: str, checkpoint_type: str, max_checkpoints: Optional[int] = None):
+def load_checkpoints(
+    checkpoint_dir: str, checkpoint_type: str, max_checkpoints: Optional[int] = None
+):
     """Load all available checkpoints."""
     checkpoints = get_available_checkpoints(checkpoint_dir, checkpoint_type)
 
     if not checkpoints:
-        print(f"{Colors.RED}No {checkpoint_type} checkpoints found in {checkpoint_dir}!{Colors.ENDC}")
+        print(
+            f"{Colors.RED}No {checkpoint_type} checkpoints found in {checkpoint_dir}!{Colors.ENDC}"
+        )
         return []
 
     if max_checkpoints and len(checkpoints) > max_checkpoints:
         # Keep evenly distributed checkpoints including first and last
-        step = (len(checkpoints) - 1) / (max_checkpoints - 1) if max_checkpoints > 1 else 1
+        step = (
+            (len(checkpoints) - 1) / (max_checkpoints - 1) if max_checkpoints > 1 else 1
+        )
         indices = [int(i * step) for i in range(max_checkpoints)]
         checkpoints = [checkpoints[i] for i in indices]
 
@@ -161,10 +168,12 @@ def run_tournament(
     checkpoint_nums = sorted(players.keys())
 
     for i, num1 in enumerate(checkpoint_nums):
-        for num2 in checkpoint_nums[i + 1:]:
+        for num2 in checkpoint_nums[i + 1 :]:
             match_count += 1
 
-            print(f"\n[{match_count}/{total_matches}] {players[num1].name} vs {players[num2].name}")
+            print(
+                f"\n[{match_count}/{total_matches}] {players[num1].name} vs {players[num2].name}"
+            )
 
             # Create players
             player1 = NetworkPlayer(
@@ -234,7 +243,9 @@ def run_tournament(
     )
 
     print()
-    print(f"{'Rank':<6}{'Player':<12}{'Points':<10}{'W':<6}{'D':<6}{'L':<6}{'Score':<10}{'WinRate':<10}")
+    print(
+        f"{'Rank':<6}{'Player':<12}{'Points':<10}{'W':<6}{'D':<6}{'L':<6}{'Score':<10}{'WinRate':<10}"
+    )
     print("-" * 76)
 
     for rank, player in enumerate(ranked, 1):
@@ -250,7 +261,9 @@ def run_tournament(
             color = ""
         end_color = Colors.ENDC if color else ""
 
-        print(f"{color}{rank:<6}{player.name:<12}{player.points:<10.1f}{player.wins:<6}{player.draws:<6}{player.losses:<6}{score:<10}{win_rate:<10}{end_color}")
+        print(
+            f"{color}{rank:<6}{player.name:<12}{player.points:<10.1f}{player.wins:<6}{player.draws:<6}{player.losses:<6}{score:<10}{win_rate:<10}{end_color}"
+        )
 
     print()
 
@@ -300,7 +313,7 @@ def run_tournament(
         best_opponent = None
         best_score = -1
         worst_opponent = None
-        worst_score = float('inf')
+        worst_score = float("inf")
 
         for opp_num, (w, l, d) in player.head_to_head.items():
             score = w + 0.5 * d
@@ -319,6 +332,7 @@ def run_tournament(
                 w, l, d = player.head_to_head[worst_opponent]
                 print(f"  Worst vs: {label} {worst_opponent} ({w}-{l}, {d}D)")
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run round-robin tournament between checkpoints",
@@ -333,28 +347,32 @@ def main():
     )
 
     parser.add_argument(
-        "-t", "--type",
+        "-t",
+        "--type",
         choices=["train", "pretrain"],
         default="pretrain",
         help="Checkpoint type (default: pretrain)",
     )
 
     parser.add_argument(
-        "-n", "--games",
+        "-n",
+        "--games",
         type=int,
         default=10,
         help="Number of games per match (default: 10)",
     )
 
     parser.add_argument(
-        "-s", "--simulations",
+        "-s",
+        "--simulations",
         type=int,
         default=100,
         help="MCTS simulations per move (default: 100)",
     )
 
     parser.add_argument(
-        "-m", "--max-checkpoints",
+        "-m",
+        "--max-checkpoints",
         type=int,
         default=None,
         help="Maximum number of checkpoints to include (default: all)",

@@ -200,9 +200,7 @@ def _test_single_position(board, network, mcts, test, results):
             position_score = 0.3
             print(f"\n  {warn(f'Mate found at rank {mate_rank}')}")
         else:
-            print(
-                f"\n  {fail(f'MCTS plays {mcts_top_move.uci()} instead of mating')}"
-            )
+            print(f"\n  {fail(f'MCTS plays {mcts_top_move.uci()} instead of mating')}")
 
     elif test_type == "tactic":
         expected_uci = test["expected_move"]
@@ -225,7 +223,9 @@ def _test_single_position(board, network, mcts, test, results):
             print(f"\n  {warn(f'Tactic at rank 3 (top is {mcts_top_move.uci()})')}")
         elif found_rank:
             position_score = 0.25
-            print(f"\n  {warn(f'Tactic at rank {found_rank} (top is {mcts_top_move.uci()})')}")
+            print(
+                f"\n  {warn(f'Tactic at rank {found_rank} (top is {mcts_top_move.uci()})')}"
+            )
         else:
             print(
                 f"\n  {fail(f'MCTS plays {mcts_top_move.uci()} instead of {expected_uci}')}"
@@ -271,7 +271,9 @@ def test_mcts_behavior(network, results: TestResults):
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
-        position_score, elapsed = _test_single_position(board, network, mcts, test, results)
+        position_score, elapsed = _test_single_position(
+            board, network, mcts, test, results
+        )
         total_score += position_score
         if position_score >= 1.0:
             full_passes += 1

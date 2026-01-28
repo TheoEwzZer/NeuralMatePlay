@@ -206,7 +206,9 @@ class MCTSPanel(tk.Frame):
                     wdl=wdl,
                     our_mate_in=stat.get("our_mate_in"),
                     opponent_mate_in=stat.get("opponent_mate_in"),
-                    leads_to_draw_repetition=stat.get("leads_to_draw_repetition", False),
+                    leads_to_draw_repetition=stat.get(
+                        "leads_to_draw_repetition", False
+                    ),
                 )
             )
 
@@ -388,7 +390,9 @@ class MCTSPanel(tk.Frame):
             mate_label.pack(side=tk.LEFT, padx=(5, 2))
         elif stat.opponent_mate_in is not None:
             # Losing mate - opponent has forced mate (red)
-            mate_text = f"#-{stat.opponent_mate_in}" if stat.opponent_mate_in > 0 else "#"
+            mate_text = (
+                f"#-{stat.opponent_mate_in}" if stat.opponent_mate_in > 0 else "#"
+            )
             mate_label = tk.Label(
                 row,
                 text=mate_text,

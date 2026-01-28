@@ -199,7 +199,9 @@ def test_policy_diversity(network, results: TestResults):
     """Test if the policy head has ADAPTIVE diversity (appropriate to position complexity)."""
     print(header("TEST: Policy Head Diversity (Adaptive)"))
 
-    print(f"\n  {Colors.CYAN}This test checks if diversity matches position complexity:{Colors.ENDC}")
+    print(
+        f"\n  {Colors.CYAN}This test checks if diversity matches position complexity:{Colors.ENDC}"
+    )
     print(f"  - Simple positions (forced moves) → Should be CONCENTRATED")
     print(f"  - Complex positions (many options) → Should be DIVERSE")
     print()
@@ -274,7 +276,9 @@ def test_policy_diversity(network, results: TestResults):
 
         # Store per-position diagnostics
         results.add_diagnostic(
-            "policy_diversity", f"{test['name']}_entropy", float(stats["normalized_entropy"])
+            "policy_diversity",
+            f"{test['name']}_entropy",
+            float(stats["normalized_entropy"]),
         )
         results.add_diagnostic(
             "policy_diversity", f"{test['name']}_top_prob", float(stats["top_prob"])
@@ -309,7 +313,9 @@ def test_policy_diversity(network, results: TestResults):
     issues = []
 
     if avg_simple < 0.5:
-        issues.append(f"Network too diverse on simple positions ({avg_simple*100:.0f}%)")
+        issues.append(
+            f"Network too diverse on simple positions ({avg_simple*100:.0f}%)"
+        )
         results.add_issue(
             "MEDIUM",
             "policy",
@@ -318,7 +324,9 @@ def test_policy_diversity(network, results: TestResults):
         )
 
     if avg_complex < 0.5:
-        issues.append(f"Network too concentrated on complex positions ({avg_complex*100:.0f}%)")
+        issues.append(
+            f"Network too concentrated on complex positions ({avg_complex*100:.0f}%)"
+        )
         results.add_issue(
             "MEDIUM",
             "policy",

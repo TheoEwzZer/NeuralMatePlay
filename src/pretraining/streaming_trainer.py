@@ -50,7 +50,10 @@ def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
 
 
 def adaptive_label_smoothing(
-    base_smoothing: float, weights: torch.Tensor, min_smoothing: float = 0.01, max_smoothing: float = 0.08
+    base_smoothing: float,
+    weights: torch.Tensor,
+    min_smoothing: float = 0.01,
+    max_smoothing: float = 0.08,
 ) -> torch.Tensor:
     """
     Calculate adaptive label smoothing based on tactical weights.
@@ -104,8 +107,8 @@ def distillation_loss(
     student_log_probs = nn.functional.log_softmax(student_logits / temperature, dim=-1)
     teacher_probs = nn.functional.softmax(teacher_logits / temperature, dim=-1)
     return nn.functional.kl_div(
-        student_log_probs, teacher_probs, reduction='batchmean'
-    ) * (temperature ** 2)
+        student_log_probs, teacher_probs, reduction="batchmean"
+    ) * (temperature**2)
 
 
 class TacticalReplayBuffer:
@@ -198,22 +201,24 @@ class TacticalReplayBuffer:
         # Sort by weight (descending) and take top N
         tactical_weights = weights[tactical_indices]
         sorted_order = np.argsort(tactical_weights)[::-1]  # Descending
-        top_indices = tactical_indices[sorted_order[:self.positions_per_chunk]]
+        top_indices = tactical_indices[sorted_order[: self.positions_per_chunk]]
 
         # Vectorized batch insert
         n_to_add = min(len(top_indices), self.capacity - self._size)
         if n_to_add > 0:
             insert_indices = top_indices[:n_to_add]
             end_idx = self._size + n_to_add
-            self.states[self._size:end_idx] = states[insert_indices]
-            self.policies[self._size:end_idx] = policies[insert_indices]
-            self.values[self._size:end_idx] = values[insert_indices]
-            self.weights[self._size:end_idx] = weights[insert_indices]
+            self.states[self._size : end_idx] = states[insert_indices]
+            self.policies[self._size : end_idx] = policies[insert_indices]
+            self.values[self._size : end_idx] = values[insert_indices]
+            self.weights[self._size : end_idx] = weights[insert_indices]
             self._size = end_idx
 
         return n_to_add
 
-    def sample(self, n: int, device: torch.device) -> Optional[Tuple[torch.Tensor, ...]]:
+    def sample(
+        self, n: int, device: torch.device
+    ) -> Optional[Tuple[torch.Tensor, ...]]:
         """
         Sample n positions from the buffer.
 
@@ -231,21 +236,23 @@ class TacticalReplayBuffer:
         indices = self._rng.choice(self._size, n, replace=False)
 
         # Direct numpy fancy indexing (fast, contiguous memory)
-        sampled_states = torch.from_numpy(
-            self.states[indices].copy()
-        ).to(device, non_blocking=True)
+        sampled_states = torch.from_numpy(self.states[indices].copy()).to(
+            device, non_blocking=True
+        )
 
-        sampled_policies = torch.from_numpy(
-            self.policies[indices].copy()
-        ).long().to(device, non_blocking=True)
+        sampled_policies = (
+            torch.from_numpy(self.policies[indices].copy())
+            .long()
+            .to(device, non_blocking=True)
+        )
 
-        sampled_values = torch.from_numpy(
-            self.values[indices].copy()
-        ).to(device, non_blocking=True)
+        sampled_values = torch.from_numpy(self.values[indices].copy()).to(
+            device, non_blocking=True
+        )
 
-        sampled_weights = torch.from_numpy(
-            self.weights[indices].copy()
-        ).to(device, non_blocking=True)
+        sampled_weights = torch.from_numpy(self.weights[indices].copy()).to(
+            device, non_blocking=True
+        )
 
         return sampled_states, sampled_policies, sampled_values, sampled_weights
 
@@ -269,9 +276,15 @@ class TacticalReplayBuffer:
         self._gpu_cache_states = torch.empty(
             (alloc_size, 72, 8, 8), dtype=torch.float32, device=device
         )
-        self._gpu_cache_policies = torch.empty(alloc_size, dtype=torch.long, device=device)
-        self._gpu_cache_values = torch.empty(alloc_size, dtype=torch.float32, device=device)
-        self._gpu_cache_weights = torch.empty(alloc_size, dtype=torch.float32, device=device)
+        self._gpu_cache_policies = torch.empty(
+            alloc_size, dtype=torch.long, device=device
+        )
+        self._gpu_cache_values = torch.empty(
+            alloc_size, dtype=torch.float32, device=device
+        )
+        self._gpu_cache_weights = torch.empty(
+            alloc_size, dtype=torch.float32, device=device
+        )
         self._gpu_cache_size = alloc_size
         self._gpu_cache_device = device
 
@@ -344,10 +357,10 @@ class TacticalReplayBuffer:
 
         end_idx = min(self._chunk_cache_idx + n, cache_size)
         batch = (
-            self._chunk_cache[0][self._chunk_cache_idx:end_idx],
-            self._chunk_cache[1][self._chunk_cache_idx:end_idx],
-            self._chunk_cache[2][self._chunk_cache_idx:end_idx],
-            self._chunk_cache[3][self._chunk_cache_idx:end_idx],
+            self._chunk_cache[0][self._chunk_cache_idx : end_idx],
+            self._chunk_cache[1][self._chunk_cache_idx : end_idx],
+            self._chunk_cache[2][self._chunk_cache_idx : end_idx],
+            self._chunk_cache[3][self._chunk_cache_idx : end_idx],
         )
         self._chunk_cache_idx = end_idx
         return batch
@@ -358,10 +371,10 @@ class TacticalReplayBuffer:
             return
         np.savez_compressed(
             path,
-            states=self.states[:self._size],
-            policies=self.policies[:self._size],
-            values=self.values[:self._size],
-            weights=self.weights[:self._size],
+            states=self.states[: self._size],
+            policies=self.policies[: self._size],
+            values=self.values[: self._size],
+            weights=self.weights[: self._size],
         )
 
     def load(self, path: str) -> bool:
@@ -443,7 +456,9 @@ class EWCRegularizer:
 
             # Compute log probability of actual moves (supervised signal)
             log_probs = nn.functional.log_softmax(pred_policies, dim=-1)
-            selected_log_probs = log_probs.gather(1, policy_indices.unsqueeze(1)).squeeze(1)
+            selected_log_probs = log_probs.gather(
+                1, policy_indices.unsqueeze(1)
+            ).squeeze(1)
 
             # Weight by tactical importance
             weighted_log_prob = (selected_log_probs * weights).sum()
@@ -483,31 +498,37 @@ class EWCRegularizer:
         penalty = torch.tensor(0.0, device=next(network.parameters()).device)
         for name, param in network.named_parameters():
             if name in self.fisher:
-                penalty = penalty + (
-                    self.fisher[name] * (param - self.optimal_params[name]).pow(2)
-                ).sum()
+                penalty = (
+                    penalty
+                    + (
+                        self.fisher[name] * (param - self.optimal_params[name]).pow(2)
+                    ).sum()
+                )
 
         return self.lambda_ewc * penalty
 
     def save(self, path: str) -> None:
         """Save Fisher and optimal params to file."""
-        torch.save({
-            'fisher': self.fisher,
-            'optimal_params': self.optimal_params,
-            'lambda_ewc': self.lambda_ewc,
-            'computed': self._computed,
-        }, path)
+        torch.save(
+            {
+                "fisher": self.fisher,
+                "optimal_params": self.optimal_params,
+                "lambda_ewc": self.lambda_ewc,
+                "computed": self._computed,
+            },
+            path,
+        )
 
     def load(self, path: str) -> bool:
         """Load Fisher and optimal params from file. Returns True if successful."""
         if not os.path.exists(path):
             return False
         try:
-            data = torch.load(path, map_location='cpu')
-            self.fisher = data['fisher']
-            self.optimal_params = data['optimal_params']
-            self.lambda_ewc = data.get('lambda_ewc', self.lambda_ewc)
-            self._computed = data.get('computed', True)
+            data = torch.load(path, map_location="cpu")
+            self.fisher = data["fisher"]
+            self.optimal_params = data["optimal_params"]
+            self.lambda_ewc = data.get("lambda_ewc", self.lambda_ewc)
+            self._computed = data.get("computed", True)
             return True
         except Exception as e:
             print(f"  Warning: Failed to load EWC state: {e}")
@@ -568,7 +589,9 @@ def adaptive_cross_entropy_with_smoothing(
     # (1 - s) * (-true_log_prob) + s * (-mean_log_prob)
     # = -true_log_prob + s * true_log_prob - s * mean_log_prob
     # = -true_log_prob + s * (true_log_prob - mean_log_prob)
-    losses = -true_class_log_prob + smoothing_values * (true_class_log_prob - mean_log_prob)
+    losses = -true_class_log_prob + smoothing_values * (
+        true_class_log_prob - mean_log_prob
+    )
 
     return losses
 
@@ -786,7 +809,9 @@ class StreamingTrainer:
         self.ewc_enabled = ewc_enabled
         self.ewc_start_epoch = ewc_start_epoch
         self.ewc_fisher_samples = ewc_fisher_samples
-        self.ewc_regularizer = EWCRegularizer(lambda_ewc=ewc_lambda) if ewc_enabled else None
+        self.ewc_regularizer = (
+            EWCRegularizer(lambda_ewc=ewc_lambda) if ewc_enabled else None
+        )
         self.ewc_path = os.path.join(
             os.path.dirname(output_path) or "models", "ewc_state.pt"
         )
@@ -843,8 +868,8 @@ class StreamingTrainer:
 
         # Limit chunks for quick testing
         if self.max_chunks is not None:
-            self.train_chunks = self.train_chunks[:self.max_chunks]
-            self.val_chunks = self.val_chunks[:max(1, self.max_chunks // 10)]
+            self.train_chunks = self.train_chunks[: self.max_chunks]
+            self.val_chunks = self.val_chunks[: max(1, self.max_chunks // 10)]
 
         if verbose:
             print(f"Chunks: {len(self.train_chunks)} train, {len(self.val_chunks)} val")
@@ -1058,11 +1083,15 @@ class StreamingTrainer:
                 num_chunks=num_train_chunks,
             )
             positions_per_chunk = self.tactical_replay_buffer.positions_per_chunk
-            print(f"Replay Buffer: {self.tactical_replay_capacity:,} capacity, {positions_per_chunk} positions/chunk")
+            print(
+                f"Replay Buffer: {self.tactical_replay_capacity:,} capacity, {positions_per_chunk} positions/chunk"
+            )
 
             # Load replay buffer from disk if available
             if self.tactical_replay_buffer.load(self.replay_buffer_path):
-                print(f"Loaded replay buffer from: {self.replay_buffer_path} ({len(self.tactical_replay_buffer):,} positions)")
+                print(
+                    f"Loaded replay buffer from: {self.replay_buffer_path} ({len(self.tactical_replay_buffer):,} positions)"
+                )
 
         # Move teacher network to device if enabled
         if self.teacher_enabled and self.teacher_network is not None:
@@ -1074,8 +1103,12 @@ class StreamingTrainer:
             if self.ewc_regularizer.load(self.ewc_path):
                 # Move Fisher matrices and optimal params to device
                 for name in self.ewc_regularizer.fisher:
-                    self.ewc_regularizer.fisher[name] = self.ewc_regularizer.fisher[name].to(self.device)
-                    self.ewc_regularizer.optimal_params[name] = self.ewc_regularizer.optimal_params[name].to(self.device)
+                    self.ewc_regularizer.fisher[name] = self.ewc_regularizer.fisher[
+                        name
+                    ].to(self.device)
+                    self.ewc_regularizer.optimal_params[name] = (
+                        self.ewc_regularizer.optimal_params[name].to(self.device)
+                    )
                 print(f"Loaded EWC state from: {self.ewc_path}")
 
         # Enable TensorFloat32 for faster matmul on Ampere+ GPUs (RTX 30xx, 40xx)
@@ -1115,15 +1148,23 @@ class StreamingTrainer:
         # Print anti-forgetting features status
         print("\nAnti-forgetting features:")
         if self.tactical_replay_enabled:
-            print(f"  - Tactical Replay Buffer: ENABLED (ratio={self.tactical_replay_ratio}, starts epoch 2)")
+            print(
+                f"  - Tactical Replay Buffer: ENABLED (ratio={self.tactical_replay_ratio}, starts epoch 2)"
+            )
         else:
             print("  - Tactical Replay Buffer: DISABLED")
         if self.teacher_enabled and self.teacher_network is not None:
-            print(f"  - Knowledge Distillation: ENABLED (alpha={self.teacher_alpha}, T={self.teacher_temperature})")
+            print(
+                f"  - Knowledge Distillation: ENABLED (alpha={self.teacher_alpha}, T={self.teacher_temperature})"
+            )
         else:
             print("  - Knowledge Distillation: DISABLED")
         if self.ewc_enabled:
-            ewc_status = "ACTIVE" if self.ewc_regularizer.is_computed else f"starts epoch {self.ewc_start_epoch}"
+            ewc_status = (
+                "ACTIVE"
+                if self.ewc_regularizer.is_computed
+                else f"starts epoch {self.ewc_start_epoch}"
+            )
             print(f"  - EWC Regularization: ENABLED ({ewc_status})")
         else:
             print("  - EWC Regularization: DISABLED")
@@ -1173,7 +1214,9 @@ class StreamingTrainer:
 
             # Print anti-forgetting stats
             if self.tactical_replay_enabled and self.tactical_replay_buffer:
-                print(f"  Replay buffer: {len(self.tactical_replay_buffer)}/{self.tactical_replay_buffer.capacity} positions")
+                print(
+                    f"  Replay buffer: {len(self.tactical_replay_buffer)}/{self.tactical_replay_buffer.capacity} positions"
+                )
 
             # Compute EWC Fisher after first epoch (or ewc_start_epoch - 1)
             if (
@@ -1188,10 +1231,20 @@ class StreamingTrainer:
                     """Generator for Fisher computation using tactical positions."""
                     for chunk_path in self.train_chunks[:10]:  # Use first 10 chunks
                         chunk = ChunkManager.load_chunk(chunk_path)
-                        states = torch.from_numpy(chunk["states"]).float().to(self.device)
-                        policy_indices = torch.from_numpy(chunk["policy_indices"]).long().to(self.device)
-                        values = torch.from_numpy(chunk["values"]).float().to(self.device)
-                        weights = torch.from_numpy(chunk["weights"]).float().to(self.device)
+                        states = (
+                            torch.from_numpy(chunk["states"]).float().to(self.device)
+                        )
+                        policy_indices = (
+                            torch.from_numpy(chunk["policy_indices"])
+                            .long()
+                            .to(self.device)
+                        )
+                        values = (
+                            torch.from_numpy(chunk["values"]).float().to(self.device)
+                        )
+                        weights = (
+                            torch.from_numpy(chunk["weights"]).float().to(self.device)
+                        )
                         # Only use tactical positions (high weight)
                         mask = weights >= 1.5
                         if mask.any():
@@ -1242,7 +1295,9 @@ class StreamingTrainer:
                 and len(self.tactical_replay_buffer) > 0
             ):
                 self.tactical_replay_buffer.save(self.replay_buffer_path)
-                print(f"  Replay buffer saved: {len(self.tactical_replay_buffer):,} positions")
+                print(
+                    f"  Replay buffer saved: {len(self.tactical_replay_buffer):,} positions"
+                )
 
             print()
 
@@ -1350,8 +1405,13 @@ class StreamingTrainer:
                 weights = weights[indices]
 
                 # Add tactical positions to replay buffer
-                if self.tactical_replay_enabled and self.tactical_replay_buffer is not None:
-                    self.tactical_replay_buffer.add_batch(states, policy_indices, values, weights)
+                if (
+                    self.tactical_replay_enabled
+                    and self.tactical_replay_buffer is not None
+                ):
+                    self.tactical_replay_buffer.add_batch(
+                        states, policy_indices, values, weights
+                    )
 
                 # Create mini-batches with gradient accumulation
                 n_batches = len(states) // self.batch_size
@@ -1365,9 +1425,13 @@ class StreamingTrainer:
                     and len(self.tactical_replay_buffer) > 0
                     and epoch > 0
                 ):
-                    replay_size_per_batch = int(self.batch_size * self.tactical_replay_ratio)
+                    replay_size_per_batch = int(
+                        self.batch_size * self.tactical_replay_ratio
+                    )
                     total_replay_samples = replay_size_per_batch * n_batches
-                    self.tactical_replay_buffer.pre_sample_for_chunk(total_replay_samples, self.device)
+                    self.tactical_replay_buffer.pre_sample_for_chunk(
+                        total_replay_samples, self.device
+                    )
 
                 # Zero gradients at the start of each chunk
                 self.optimizer.zero_grad()
@@ -1415,24 +1479,45 @@ class StreamingTrainer:
                         self.tactical_replay_enabled
                         and self.tactical_replay_buffer is not None
                         and len(self.tactical_replay_buffer) > 0
-                        and epoch > 0  # Don't replay during epoch 1 - nothing to "remember" yet
+                        and epoch
+                        > 0  # Don't replay during epoch 1 - nothing to "remember" yet
                     ):
-                        replay_size = int(batch_size_actual * self.tactical_replay_ratio)
+                        replay_size = int(
+                            batch_size_actual * self.tactical_replay_ratio
+                        )
                         if replay_size > 0:
-                            replay_data = self.tactical_replay_buffer.get_batch_from_cache(replay_size)
+                            replay_data = (
+                                self.tactical_replay_buffer.get_batch_from_cache(
+                                    replay_size
+                                )
+                            )
                             if replay_data is not None:
-                                r_states, r_policies_idx, r_values, r_weights = replay_data
+                                r_states, r_policies_idx, r_values, r_weights = (
+                                    replay_data
+                                )
                                 # Reconstruct one-hot for replay policies
                                 r_policies = torch.zeros(
-                                    len(r_policies_idx), MOVE_ENCODING_SIZE, device=self.device
+                                    len(r_policies_idx),
+                                    MOVE_ENCODING_SIZE,
+                                    device=self.device,
                                 )
                                 r_policies.scatter_(1, r_policies_idx.unsqueeze(1), 1.0)
                                 # Concatenate with current batch
-                                batch_states = torch.cat([batch_states, r_states], dim=0)
-                                batch_policies = torch.cat([batch_policies, r_policies], dim=0)
-                                batch_values = torch.cat([batch_values, r_values], dim=0)
-                                batch_policy_indices = torch.cat([batch_policy_indices, r_policies_idx], dim=0)
-                                batch_weights = torch.cat([batch_weights, r_weights], dim=0)
+                                batch_states = torch.cat(
+                                    [batch_states, r_states], dim=0
+                                )
+                                batch_policies = torch.cat(
+                                    [batch_policies, r_policies], dim=0
+                                )
+                                batch_values = torch.cat(
+                                    [batch_values, r_values], dim=0
+                                )
+                                batch_policy_indices = torch.cat(
+                                    [batch_policy_indices, r_policies_idx], dim=0
+                                )
+                                batch_weights = torch.cat(
+                                    [batch_weights, r_weights], dim=0
+                                )
                                 batch_size_actual = len(batch_states)
 
                     # Check if this is the last batch in accumulation cycle or chunk
@@ -1469,10 +1554,12 @@ class StreamingTrainer:
                             )
 
                             # Policy loss with adaptive smoothing and tactical weighting
-                            policy_loss_unreduced = adaptive_cross_entropy_with_smoothing(
-                                pred_policies_clamped,
-                                batch_policies,
-                                smoothing_values,
+                            policy_loss_unreduced = (
+                                adaptive_cross_entropy_with_smoothing(
+                                    pred_policies_clamped,
+                                    batch_policies,
+                                    smoothing_values,
+                                )
                             )
                             policy_loss = (policy_loss_unreduced * batch_weights).mean()
 
@@ -1481,10 +1568,12 @@ class StreamingTrainer:
                             wdl_logits_clamped = torch.clamp(
                                 wdl_logits, min=-50, max=50
                             )
-                            value_loss_unreduced = adaptive_cross_entropy_with_smoothing(
-                                wdl_logits_clamped,
-                                wdl_targets,
-                                smoothing_values,
+                            value_loss_unreduced = (
+                                adaptive_cross_entropy_with_smoothing(
+                                    wdl_logits_clamped,
+                                    wdl_targets,
+                                    smoothing_values,
+                                )
                             )
                             value_loss = (value_loss_unreduced * batch_weights).mean()
 
@@ -1515,10 +1604,17 @@ class StreamingTrainer:
 
                             # Knowledge Distillation loss
                             distill_loss = torch.tensor(0.0, device=self.device)
-                            if self.teacher_enabled and self.teacher_network is not None:
+                            if (
+                                self.teacher_enabled
+                                and self.teacher_network is not None
+                            ):
                                 with torch.no_grad():
-                                    teacher_policies, _, teacher_wdl = self.teacher_network(batch_states)
-                                    teacher_policies_clamped = torch.clamp(teacher_policies, min=-50, max=50)
+                                    teacher_policies, _, teacher_wdl = (
+                                        self.teacher_network(batch_states)
+                                    )
+                                    teacher_policies_clamped = torch.clamp(
+                                        teacher_policies, min=-50, max=50
+                                    )
                                 # Policy distillation
                                 distill_loss = distillation_loss(
                                     pred_policies_clamped,
@@ -1526,7 +1622,9 @@ class StreamingTrainer:
                                     temperature=self.teacher_temperature,
                                 )
                                 # Blend hard and soft losses
-                                loss = (1.0 - self.teacher_alpha) * hard_loss + self.teacher_alpha * distill_loss
+                                loss = (
+                                    1.0 - self.teacher_alpha
+                                ) * hard_loss + self.teacher_alpha * distill_loss
                             else:
                                 loss = hard_loss
 
@@ -1648,8 +1746,12 @@ class StreamingTrainer:
                         distill_loss = torch.tensor(0.0, device=self.device)
                         if self.teacher_enabled and self.teacher_network is not None:
                             with torch.no_grad():
-                                teacher_policies, _, teacher_wdl = self.teacher_network(batch_states)
-                                teacher_policies_clamped = torch.clamp(teacher_policies, min=-50, max=50)
+                                teacher_policies, _, teacher_wdl = self.teacher_network(
+                                    batch_states
+                                )
+                                teacher_policies_clamped = torch.clamp(
+                                    teacher_policies, min=-50, max=50
+                                )
                             # Policy distillation
                             distill_loss = distillation_loss(
                                 pred_policies_clamped,
@@ -1657,7 +1759,9 @@ class StreamingTrainer:
                                 temperature=self.teacher_temperature,
                             )
                             # Blend hard and soft losses
-                            loss = (1.0 - self.teacher_alpha) * hard_loss + self.teacher_alpha * distill_loss
+                            loss = (
+                                1.0 - self.teacher_alpha
+                            ) * hard_loss + self.teacher_alpha * distill_loss
                         else:
                             loss = hard_loss
 
@@ -1759,7 +1863,8 @@ class StreamingTrainer:
                 if (
                     self.tactical_replay_enabled
                     and self.tactical_replay_buffer is not None
-                    and len(self.tactical_replay_buffer) < self.tactical_replay_buffer.capacity
+                    and len(self.tactical_replay_buffer)
+                    < self.tactical_replay_buffer.capacity
                 ):
                     buf_size = len(self.tactical_replay_buffer)
                     buf_cap = self.tactical_replay_buffer.capacity
@@ -1769,9 +1874,9 @@ class StreamingTrainer:
                 print(progress_line + "   ", end="", flush=True)
 
                 # Save checkpoint every 10 chunks (and at least 60 seconds apart)
-                should_save_checkpoint = (
-                    (chunk_idx + 1) % 10 == 0 or chunk_idx == len(train_chunks) - 1
-                )
+                should_save_checkpoint = (chunk_idx + 1) % 10 == 0 or chunk_idx == len(
+                    train_chunks
+                ) - 1
 
                 if should_save_checkpoint:
                     # Wait for previous checkpoint save to complete if still running
@@ -1883,13 +1988,17 @@ class StreamingTrainer:
 
                         pred_policies, _, wdl_logits = self.network(batch_states)
                         policy_loss = nn.functional.cross_entropy(
-                            pred_policies, batch_policies, label_smoothing=self.label_smoothing
+                            pred_policies,
+                            batch_policies,
+                            label_smoothing=self.label_smoothing,
                         )
 
                         # Value loss: WDL cross-entropy
                         wdl_targets = values_to_wdl_targets(batch_values)
                         value_loss = nn.functional.cross_entropy(
-                            wdl_logits, wdl_targets, label_smoothing=self.label_smoothing
+                            wdl_logits,
+                            wdl_targets,
+                            label_smoothing=self.label_smoothing,
                         )
 
                         # Skip NaN losses in validation

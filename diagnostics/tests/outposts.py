@@ -119,7 +119,9 @@ def test_outposts(network, results: TestResults):
                     out_str = "OUTPOST" if is_outpost else ""
                     color = Colors.GREEN if is_outpost else ""
                     end_color = Colors.ENDC if color else ""
-                    print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {out_str}{end_color}")
+                    print(
+                        f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {out_str}{end_color}"
+                    )
 
             if found_at == 1:
                 print(f"\n  {ok('Occupies outpost!')}")

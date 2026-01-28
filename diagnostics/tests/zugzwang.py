@@ -114,8 +114,8 @@ def test_zugzwang(network, results: TestResults):
         results.add_diagnostic(
             "zugzwang",
             f"{test['name']}_correct",
-            (test["side_to_move_disadvantage"] and value < 0) or
-            (not test["side_to_move_disadvantage"] and value >= -0.1)
+            (test["side_to_move_disadvantage"] and value < 0)
+            or (not test["side_to_move_disadvantage"] and value >= -0.1),
         )
 
     score = passed / total

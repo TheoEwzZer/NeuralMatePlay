@@ -127,7 +127,9 @@ def test_pin_handling(network, results: TestResults):
                 print(f"  {warn('Evaluation differs from expected')}")
                 passed += 0.5
 
-            results.add_diagnostic("pin_handling", f"{test['name']}_value", float(value))
+            results.add_diagnostic(
+                "pin_handling", f"{test['name']}_value", float(value)
+            )
 
         else:  # move test
             total += 1
@@ -150,7 +152,9 @@ def test_pin_handling(network, results: TestResults):
                     pin_str = "PIN!" if is_pin else ""
                     color = Colors.GREEN if is_pin else ""
                     end_color = Colors.ENDC if color else ""
-                    print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {pin_str}{end_color}")
+                    print(
+                        f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {pin_str}{end_color}"
+                    )
 
             if found_at == 1:
                 print(f"\n  {ok('Correct pin handling!')}")

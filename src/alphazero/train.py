@@ -632,6 +632,7 @@ Examples:
 
     # Detect device
     import torch
+
     if torch.cuda.is_available():
         device_name = torch.cuda.get_device_name(0)
         device_str = f"GPU ({device_name})"

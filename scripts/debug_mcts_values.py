@@ -3,6 +3,7 @@
 
 import sys
 import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import chess
@@ -43,7 +44,9 @@ def load_network(path: str) -> DualHeadNetwork:
     config = checkpoint.get("config", {})
 
     network = DualHeadNetwork(
-        num_residual_blocks=config.get("num_residual_blocks", config.get("num_blocks", 8)),
+        num_residual_blocks=config.get(
+            "num_residual_blocks", config.get("num_blocks", 8)
+        ),
         num_filters=config.get("num_filters", 128),
         num_input_planes=config.get("num_input_planes", 72),
     )
@@ -87,14 +90,18 @@ def analyze_position(network: DualHeadNetwork, fen: str, name: str, description:
     policy, value, wdl = predict_for_board(board, network)
 
     print(f"\n--- RAW NETWORK OUTPUT (before any move) ---")
-    print(f"Value (from {'White' if board.turn else 'Black'}'s perspective): {value:+.4f}")
+    print(
+        f"Value (from {'White' if board.turn else 'Black'}'s perspective): {value:+.4f}"
+    )
     print(f"WDL: [Win={wdl[0]:.3f}, Draw={wdl[1]:.3f}, Loss={wdl[2]:.3f}]")
 
     # Top 5 moves by policy
     top_indices = np.argsort(policy)[::-1][:10]
 
     print(f"\n--- TOP POLICY MOVES (what network thinks) ---")
-    print(f"{'Rank':<6} {'Move':<8} {'Prior':>8} {'Value After':>12} {'WDL After':<30} {'Note':<15}")
+    print(
+        f"{'Rank':<6} {'Move':<8} {'Prior':>8} {'Value After':>12} {'WDL After':<30} {'Note':<15}"
+    )
     print("-" * 90)
 
     found_moves = 0
@@ -122,7 +129,14 @@ def analyze_position(network: DualHeadNetwork, fen: str, name: str, description:
         elif board.is_capture(move):
             captured = board.piece_at(move.to_square)
             if captured:
-                piece_names = {1: "pawn", 2: "knight", 3: "bishop", 4: "rook", 5: "queen", 6: "king"}
+                piece_names = {
+                    1: "pawn",
+                    2: "knight",
+                    3: "bishop",
+                    4: "rook",
+                    5: "queen",
+                    6: "king",
+                }
                 note = f"captures {piece_names.get(captured.piece_type, '?')}"
 
         wdl_str = f"[W={child_wdl[0]:.2f}, D={child_wdl[1]:.2f}, L={child_wdl[2]:.2f}]"
@@ -132,7 +146,9 @@ def analyze_position(network: DualHeadNetwork, fen: str, name: str, description:
         # MCTS will negate this: q = -child_value
         mcts_q = -child_value
 
-        print(f"{found_moves+1:<6} {move.uci():<8} {prior*100:>7.2f}% {child_value:>+11.4f} {wdl_str:<30} {note:<15}")
+        print(
+            f"{found_moves+1:<6} {move.uci():<8} {prior*100:>7.2f}% {child_value:>+11.4f} {wdl_str:<30} {note:<15}"
+        )
         print(f"       {'':8} {'':>8} MCTS Q={mcts_q:+.4f} (negated for parent)")
         found_moves += 1
 
@@ -153,7 +169,9 @@ def analyze_position(network: DualHeadNetwork, fen: str, name: str, description:
     # Get root node to see actual visit counts
     root = mcts._get_or_create_node(board)
 
-    print(f"{'Rank':<6} {'Move':<8} {'Visits':>8} {'Q-Value':>10} {'Prior':>8} {'PUCT Score':>12}")
+    print(
+        f"{'Rank':<6} {'Move':<8} {'Visits':>8} {'Q-Value':>10} {'Prior':>8} {'PUCT Score':>12}"
+    )
     print("-" * 70)
 
     # Sort children by visit count
@@ -185,7 +203,9 @@ def analyze_position(network: DualHeadNetwork, fen: str, name: str, description:
                 piece_names = {1: "P", 2: "N", 3: "B", 4: "R", 5: "Q", 6: "K"}
                 note = f"x{piece_names.get(captured.piece_type, '?')}"
 
-        print(f"{i+1:<6} {move.uci():<8} {visits:>7} ({pct:4.1f}%) {q:>+9.4f} {prior*100:>7.2f}% {puct_score:>+11.4f} {note}{marker}")
+        print(
+            f"{i+1:<6} {move.uci():<8} {visits:>7} ({pct:4.1f}%) {q:>+9.4f} {prior*100:>7.2f}% {puct_score:>+11.4f} {note}{marker}"
+        )
 
 
 def main():
@@ -213,10 +233,11 @@ def main():
         for test in TEST_POSITIONS:
             analyze_position(network, test["fen"], test["name"], test["description"])
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("ANALYSIS COMPLETE")
-    print("="*70)
-    print("""
+    print("=" * 70)
+    print(
+        """
 Key things to look for:
 1. For 'Hanging Queen': After d1d4 (capture), Value After should be NEGATIVE
    (because it's from Black's perspective, and Black just lost their queen)
@@ -226,7 +247,8 @@ Key things to look for:
    This would explain why MCTS rejects the capture.
 
 3. Compare across checkpoints - does checkpoint 1 have different behavior?
-""")
+"""
+    )
 
 
 if __name__ == "__main__":

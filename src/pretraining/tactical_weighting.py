@@ -160,13 +160,11 @@ def _is_endgame(board: chess.Board) -> bool:
         return True
 
     # Count minor pieces (bishops + knights)
-    white_minors = (
-        len(board.pieces(chess.BISHOP, chess.WHITE))
-        + len(board.pieces(chess.KNIGHT, chess.WHITE))
+    white_minors = len(board.pieces(chess.BISHOP, chess.WHITE)) + len(
+        board.pieces(chess.KNIGHT, chess.WHITE)
     )
-    black_minors = (
-        len(board.pieces(chess.BISHOP, chess.BLACK))
-        + len(board.pieces(chess.KNIGHT, chess.BLACK))
+    black_minors = len(board.pieces(chess.BISHOP, chess.BLACK)) + len(
+        board.pieces(chess.KNIGHT, chess.BLACK)
     )
 
     # If one side has queen but very limited material, still endgame

@@ -209,8 +209,12 @@ def test_development(network, results: TestResults):
 
         # Store per-position diagnostics
         results.add_diagnostic("opening", f"{test['name']}_top_move", stats["top_move"])
-        results.add_diagnostic("opening", f"{test['name']}_category", stats["top_category"])
-        results.add_diagnostic("opening", f"{test['name']}_excellent_prob", stats["excellent_prob"])
+        results.add_diagnostic(
+            "opening", f"{test['name']}_category", stats["top_category"]
+        )
+        results.add_diagnostic(
+            "opening", f"{test['name']}_excellent_prob", stats["excellent_prob"]
+        )
 
     # Summary
     num_positions = len(TEST_POSITIONS)

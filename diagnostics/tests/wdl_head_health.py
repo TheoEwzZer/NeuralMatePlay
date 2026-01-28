@@ -43,9 +43,21 @@ def test_wdl_head_health(network, results: TestResults):
         ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1", "White -Q", -0.8),
         ("8/8/8/3K4/8/2k5/8/3rr3 w - - 0 1", "Black 2R vs nothing", -0.95),
         # === NEUTRAL POSITIONS ===
-        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "Start position", 0.0),
-        ("rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1", "Early game", 0.0),
-        ("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1", "Italian", 0.0),
+        (
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "Start position",
+            0.0,
+        ),
+        (
+            "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+            "Early game",
+            0.0,
+        ),
+        (
+            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1",
+            "Italian",
+            0.0,
+        ),
         # === SUBTLE ADVANTAGES (HARDER) ===
         # Material imbalances
         ("8/8/4k3/8/8/4K3/8/RR6 w - - 0 1", "2R vs nothing (K+RR)", 0.85),
@@ -59,12 +71,32 @@ def test_wdl_head_health(network, results: TestResults):
         ("8/8/8/1k6/1p6/1K6/8/8 w - - 0 1", "Drawn pawn ending", 0.0),
         ("8/8/8/8/8/4k3/4p3/4K3 w - - 0 1", "K vs K+P (lost)", -0.5),
         # === POSITIONAL ADVANTAGES (NO MATERIAL DIFF - HARDEST) ===
-        ("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1", "Italian Game", 0.1),
-        ("rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 1", "Nimzo-Indian", 0.0),
-        ("r1bqkbnr/pp1ppppp/2n5/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1", "Sicilian", 0.1),
+        (
+            "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
+            "Italian Game",
+            0.1,
+        ),
+        (
+            "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 1",
+            "Nimzo-Indian",
+            0.0,
+        ),
+        (
+            "r1bqkbnr/pp1ppppp/2n5/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1",
+            "Sicilian",
+            0.1,
+        ),
         # === COMPLEX MIDDLEGAME (HARDEST) ===
-        ("r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 1", "Complex equal", 0.0),
-        ("r2qkb1r/ppp2ppp/2np1n2/4pb2/2B1P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 1", "Open game", 0.05),
+        (
+            "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 1",
+            "Complex equal",
+            0.0,
+        ),
+        (
+            "r2qkb1r/ppp2ppp/2np1n2/4pb2/2B1P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 1",
+            "Open game",
+            0.05,
+        ),
     ]
 
     print(subheader("Value Distribution Analysis"))
@@ -157,10 +189,10 @@ def test_wdl_head_health(network, results: TestResults):
     sep_score = min(1.0, max(0, separation) / 0.5)  # Perfect if separation >= 0.5
 
     health_score = (
-        0.4 * direction_score +  # Most important: correct sign
-        0.2 * std_score +
-        0.2 * range_score +
-        0.2 * sep_score
+        0.4 * direction_score  # Most important: correct sign
+        + 0.2 * std_score
+        + 0.2 * range_score
+        + 0.2 * sep_score
     )
 
     # Critical failure detection

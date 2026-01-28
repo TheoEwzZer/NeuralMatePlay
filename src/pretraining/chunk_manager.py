@@ -206,7 +206,9 @@ class ChunkManager:
         """Get the list of already processed PGN files."""
         return self._processed_files.copy()
 
-    def set_current_file(self, file_path: Optional[str], games_processed: int = 0) -> None:
+    def set_current_file(
+        self, file_path: Optional[str], games_processed: int = 0
+    ) -> None:
         """Set the current file being processed (for resume tracking)."""
         self._current_file = file_path
         self._current_file_games = games_processed

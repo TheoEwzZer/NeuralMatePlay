@@ -131,7 +131,9 @@ def test_trapped_pieces(network, results: TestResults):
                     trap_str = "TRAP!" if is_trap else ""
                     color = Colors.GREEN if is_trap else ""
                     end_color = Colors.ENDC if color else ""
-                    print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {trap_str}{end_color}")
+                    print(
+                        f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {trap_str}{end_color}"
+                    )
 
             if found_at == 1:
                 print(f"\n  {ok('Finds the trapping move!')}")
@@ -162,7 +164,9 @@ def test_trapped_pieces(network, results: TestResults):
                 print(f"  {warn(f'Evaluation mismatch')}")
                 passed += 0.5
 
-            results.add_diagnostic("trapped_pieces", f"{test['name']}_value", float(value))
+            results.add_diagnostic(
+                "trapped_pieces", f"{test['name']}_value", float(value)
+            )
 
     score = passed / total if total > 0 else 0
     results.add_diagnostic("trapped_pieces", "total_tested", total)

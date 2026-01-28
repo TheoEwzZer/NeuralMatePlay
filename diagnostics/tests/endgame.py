@@ -124,7 +124,14 @@ def test_endgame(network, results: TestResults):
                 passed += 0.3
             else:
                 status = fail("")
-                value_errors.append({"position": test["name"], "expected": expected, "actual": value, "material": material})
+                value_errors.append(
+                    {
+                        "position": test["name"],
+                        "expected": expected,
+                        "actual": value,
+                        "material": material,
+                    }
+                )
         elif expected == "negative":
             if value < -0.2:
                 status = ok("")
@@ -137,7 +144,14 @@ def test_endgame(network, results: TestResults):
                 passed += 0.3
             else:
                 status = fail("")
-                value_errors.append({"position": test["name"], "expected": expected, "actual": value, "material": material})
+                value_errors.append(
+                    {
+                        "position": test["name"],
+                        "expected": expected,
+                        "actual": value,
+                        "material": material,
+                    }
+                )
         else:  # neutral
             if abs(value) < 0.15:
                 status = ok("")
@@ -150,7 +164,14 @@ def test_endgame(network, results: TestResults):
                 passed += 0.3
             else:
                 status = fail("")
-                value_errors.append({"position": test["name"], "expected": expected, "actual": value, "material": material})
+                value_errors.append(
+                    {
+                        "position": test["name"],
+                        "expected": expected,
+                        "actual": value,
+                        "material": material,
+                    }
+                )
 
         exp_str = (
             "+" if expected == "positive" else ("-" if expected == "negative" else "=")

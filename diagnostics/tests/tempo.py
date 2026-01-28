@@ -126,7 +126,9 @@ def test_tempo(network, results: TestResults):
                     quality = "GOOD" if is_good else ("BAD" if is_bad else "")
                     color = Colors.GREEN if is_good else (Colors.RED if is_bad else "")
                     end_color = Colors.ENDC if color else ""
-                    print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {quality}{end_color}")
+                    print(
+                        f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {quality}{end_color}"
+                    )
 
             # Scoring
             if expected_set:

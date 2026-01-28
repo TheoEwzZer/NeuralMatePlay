@@ -149,7 +149,9 @@ class NetworkPlayer(Player):
         # Get history for MCTS (excluding current position which is passed separately)
         history_boards = self._history.get_boards()[1:]
 
-        move = self._mcts.get_best_move(board, add_noise=False, history_boards=history_boards)
+        move = self._mcts.get_best_move(
+            board, add_noise=False, history_boards=history_boards
+        )
 
         # Capture stats after search (before advancing root)
         self.last_mcts_stats = self._mcts.get_root_statistics(board)

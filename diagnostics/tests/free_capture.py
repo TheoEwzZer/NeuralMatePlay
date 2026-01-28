@@ -242,7 +242,9 @@ def test_free_capture(network, results: TestResults):
                 f"Capture at rank {capture_rank} ({capture_prob*100:.1f}%) vs top move ({top_probs[0]*100:.1f}%)",
             )
         elif capture_rank:
-            print(f"\n  {warn(f'Capture at rank {capture_rank} ({capture_prob*100:.1f}%)')}")
+            print(
+                f"\n  {warn(f'Capture at rank {capture_rank} ({capture_prob*100:.1f}%)')}"
+            )
             passed += 0.25
             results.add_issue(
                 "HIGH",

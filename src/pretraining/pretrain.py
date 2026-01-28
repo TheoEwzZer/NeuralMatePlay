@@ -250,10 +250,14 @@ def pretrain(
                             eta_str = f"{file_eta_seconds:.0f}s"
                     else:
                         eta_str = "..."
-                    speed = file_position_count / file_elapsed if file_elapsed > 0 else 0
+                    speed = (
+                        file_position_count / file_elapsed if file_elapsed > 0 else 0
+                    )
                     # Show cumulative totals
                     cumul_pos = initial_positions + total_position_count
-                    cumul_games = initial_games + total_games_count + processor.games_processed
+                    cumul_games = (
+                        initial_games + total_games_count + processor.games_processed
+                    )
                     print(
                         f"\r  {cumul_pos:,} pos | {cumul_games:,} games | "
                         f"{current_chunks} chunks | {progress:.1%} | {speed:.0f} pos/s | ETA: {eta_str}    ",

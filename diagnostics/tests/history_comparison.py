@@ -95,7 +95,9 @@ def _compare_encodings(
 ) -> dict:
     """Compare network outputs between real and duplicated history."""
     # Encode with real history
-    state_real = _encode_with_real_history(current_board, history_boards, history_length)
+    state_real = _encode_with_real_history(
+        current_board, history_boards, history_length
+    )
     policy_real, value_real, wdl_real = network.predict_single_with_wdl(state_real)
     if current_board.turn == chess.BLACK:
         policy_real = flip_policy(policy_real)
@@ -148,7 +150,9 @@ def _compare_mcts(
 
     # MCTS with real history
     start = time.time()
-    policy_real = mcts.search(current_board, add_noise=False, history_boards=history_boards)
+    policy_real = mcts.search(
+        current_board, add_noise=False, history_boards=history_boards
+    )
     time_real = time.time() - start
 
     mcts.clear_cache()
@@ -183,7 +187,9 @@ def _compare_mcts(
     }
 
 
-def _test_single_scenario(network, scenario: dict, history_length: int, results: TestResults) -> float:
+def _test_single_scenario(
+    network, scenario: dict, history_length: int, results: TestResults
+) -> float:
     """Test a single scenario with real vs duplicated history."""
     board = chess.Board()
 
@@ -201,32 +207,38 @@ def _test_single_scenario(network, scenario: dict, history_length: int, results:
     print(f"  Value (real history):      {net_cmp['value_real']:+.4f}")
     print(f"  Value (duplicated):        {net_cmp['value_dup']:+.4f}")
     print(f"  Value difference:          {net_cmp['value_diff']:.4f}")
-    print(f"  WDL (real):    [W={net_cmp['wdl_real'][0]:.3f}, D={net_cmp['wdl_real'][1]:.3f}, L={net_cmp['wdl_real'][2]:.3f}]")
-    print(f"  WDL (dup):     [W={net_cmp['wdl_dup'][0]:.3f}, D={net_cmp['wdl_dup'][1]:.3f}, L={net_cmp['wdl_dup'][2]:.3f}]")
+    print(
+        f"  WDL (real):    [W={net_cmp['wdl_real'][0]:.3f}, D={net_cmp['wdl_real'][1]:.3f}, L={net_cmp['wdl_real'][2]:.3f}]"
+    )
+    print(
+        f"  WDL (dup):     [W={net_cmp['wdl_dup'][0]:.3f}, D={net_cmp['wdl_dup'][1]:.3f}, L={net_cmp['wdl_dup'][2]:.3f}]"
+    )
 
     # Top moves comparison
     print(f"\n  Top moves (real history):")
-    for i, idx in enumerate(net_cmp['top_real'][:3]):
+    for i, idx in enumerate(net_cmp["top_real"][:3]):
         move = decode_move(idx, board)
         if move:
             print(f"    {i+1}. {move.uci()} ({net_cmp['policy_real'][idx]*100:.1f}%)")
 
     print(f"\n  Top moves (duplicated):")
-    for i, idx in enumerate(net_cmp['top_dup'][:3]):
+    for i, idx in enumerate(net_cmp["top_dup"][:3]):
         move = decode_move(idx, board)
         if move:
             print(f"    {i+1}. {move.uci()} ({net_cmp['policy_dup'][idx]*100:.1f}%)")
 
-    if net_cmp['top_move_same']:
-        top_move = decode_move(net_cmp['top_real'][0], board)
+    if net_cmp["top_move_same"]:
+        top_move = decode_move(net_cmp["top_real"][0], board)
         move_str = top_move.uci() if top_move else "?"
         print(f"\n  {ok('Same top move: ' + move_str)} (network)")
     else:
-        top_real = decode_move(net_cmp['top_real'][0], board)
-        top_dup = decode_move(net_cmp['top_dup'][0], board)
+        top_real = decode_move(net_cmp["top_real"][0], board)
+        top_dup = decode_move(net_cmp["top_dup"][0], board)
         real_str = top_real.uci() if top_real else "?"
         dup_str = top_dup.uci() if top_dup else "?"
-        print(f"\n  {warn('Different top moves: real=' + real_str + ', dup=' + dup_str)}")
+        print(
+            f"\n  {warn('Different top moves: real=' + real_str + ', dup=' + dup_str)}"
+        )
 
     # Compare MCTS outputs
     print(f"\n  {Colors.BOLD}--- MCTS Comparison (100 sims) ---{Colors.ENDC}")
@@ -238,34 +250,52 @@ def _test_single_scenario(network, scenario: dict, history_length: int, results:
     print(f"  Policy mean diff:          {mcts_cmp['policy_mean_diff']*100:.4f}%")
 
     print(f"\n  Top MCTS moves (real history):")
-    for i, idx in enumerate(mcts_cmp['top_real'][:3]):
+    for i, idx in enumerate(mcts_cmp["top_real"][:3]):
         move = decode_move(idx, board)
         if move:
             print(f"    {i+1}. {move.uci()} ({mcts_cmp['policy_real'][idx]*100:.1f}%)")
 
     print(f"\n  Top MCTS moves (duplicated):")
-    for i, idx in enumerate(mcts_cmp['top_dup'][:3]):
+    for i, idx in enumerate(mcts_cmp["top_dup"][:3]):
         move = decode_move(idx, board)
         if move:
             print(f"    {i+1}. {move.uci()} ({mcts_cmp['policy_dup'][idx]*100:.1f}%)")
 
-    if mcts_cmp['top_move_same']:
-        top_move = decode_move(mcts_cmp['top_real'][0], board)
+    if mcts_cmp["top_move_same"]:
+        top_move = decode_move(mcts_cmp["top_real"][0], board)
         move_str = top_move.uci() if top_move else "?"
         print(f"\n  {ok('Same top MCTS move: ' + move_str)} (MCTS)")
     else:
-        top_real = decode_move(mcts_cmp['top_real'][0], board)
-        top_dup = decode_move(mcts_cmp['top_dup'][0], board)
+        top_real = decode_move(mcts_cmp["top_real"][0], board)
+        top_dup = decode_move(mcts_cmp["top_dup"][0], board)
         real_str = top_real.uci() if top_real else "?"
         dup_str = top_dup.uci() if top_dup else "?"
-        print(f"\n  {warn('Different MCTS top moves: real=' + real_str + ', dup=' + dup_str)}")
+        print(
+            f"\n  {warn('Different MCTS top moves: real=' + real_str + ', dup=' + dup_str)}"
+        )
 
     # Store diagnostics
-    results.add_diagnostic("history", f"{scenario['name']}_net_value_diff", net_cmp['value_diff'])
-    results.add_diagnostic("history", f"{scenario['name']}_net_policy_max_diff", net_cmp['policy_max_diff'])
-    results.add_diagnostic("history", f"{scenario['name']}_net_same_top", 1.0 if net_cmp['top_move_same'] else 0.0)
-    results.add_diagnostic("history", f"{scenario['name']}_mcts_policy_max_diff", mcts_cmp['policy_max_diff'])
-    results.add_diagnostic("history", f"{scenario['name']}_mcts_same_top", 1.0 if mcts_cmp['top_move_same'] else 0.0)
+    results.add_diagnostic(
+        "history", f"{scenario['name']}_net_value_diff", net_cmp["value_diff"]
+    )
+    results.add_diagnostic(
+        "history", f"{scenario['name']}_net_policy_max_diff", net_cmp["policy_max_diff"]
+    )
+    results.add_diagnostic(
+        "history",
+        f"{scenario['name']}_net_same_top",
+        1.0 if net_cmp["top_move_same"] else 0.0,
+    )
+    results.add_diagnostic(
+        "history",
+        f"{scenario['name']}_mcts_policy_max_diff",
+        mcts_cmp["policy_max_diff"],
+    )
+    results.add_diagnostic(
+        "history",
+        f"{scenario['name']}_mcts_same_top",
+        1.0 if mcts_cmp["top_move_same"] else 0.0,
+    )
 
     # Score: penalize if there are significant differences AND different top moves
     # Small differences are expected and OK
@@ -273,13 +303,15 @@ def _test_single_scenario(network, scenario: dict, history_length: int, results:
 
     # Check if implementation works (history should produce different results than duplication)
     has_difference = (
-        net_cmp['policy_max_diff'] > 0.001 or
-        net_cmp['value_diff'] > 0.001 or
-        mcts_cmp['policy_max_diff'] > 0.001
+        net_cmp["policy_max_diff"] > 0.001
+        or net_cmp["value_diff"] > 0.001
+        or mcts_cmp["policy_max_diff"] > 0.001
     )
 
     if has_difference:
-        print(f"\n  {ok('History produces different results - implementation working!')}")
+        print(
+            f"\n  {ok('History produces different results - implementation working!')}"
+        )
     else:
         print(f"\n  {warn('No difference detected - history may not be used')}")
         score = 0.5  # Reduce score if no difference (might indicate bug)

@@ -460,9 +460,7 @@ class EvalGraph(tk.Canvas):
         self.delete("tooltip_bg")
         self._tooltip_id = None
 
-    def add_evaluation(
-        self, value: float, wdl: Optional[np.ndarray] = None
-    ) -> None:
+    def add_evaluation(self, value: float, wdl: Optional[np.ndarray] = None) -> None:
         """
         Add a new evaluation point.
 

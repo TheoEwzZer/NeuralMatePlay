@@ -101,7 +101,9 @@ Examples:
     print("=" * 60)
     print()
     print("Architecture:")
-    print(f"  Input planes:       {num_input_planes} (48 history + 24 metadata/semantic/tactical)")
+    print(
+        f"  Input planes:       {num_input_planes} (48 history + 24 metadata/semantic/tactical)"
+    )
     print(f"  Filters:            {num_filters}")
     print(f"  Residual blocks:    {num_blocks}")
     print("  Heads:              Policy, WDL, Phase, MovesLeft")

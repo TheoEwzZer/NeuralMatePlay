@@ -123,7 +123,9 @@ def test_prophylaxis(network, results: TestResults):
                 proph_str = "PROPHYLACTIC" if is_prophylactic else ""
                 color = Colors.GREEN if is_prophylactic else ""
                 end_color = Colors.ENDC if color else ""
-                print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {proph_str}{end_color}")
+                print(
+                    f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {proph_str}{end_color}"
+                )
 
         if found_at == 1:
             print(f"\n  {ok('Finds prophylactic move!')}")

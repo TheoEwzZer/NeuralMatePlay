@@ -215,13 +215,15 @@ def test_mate_in_two(network, results: TestResults):
                 move = decode_move(idx, board)
                 prob = policy[idx]
                 if move:
-                    is_mate_move = (move == mating_move)
+                    is_mate_move = move == mating_move
                     if is_mate_move and mate_found_at is None:
                         mate_found_at = i + 1
                     mate_str = "MATE!" if is_mate_move else ""
                     color = Colors.GREEN if is_mate_move else ""
                     end_color = Colors.ENDC if color else ""
-                    print(f"  {color}{i+1:<6} {move.uci():<8} {prob*100:>7.2f}% {mate_str}{end_color}")
+                    print(
+                        f"  {color}{i+1:<6} {move.uci():<8} {prob*100:>7.2f}% {mate_str}{end_color}"
+                    )
 
             # Progressive scoring based on rank
             if mate_found_at == 1:

@@ -165,7 +165,9 @@ def test_passed_pawn(network, results: TestResults):
                 exp_str = "YES" if is_expected else ""
                 color = Colors.GREEN if is_expected else ""
                 end_color = Colors.ENDC if color else ""
-                print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {exp_str}{end_color}")
+                print(
+                    f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {exp_str}{end_color}"
+                )
 
         # Progressive scoring based on rank
         if found_at == 1:

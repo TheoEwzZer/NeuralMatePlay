@@ -46,11 +46,24 @@ DEFAULT_HISTORY_LENGTH = 3
 # Center squares for control evaluation
 CENTER_SQUARES = [chess.D4, chess.D5, chess.E4, chess.E5]
 EXTENDED_CENTER = [
-    chess.C3, chess.C4, chess.C5, chess.C6,
-    chess.D3, chess.D4, chess.D5, chess.D6,
-    chess.E3, chess.E4, chess.E5, chess.E6,
-    chess.F3, chess.F4, chess.F5, chess.F6,
+    chess.C3,
+    chess.C4,
+    chess.C5,
+    chess.C6,
+    chess.D3,
+    chess.D4,
+    chess.D5,
+    chess.D6,
+    chess.E3,
+    chess.E4,
+    chess.E5,
+    chess.E6,
+    chess.F3,
+    chess.F4,
+    chess.F5,
+    chess.F6,
 ]
+
 
 def encode_board_with_history(
     boards: list[chess.Board],
@@ -71,7 +84,9 @@ def encode_board_with_history(
     history_length = DEFAULT_HISTORY_LENGTH
     num_position_planes = (history_length + 1) * PLANES_PER_POSITION  # 48
     metadata_planes = 12  # Basic metadata + attack maps
-    total_planes = num_position_planes + metadata_planes + SEMANTIC_PLANES + TACTICAL_PLANES  # 72
+    total_planes = (
+        num_position_planes + metadata_planes + SEMANTIC_PLANES + TACTICAL_PLANES
+    )  # 72
 
     planes = np.zeros((total_planes, 8, 8), dtype=np.float32)
 
@@ -325,7 +340,9 @@ def _get_king_zone(king_square: int) -> list[int]:
     return zone
 
 
-def _is_passed_pawn(pawn_sq: int, color: chess.Color, opp_pawns: chess.SquareSet) -> bool:
+def _is_passed_pawn(
+    pawn_sq: int, color: chess.Color, opp_pawns: chess.SquareSet
+) -> bool:
     """Check if a pawn is passed (no opposing pawns ahead on same or adjacent files)."""
     pawn_file = chess.square_file(pawn_sq)
     pawn_rank = chess.square_rank(pawn_sq)
@@ -398,8 +415,12 @@ def _encode_tactical_features(
 
     # Piece values for comparison
     piece_values = {
-        chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
-        chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+        chess.KING: 0,
     }
 
     # Plane 0: Pinned pieces - my pieces pinned to king
@@ -555,7 +576,12 @@ def get_num_planes(history_length: int = DEFAULT_HISTORY_LENGTH) -> int:
         Total number of planes (72 for default history_length=3).
     """
     # (history_length + 1) positions × 12 planes + 12 metadata + 8 semantic + 4 tactical
-    return (history_length + 1) * PLANES_PER_POSITION + 12 + SEMANTIC_PLANES + TACTICAL_PLANES
+    return (
+        (history_length + 1) * PLANES_PER_POSITION
+        + 12
+        + SEMANTIC_PLANES
+        + TACTICAL_PLANES
+    )
 
 
 def history_length_from_planes(num_planes: int) -> int:
