@@ -204,13 +204,34 @@ class MCTS:
                 if idx is not None:
                     policy[idx] = child.prior
         else:
-            if self.temperature > 0:
-                # Temperature > 0: use visit counts for stochastic selection
+            # Detect repetition draws to filter them in both branches
+            repetition_moves = set()
+            if root.q_value > -0.50:
                 for move, child in root.children.items():
                     if child.visit_count > 0:
+                        test_board = board.copy()
+                        test_board.push(move)
+                        if test_board.is_repetition(3):
+                            repetition_moves.add(move)
+
+            if self.temperature > 0:
+                # Temperature > 0: use visit counts for stochastic selection
+                # Exclude repetition draws (redistribute their visits)
+                for move, child in root.children.items():
+                    if child.visit_count > 0 and move not in repetition_moves:
                         idx = encode_move_from_perspective(move, flip)
                         if idx is not None:
-                            policy[idx] = child.visit_count / total_visits
+                            policy[idx] = child.visit_count
+                # Renormalize (if all moves are repetitions, fall back to all moves)
+                if policy.sum() == 0:
+                    for move, child in root.children.items():
+                        if child.visit_count > 0:
+                            idx = encode_move_from_perspective(move, flip)
+                            if idx is not None:
+                                policy[idx] = child.visit_count
+                policy_sum = policy.sum()
+                if policy_sum > 0:
+                    policy /= policy_sum
             else:
                 # Temperature 0: deterministic selection by visits
                 sorted_children = sorted(
@@ -224,9 +245,6 @@ class MCTS:
                 losing_mates = (
                     []
                 )  # (move, mate_distance, visits) - mats pour adversaire
-                repetition_draws = (
-                    []
-                )  # (move, visits) - coups menant à nulle par répétition
 
                 # Analyser chaque coup
                 for move, child in sorted_children:
@@ -237,11 +255,6 @@ class MCTS:
                     if test_board.is_checkmate():
                         winning_mates.append((move, 1))
                         continue
-
-                    # Vérifier répétition triple (nulle)
-                    if test_board.is_repetition(3):
-                        repetition_draws.append((move, child.visit_count))
-                        # Ne pas "continue" ici, on vérifie aussi les mats plus bas
 
                     # Seulement si le coup a été suffisamment exploré (évite faux positifs)
                     if child.visit_count >= 5:
@@ -276,12 +289,8 @@ class MCTS:
                     # Priorité 2: Coup le plus visité qui ne mène pas à un mat adverse
                     # NI à une nulle par répétition (si on ne perd pas gravement)
                     dominated_moves = {m for m, _, _ in losing_mates}
-
-                    # Si on ne perd pas gravement, éviter aussi les répétitions
-                    root_value = root.q_value
-                    if root_value > -0.50:
-                        repetition_moves = {m for m, _ in repetition_draws}
-                        dominated_moves = dominated_moves | repetition_moves
+                    # repetition_moves already computed above
+                    dominated_moves = dominated_moves | repetition_moves
 
                     for move, child in sorted_children:
                         if move not in dominated_moves:
