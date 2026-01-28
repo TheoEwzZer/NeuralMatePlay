@@ -87,7 +87,9 @@ def run_training(
     # Keep original PGN paths to reuse existing chunks!
     # Only modify the anti-forgetting settings
     config["pretraining"]["ewc_enabled"] = config_settings["ewc_enabled"]
-    config["pretraining"]["tactical_replay_enabled"] = config_settings["tactical_replay_enabled"]
+    config["pretraining"]["tactical_replay_enabled"] = config_settings[
+        "tactical_replay_enabled"
+    ]
 
     # Propagate EWC parameters if specified
     if "ewc_lambda" in config_settings:
@@ -123,15 +125,25 @@ def run_training(
         pgn_files = ["data/lichess_elite_2020-08.pgn"]  # Fallback
 
     # Build command
-    cmd = [
-        sys.executable, "-m", "src.pretraining.pretrain",
-        "--config", temp_config_path,
-        "--pgn",
-    ] + pgn_files + [  # Pass all PGN files to reuse existing chunks
-        "--epochs", str(epochs),
-        "--max-chunks", str(chunks),
-        "--output", model_output,
-    ]
+    cmd = (
+        [
+            sys.executable,
+            "-m",
+            "src.pretraining.pretrain",
+            "--config",
+            temp_config_path,
+            "--pgn",
+        ]
+        + pgn_files
+        + [  # Pass all PGN files to reuse existing chunks
+            "--epochs",
+            str(epochs),
+            "--max-chunks",
+            str(chunks),
+            "--output",
+            model_output,
+        ]
+    )
 
     print(f"Running: {' '.join(cmd)}\n")
 
@@ -162,8 +174,11 @@ def run_training(
 def run_diagnostic(model1_path: str, model2_path: str) -> str:
     """Run diagnostic comparison between two models."""
     cmd = [
-        sys.executable, "diagnose_network.py",
-        "-m", model1_path, model2_path,
+        sys.executable,
+        "diagnose_network.py",
+        "-m",
+        model1_path,
+        model2_path,
     ]
 
     try:
@@ -209,40 +224,32 @@ Examples:
   python test_anti_forgetting.py --chunks 50        # Quick test (50 chunks)
   python test_anti_forgetting.py --only NONE EWC    # Compare only NONE vs EWC
   python test_anti_forgetting.py --skip-training    # Only run diagnostics
-        """
+        """,
     )
     parser.add_argument(
-        "--config",
-        default="config/config.json",
-        help="Base config file path"
+        "--config", default="config/config.json", help="Base config file path"
     )
     parser.add_argument(
-        "--chunks",
-        type=int,
-        default=400,
-        help="Chunks per epoch (default: 400)"
+        "--chunks", type=int, default=400, help="Chunks per epoch (default: 400)"
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=5,
-        help="Number of epochs (default: 5)"
+        "--epochs", type=int, default=5, help="Number of epochs (default: 5)"
     )
     parser.add_argument(
         "--output-dir",
         default="models/anti_forgetting_test",
-        help="Output directory for test models"
+        help="Output directory for test models",
     )
     parser.add_argument(
         "--skip-training",
         action="store_true",
-        help="Skip training, only run diagnostics on existing models"
+        help="Skip training, only run diagnostics on existing models",
     )
     parser.add_argument(
         "--only",
         choices=list(CONFIGS.keys()),
         nargs="+",
-        help="Only run specific configs (e.g., --only NONE EWC)"
+        help="Only run specific configs (e.g., --only NONE EWC)",
     )
     args = parser.parse_args()
 
@@ -318,7 +325,16 @@ Examples:
 
         # Print relevant lines
         for line in output.split("\n"):
-            if any(x in line for x in ["WEIGHTED AVG", "WEIGHTED WINS", "Mate in 1", "Tactics", "Material"]):
+            if any(
+                x in line
+                for x in [
+                    "WEIGHTED AVG",
+                    "WEIGHTED WINS",
+                    "Mate in 1",
+                    "Tactics",
+                    "Material",
+                ]
+            ):
                 print(line)
 
         results[config_name] = extract_summary(output)
@@ -342,12 +358,12 @@ Examples:
             wins = summary.get("weighted_wins", "N/A")
             print(f"{config_name:<10} vs {baseline:<8} {str(avg):<15} {wins}")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("To run full comparison manually:")
     if len(trained_models) >= 2:
         models_list = list(trained_models.values())
         print(f"  python diagnose_network.py -m {models_list[0]} {models_list[1]}")
-    print("="*60)
+    print("=" * 60)
 
     return 0
 
