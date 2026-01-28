@@ -352,6 +352,36 @@ class TacticalReplayBuffer:
         self._chunk_cache_idx = end_idx
         return batch
 
+    def save(self, path: str) -> None:
+        """Save replay buffer to disk."""
+        if self._size == 0:
+            return
+        np.savez_compressed(
+            path,
+            states=self.states[:self._size],
+            policies=self.policies[:self._size],
+            values=self.values[:self._size],
+            weights=self.weights[:self._size],
+        )
+
+    def load(self, path: str) -> bool:
+        """Load replay buffer from disk. Returns True if loaded."""
+        if not os.path.exists(path):
+            return False
+        try:
+            data = np.load(path)
+            n = len(data["states"])
+            n = min(n, self.capacity)
+            self.states[:n] = data["states"][:n]
+            self.policies[:n] = data["policies"][:n]
+            self.values[:n] = data["values"][:n]
+            self.weights[:n] = data["weights"][:n]
+            self._size = n
+            return True
+        except Exception as e:
+            print(f"  WARNING: Failed to load replay buffer: {e}")
+            return False
+
     def __len__(self) -> int:
         return self._size
 
@@ -760,6 +790,9 @@ class StreamingTrainer:
         self.ewc_path = os.path.join(
             os.path.dirname(output_path) or "models", "ewc_state.pt"
         )
+        self.replay_buffer_path = os.path.join(
+            os.path.dirname(output_path) or "models", "replay_buffer.npz"
+        )
         self.chunks_dir = chunks_dir
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -1027,6 +1060,10 @@ class StreamingTrainer:
             positions_per_chunk = self.tactical_replay_buffer.positions_per_chunk
             print(f"Replay Buffer: {self.tactical_replay_capacity:,} capacity, {positions_per_chunk} positions/chunk")
 
+            # Load replay buffer from disk if available
+            if self.tactical_replay_buffer.load(self.replay_buffer_path):
+                print(f"Loaded replay buffer from: {self.replay_buffer_path} ({len(self.tactical_replay_buffer):,} positions)")
+
         # Move teacher network to device if enabled
         if self.teacher_enabled and self.teacher_network is not None:
             self.teacher_network.to(self.device)
@@ -1197,6 +1234,15 @@ class StreamingTrainer:
                 print(
                     f"  No improvement ({self.epochs_without_improvement}/{self.patience})"
                 )
+
+            # Save replay buffer to disk
+            if (
+                self.tactical_replay_enabled
+                and self.tactical_replay_buffer is not None
+                and len(self.tactical_replay_buffer) > 0
+            ):
+                self.tactical_replay_buffer.save(self.replay_buffer_path)
+                print(f"  Replay buffer saved: {len(self.tactical_replay_buffer):,} positions")
 
             print()
 

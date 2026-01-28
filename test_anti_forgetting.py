@@ -104,11 +104,12 @@ def run_training(
     # Save temp config
     os.makedirs(output_dir, exist_ok=True)
 
-    # Clean up any existing EWC state to prevent cross-test contamination
-    ewc_path = os.path.join(output_dir, "ewc_state.pt")
-    if os.path.exists(ewc_path):
-        os.remove(ewc_path)
-        print(f"  Cleaned up existing EWC state: {ewc_path}")
+    # Clean up any existing state to prevent cross-test contamination
+    for state_file in ["ewc_state.pt", "replay_buffer.npz"]:
+        state_path = os.path.join(output_dir, state_file)
+        if os.path.exists(state_path):
+            os.remove(state_path)
+            print(f"  Cleaned up: {state_path}")
 
     temp_config_path = os.path.join(output_dir, f"config_{config_name.lower()}.json")
     save_config(config, temp_config_path)
