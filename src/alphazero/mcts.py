@@ -49,12 +49,11 @@ class MCTSNode:
 
     @property
     def q_value(self) -> float:
-        """Q(s, a) = W(s, a) / N(s, a) - mean value, clamped to [-1, 1]."""
+        """Q(s, a) = W(s, a) / N(s, a) - mean value"""
         if self.visit_count == 0:
             return 0.0
-        # Clamp to avoid numerical drift beyond valid range
-        raw_q: float = self.total_value / self.visit_count
-        return max(-1.0, min(1.0, raw_q))
+
+        return self.total_value / self.visit_count
 
     @property
     def wdl(self) -> np.ndarray:
@@ -222,8 +221,12 @@ class MCTS:
 
                 best_move = None
                 winning_mates = []  # (move, mate_distance) - mats pour nous
-                losing_mates = []   # (move, mate_distance, visits) - mats pour adversaire
-                repetition_draws = []  # (move, visits) - coups menant à nulle par répétition
+                losing_mates = (
+                    []
+                )  # (move, mate_distance, visits) - mats pour adversaire
+                repetition_draws = (
+                    []
+                )  # (move, visits) - coups menant à nulle par répétition
 
                 # Analyser chaque coup
                 for move, child in sorted_children:
@@ -244,7 +247,11 @@ class MCTS:
                     if child.visit_count >= 5:
                         # Mat plus profond pour nous ? (via MCTS tree)
                         our_mate = self._find_forced_mate(
-                            child, test_board, is_our_turn=False, our_moves=0, max_our_moves=5
+                            child,
+                            test_board,
+                            is_our_turn=False,
+                            our_moves=0,
+                            max_our_moves=5,
                         )
                         if our_mate is not None:
                             winning_mates.append((move, our_mate))
@@ -252,7 +259,11 @@ class MCTS:
 
                         # Mat pour l'adversaire ? (à éviter)
                         opp_mate = self._find_forced_mate(
-                            child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                            child,
+                            test_board,
+                            is_our_turn=True,
+                            our_moves=0,
+                            max_our_moves=5,
                         )
                         if opp_mate is not None:
                             losing_mates.append((move, opp_mate, child.visit_count))
@@ -440,7 +451,9 @@ class MCTS:
         board: chess.Board,
         root: MCTSNode,
         root_board: chess.Board,
-    ) -> tuple[list[tuple[chess.Move | None, MCTSNode]], chess.Board, bool, list[chess.Board]]:
+    ) -> tuple[
+        list[tuple[chess.Move | None, MCTSNode]], chess.Board, bool, list[chess.Board]
+    ]:
         """
         Traverse tree to a leaf node, applying virtual losses.
 
@@ -463,7 +476,9 @@ class MCTS:
         # history_boards will be [current, T-1, T-2, ...] at the end
         # Take the LAST history_length positions and reverse to get [T-1, T-2, T-3] order
         if self._initial_history:
-            recent_history = list(reversed(self._initial_history[-self.history_length:]))
+            recent_history = list(
+                reversed(self._initial_history[-self.history_length :])
+            )
         else:
             recent_history = []
         history_boards = [root_board.copy()] + recent_history
@@ -491,7 +506,7 @@ class MCTS:
             node = child
 
             # Update history: new position becomes current, shift others
-            history_boards = [board.copy()] + history_boards[:self.history_length]
+            history_boards = [board.copy()] + history_boards[: self.history_length]
 
         # Check if terminal at leaf
         is_terminal = board.is_game_over()
@@ -560,7 +575,8 @@ class MCTS:
         if node.is_expanded:
             return
 
-        # Store initial value and WDL (visit_count will be set by backpropagation)
+        # Store initial value and WDL (visit_count=1 so backprop yields correct average)
+        node.visit_count = 1
         node.total_value = value
         node.total_wdl = wdl.copy()
 
@@ -621,7 +637,9 @@ class MCTS:
                     board_copy, root, board
                 )
                 leaf_node = path[-1][1]
-                pending_leaves.append((path, leaf_board, leaf_node, is_terminal, history))
+                pending_leaves.append(
+                    (path, leaf_board, leaf_node, is_terminal, history)
+                )
 
             # Separate terminal, already expanded, and new leaves
             terminal_leaves = []
@@ -680,8 +698,12 @@ class MCTS:
                         if len(history) < self.history_length + 1:
                             # Pad with oldest position (or current if no history)
                             pad_board = history[-1] if history else leaf_board
-                            history = history + [pad_board] * (self.history_length + 1 - len(history))
-                        state = encode_board_with_history(history, from_perspective=True)
+                            history = history + [pad_board] * (
+                                self.history_length + 1 - len(history)
+                            )
+                        state = encode_board_with_history(
+                            history, from_perspective=True
+                        )
                         to_evaluate.append((i, state, leaf_board))
 
                 # Batch evaluate uncached positions
@@ -778,7 +800,7 @@ class MCTS:
             if self.uncertainty_weight > 0.0 and child.visit_count > 0:
                 # uncertainty = sqrt(W * L), maximized when position is sharp
                 uncertainty = math.sqrt(child.wdl[0] * child.wdl[2])
-                u *= (1.0 + self.uncertainty_weight * uncertainty)
+                u *= 1.0 + self.uncertainty_weight * uncertainty
 
             score = q + u
 
@@ -817,7 +839,9 @@ class MCTS:
                 # Build history from initial_history (for root node)
                 # Take the LAST history_length positions and reverse to get [T-1, T-2, T-3] order
                 if self._initial_history:
-                    recent_history = list(reversed(self._initial_history[-self.history_length:]))
+                    recent_history = list(
+                        reversed(self._initial_history[-self.history_length :])
+                    )
                 else:
                     recent_history = []
                 history_boards = [board] + recent_history
@@ -1206,7 +1230,11 @@ class MCTS:
                 # Check if OPPONENT has a forced mate (bad for us)
                 if our_mate_in is None:
                     opponent_mate_in = self._find_forced_mate(
-                        child, test_board, is_our_turn=True, our_moves=0, max_our_moves=5
+                        child,
+                        test_board,
+                        is_our_turn=True,
+                        our_moves=0,
+                        max_our_moves=5,
                     )
 
             stats.append(
