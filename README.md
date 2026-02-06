@@ -9,6 +9,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
+**[:fr: Version française disponible ici](README_FRENCH.md)**
+
 _Combining supervised pretraining on master-level games with AlphaZero-style self-play reinforcement learning, using a SE-ResNet architecture with spatial attention and Win/Draw/Loss value estimation._
 
 **How it works in a nutshell**: The engine first learns chess by studying thousands of games played by strong human players (pretraining), then improves further by playing millions of games against itself (self-play). A neural network evaluates board positions and a tree search algorithm explores possible moves to find the best one.
