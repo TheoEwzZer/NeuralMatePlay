@@ -58,6 +58,7 @@ _Combining supervised pretraining on master-level games with AlphaZero-style sel
   - [Loss Functions](#loss-functions)
 - [Monte Carlo Tree Search](#monte-carlo-tree-search)
   - [PUCT Selection](#puct-selection)
+  - [Q-Value](#q-value)
   - [MCTS Features](#mcts-features)
   - [WDL-Aware Enhancements](#wdl-aware-enhancements)
 - [Anti-Forgetting System](#anti-forgetting-system)

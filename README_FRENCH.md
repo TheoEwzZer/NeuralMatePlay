@@ -58,6 +58,7 @@ _Combinant un pré-entraînement supervisé sur des parties de niveau maître av
   - [Fonctions de perte](#fonctions-de-perte)
 - [Monte Carlo Tree Search](#monte-carlo-tree-search)
   - [Sélection PUCT](#sélection-puct)
+  - [Q-Value](#q-value)
   - [Fonctionnalités MCTS](#fonctionnalités-mcts)
   - [Améliorations tenant compte du WDL](#améliorations-tenant-compte-du-wdl)
 - [Système anti-oubli](#système-anti-oubli)
