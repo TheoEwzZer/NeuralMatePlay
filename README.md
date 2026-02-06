@@ -342,6 +342,34 @@ Where:
 - `N(s, a)` = child visit count -- how many times this specific move has been explored
 - `c_puct = 1.5` = exploration constant -- higher values make the engine explore more broadly; lower values make it focus on the best-looking moves
 
+### Q-Value
+
+The **Q-value** (Quality value) is the central metric used by MCTS to evaluate how good a move is. It represents the **average evaluation** of all simulations that passed through a given move -- essentially, "based on everything we've explored so far, how promising does this move look?"
+
+**How Q-value is computed:**
+
+1. When the neural network evaluates a position, it outputs WDL probabilities: `[P(Win), P(Draw), P(Loss)]`
+2. These are converted into a single scalar value: `V = P(Win) - P(Loss)`, ranging from -1 (certain loss) to +1 (certain win). A value of 0 means the position is balanced (either likely drawn or equally volatile)
+3. As MCTS runs simulations, each node accumulates the values from all simulations that passed through it
+4. The Q-value is the **running average**: `Q(s, a) = W(s, a) / N(s, a)` where `W` is the sum of all backpropagated values and `N` is the visit count
+
+```mermaid
+graph TD
+    NN["Neural Network"] --> WDL["WDL<br/>[P(Win), P(Draw), P(Loss)]"]
+    WDL --> V["Value = P(Win) - P(Loss)<br/>single scalar in [-1, +1]"]
+    V --> Back["Backpropagated through tree<br/>flipped at each level<br/>(my win = opponent's loss)"]
+    Back --> Q["Q(s, a) = sum(values) / visits<br/>running average per move"]
+
+    style NN fill:#e1f5fe
+    style WDL fill:#fff3e0
+    style V fill:#c8e6c9
+    style Q fill:#f3e5f5
+```
+
+**Why Q-value matters:** In the PUCT formula, Q-value is the **exploitation** term -- it pulls the search toward moves that have historically led to good outcomes. A move with Q = +0.3 has led to favorable positions on average, while Q = -0.2 suggests the move tends to lead to trouble. The UI displays Q-values for each candidate move, color-coded green (positive, good for the engine) or red (negative, bad for the engine).
+
+**Sign convention:** Because MCTS alternates between players at each tree level, the value is **negated** at each backpropagation step -- a position that is good for White (V = +0.5) is bad for Black (V = -0.5). This ensures Q-values are always from the perspective of the player making the move.
+
 ### MCTS Features
 
 | Feature                   | Description                                                                                                                                                                      |

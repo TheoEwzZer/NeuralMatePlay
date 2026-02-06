@@ -342,6 +342,34 @@ Où :
 - `N(s, a)` = nombre de visites de l'enfant -- combien de fois ce coup spécifique a été exploré
 - `c_puct = 1.5` = constante d'exploration -- des valeurs plus élevées font explorer le moteur plus largement ; des valeurs plus basses le font se concentrer sur les coups les plus prometteurs
 
+### Q-Value
+
+La **Q-value** (valeur de Qualité) est la métrique centrale utilisée par MCTS pour évaluer la qualité d'un coup. Elle représente l'**évaluation moyenne** de toutes les simulations passées par un coup donné -- essentiellement, "d'après tout ce que nous avons exploré jusqu'ici, à quel point ce coup est-il prometteur ?"
+
+**Comment la Q-value est calculée :**
+
+1. Quand le réseau de neurones évalue une position, il produit des probabilités WDL : `[P(Victoire), P(Nulle), P(Défaite)]`
+2. Celles-ci sont converties en une valeur scalaire unique : `V = P(Victoire) - P(Défaite)`, allant de -1 (défaite certaine) à +1 (victoire certaine). Une valeur de 0 signifie que la position est équilibrée (soit probablement nulle, soit également volatile)
+3. Au fil des simulations MCTS, chaque nœud accumule les valeurs de toutes les simulations qui l'ont traversé
+4. La Q-value est la **moyenne glissante** : `Q(s, a) = W(s, a) / N(s, a)` où `W` est la somme de toutes les valeurs rétropropagées et `N` est le nombre de visites
+
+```mermaid
+graph TD
+    NN["Réseau de neurones"] --> WDL["WDL<br/>[P(Victoire), P(Nulle), P(Défaite)]"]
+    WDL --> V["Valeur = P(Victoire) - P(Défaite)<br/>scalaire unique dans [-1, +1]"]
+    V --> Back["Rétropropagée dans l'arbre<br/>inversée à chaque niveau<br/>(ma victoire = défaite de l'adversaire)"]
+    Back --> Q["Q(s, a) = somme(valeurs) / visites<br/>moyenne glissante par coup"]
+
+    style NN fill:#e1f5fe
+    style WDL fill:#fff3e0
+    style V fill:#c8e6c9
+    style Q fill:#f3e5f5
+```
+
+**Pourquoi la Q-value est importante :** Dans la formule PUCT, la Q-value est le terme d'**exploitation** -- elle attire la recherche vers les coups qui ont historiquement mené à de bons résultats. Un coup avec Q = +0,3 a mené en moyenne à des positions favorables, tandis que Q = -0,2 suggère que le coup tend à mener à des difficultés. L'interface affiche les Q-values pour chaque coup candidat, colorées en vert (positif, bon pour le moteur) ou en rouge (négatif, mauvais pour le moteur).
+
+**Convention de signe :** Comme MCTS alterne entre les joueurs à chaque niveau de l'arbre, la valeur est **inversée** à chaque étape de rétropropagation -- une position bonne pour les Blancs (V = +0,5) est mauvaise pour les Noirs (V = -0,5). Cela garantit que les Q-values sont toujours du point de vue du joueur qui fait le coup.
+
 ### Fonctionnalités MCTS
 
 | Fonctionnalité               | Description                                                                                                                                                                                                       |
