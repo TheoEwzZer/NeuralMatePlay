@@ -71,6 +71,7 @@ _Combinant un pré-entraînement supervisé sur des parties de niveau maître av
   - [Visualiseur de matchs](#visualiseur-de-matchs)
 - [Démarrage rapide](#démarrage-rapide)
   - [Prérequis](#prérequis)
+  - [Télécharger le modèle pré-entraîné](#télécharger-le-modèle-pré-entraîné)
   - [Installation](#installation)
   - [Premiers pas](#premiers-pas)
 - [Configuration](#configuration)
@@ -534,6 +535,12 @@ L'application de match (`python -m src.ui.match_app`) permet de regarder deux r�
 | h5py         | >= 3.8.0  | Stockage de morceaux HDF5 pour le pré-entraînement |
 | Pillow       | >= 10.0.0 | Traitement d'images pour l'interface               |
 | tkinter      | (inclus)  | Framework d'interface graphique                    |
+
+### Télécharger le modèle pré-entraîné
+
+Un réseau pré-entraîné (entraîné sur des parties de niveau maître classées 2200+ Elo) est disponible au téléchargement :
+
+**[Télécharger `pretrained_network.pt` (71 Mo) depuis GitHub Releases](https://github.com/TheoEwzZer/NeuralMatePlay/releases/latest)**
 
 ### Installation
 

@@ -73,6 +73,7 @@ _Combining supervised pretraining on master-level games with AlphaZero-style sel
   - [Match Viewer](#match-viewer)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
+  - [Download Pretrained Model](#download-pretrained-model)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -536,6 +537,12 @@ The match application (`python -m src.ui.match_app`) enables watching two networ
 | h5py         | >= 3.8.0  | HDF5 chunk storage for pretraining        |
 | Pillow       | >= 10.0.0 | Image processing for UI                   |
 | tkinter      | (bundled) | GUI framework                             |
+
+### Download Pretrained Model
+
+A pretrained network (trained on master-level games rated 2200+ Elo) is available for download:
+
+**[Download `pretrained_network.pt` (71 MB) from GitHub Releases](https://github.com/TheoEwzZer/NeuralMatePlay/releases/latest)**
 
 ### Installation
 
