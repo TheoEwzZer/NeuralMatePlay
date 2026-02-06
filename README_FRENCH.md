@@ -15,6 +15,14 @@ _Combinant un pré-entraînement supervisé sur des parties de niveau maître av
 
 </div>
 
+<div align="center">
+
+![Interface NeuralMatePlay -- L'IA gagne par échec et mat avec Qg4#](assets/example.png)
+
+*Interface de jeu montrant un échec et mat délivré par l'IA (Noirs) avec Qg4#, avec l'analyse MCTS, l'arbre de recherche, le graphe d'évaluation et l'historique des coups.*
+
+</div>
+
 ---
 
 ## Résumé

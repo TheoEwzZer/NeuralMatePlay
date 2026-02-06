@@ -15,6 +15,14 @@ _Combining supervised pretraining on master-level games with AlphaZero-style sel
 
 </div>
 
+<div align="center">
+
+![NeuralMatePlay GUI -- AI wins by checkmate with Qg4#](assets/example.png)
+
+*Game UI showing a checkmate delivered by the AI (Black) with Qg4#, with MCTS analysis, search tree, evaluation graph and move history.*
+
+</div>
+
 ---
 
 ## Abstract
