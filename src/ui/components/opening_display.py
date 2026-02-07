@@ -14,7 +14,7 @@ try:
 except ImportError:
     from src.ui.styles import COLORS, FONTS
 
-ECO_OPENINGS: Dict[str, Dict[str, str]] = {
+ECO_OPENINGS: dict[str, Dict[str, str]] = {
     # A - Volume A
     "b4": {"eco": "A00", "name": "Polish (Sokolsky) opening"},
     "g3": {"eco": "A00", "name": "Benko's opening"},
@@ -725,7 +725,7 @@ class OpeningDisplay(tk.Frame):
             highlightthickness=1,
         )
 
-        self._current_opening: Optional[Dict[str, str]] = None
+        self._current_opening: Optional[dict[str, str]] = None
         self._in_book = True
 
         self._create_widgets(bg)
@@ -813,7 +813,7 @@ class OpeningDisplay(tk.Frame):
 
         return " ".join(moves)
 
-    def _lookup_opening(self, move_string: str) -> Optional[Dict[str, str]]:
+    def _lookup_opening(self, move_string: str) -> Optional[dict[str, str]]:
         """
         Look up opening from move sequence.
 
@@ -855,7 +855,7 @@ class OpeningDisplay(tk.Frame):
         self._current_opening = None
         self._in_book = True
 
-    def get_current_opening(self) -> Optional[Dict[str, str]]:
+    def get_current_opening(self) -> Optional[dict[str, str]]:
         """Get the current opening info."""
         return self._current_opening
 

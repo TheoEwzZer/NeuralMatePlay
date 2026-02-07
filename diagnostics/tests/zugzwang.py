@@ -1,5 +1,9 @@
 """Test: Zugzwang Recognition."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -13,9 +17,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Zugzwang positions - any move loses
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === KING AND PAWN ZUGZWANGS ===
     {
         "name": "Basic King Zugzwang",
@@ -71,18 +78,20 @@ TEST_POSITIONS = [
 ]
 
 
-def test_zugzwang(network, results: TestResults):
+def test_zugzwang(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network recognizes zugzwang positions."""
     print(header("TEST: Zugzwang Recognition"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
         # In zugzwang, the side to move is at disadvantage
@@ -118,7 +127,7 @@ def test_zugzwang(network, results: TestResults):
             or (not test["side_to_move_disadvantage"] and value >= -0.1),
         )
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("zugzwang", "total_tested", total)
     results.add_diagnostic("zugzwang", "correct", passed)
     results.add("Zugzwang", score >= 0.4, score, 1.0)

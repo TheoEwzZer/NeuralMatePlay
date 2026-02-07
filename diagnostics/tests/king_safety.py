@@ -1,5 +1,9 @@
 """Test: King Safety."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -14,9 +18,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for king safety evaluation
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === SAFE VS UNSAFE KING ===
     {
         "name": "Castled King (Safe)",
@@ -86,33 +93,35 @@ TEST_POSITIONS = [
 ]
 
 
-def test_king_safety(network, results: TestResults):
+def test_king_safety(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network evaluates king safety correctly."""
     print(header("TEST: King Safety"))
 
-    passed = 0
-    total = 0
+    passed: float = 0
+    total: int = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
         # Check if it's a move test or evaluation test
         if "expected_moves" in test:
             total += 1
-            top_5 = np.argsort(policy)[::-1][:5]
+            top_5: np.ndarray = np.argsort(policy)[::-1][:5]
 
             print(f"\n  Value: {value:+.4f}")
             print(f"  Expected: {test['expected_moves']}")
 
-            found_at = None
-            expected_set = set(test["expected_moves"])
+            found_at: int | None = None
+            expected_set: set[str] = set(test["expected_moves"])
 
             for i, idx in enumerate(top_5):
-                move = decode_move(idx, board)
+                move: chess.Move | None = decode_move(idx, board)
                 if move and move.uci() in expected_set:
                     found_at = i + 1
                     break
@@ -131,7 +140,7 @@ def test_king_safety(network, results: TestResults):
         else:
             # Evaluation test - progressive scoring
             total += 1
-            expected = test["expected_eval"]
+            expected: str = test["expected_eval"]
 
             print(f"\n  Value: {value:+.4f} (expected: {expected})")
 
@@ -171,7 +180,7 @@ def test_king_safety(network, results: TestResults):
 
             results.add_diagnostic("king_safety", f"{test['name']}_value", float(value))
 
-    score = passed / total if total > 0 else 0
+    score: float = passed / total if total > 0 else 0
     results.add_diagnostic("king_safety", "total_tested", total)
     results.add_diagnostic("king_safety", "correct", passed)
     results.add("King Safety", score >= 0.5, score, 1.0)

@@ -1,5 +1,9 @@
 """Test: Trapped Pieces Recognition."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions with trapped pieces
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === TRAPPED BISHOP ===
     {
         "name": "Trapped Bishop h7",
@@ -96,41 +103,43 @@ TEST_POSITIONS = [
 ]
 
 
-def test_trapped_pieces(network, results: TestResults):
+def test_trapped_pieces(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network recognizes trapped pieces."""
     print(header("TEST: Trapped Pieces"))
 
-    passed = 0
-    total = 0
+    passed: float = 0
+    total: int = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
         if test["trap_type"] == "move":
             total += 1
-            top_5 = np.argsort(policy)[::-1][:5]
-            expected_set = set(test["expected_moves"])
+            top_5: np.ndarray = np.argsort(policy)[::-1][:5]
+            expected_set: set[str] = set(test["expected_moves"])
 
             print(f"\n  Value: {value:+.4f}")
             print(f"  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Traps?':<10}")
             print("  " + "-" * 35)
 
-            found_at = None
+            found_at: int | None = None
             for i, idx in enumerate(top_5):
-                move = decode_move(idx, board)
-                prob = policy[idx]
+                move: chess.Move | None = decode_move(idx, board)
+                prob: float = policy[idx]
                 if move:
-                    uci = move.uci()
-                    is_trap = uci in expected_set
+                    uci: str = move.uci()
+                    is_trap: bool = uci in expected_set
                     if is_trap and found_at is None:
                         found_at = i + 1
-                    trap_str = "TRAP!" if is_trap else ""
-                    color = Colors.GREEN if is_trap else ""
-                    end_color = Colors.ENDC if color else ""
+                    trap_str: str = "TRAP!" if is_trap else ""
+                    color: str = Colors.GREEN if is_trap else ""
+                    end_color: str = Colors.ENDC if color else ""
                     print(
                         f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {trap_str}{end_color}"
                     )
@@ -148,7 +157,7 @@ def test_trapped_pieces(network, results: TestResults):
 
         else:  # evaluation
             total += 1
-            expected = test["expected_eval"]
+            expected: str = test["expected_eval"]
             print(f"\n  Value: {value:+.4f} (expected: {expected})")
 
             if expected == "positive" and value > 0.0:
@@ -168,7 +177,7 @@ def test_trapped_pieces(network, results: TestResults):
                 "trapped_pieces", f"{test['name']}_value", float(value)
             )
 
-    score = passed / total if total > 0 else 0
+    score: float = passed / total if total > 0 else 0
     results.add_diagnostic("trapped_pieces", "total_tested", total)
     results.add_diagnostic("trapped_pieces", "correct", passed)
     results.add("Trapped Pieces", score >= 0.4, score, 1.0)

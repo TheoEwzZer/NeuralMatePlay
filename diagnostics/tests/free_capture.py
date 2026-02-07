@@ -1,5 +1,9 @@
 """Test: Free Piece Capture."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,12 +19,15 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_free_capture(network, results: TestResults):
+
+def test_free_capture(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the network captures free pieces."""
     print(header("TEST: Free Piece Capture"))
 
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === HANGING PIECES (4 - various piece types) ===
         {
             "name": "Hanging Queen",
@@ -112,15 +119,15 @@ def test_free_capture(network, results: TestResults):
         },
     ]
 
-    passed = 0
-    total_details = []
+    passed: float = 0
+    total_details: list[dict[str, Any]] = []
 
     for test in test_positions:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(test["name"]))
 
         # Find captures of the target piece
-        capture_moves = []
+        capture_moves: list[chess.Move] = []
         for move in board.legal_moves:
             if move.to_square == test["target_square"] and board.is_capture(move):
                 capture_moves.append(move)
@@ -131,15 +138,17 @@ def test_free_capture(network, results: TestResults):
         print(f"  Capturing moves available: {[m.uci() for m in capture_moves]}")
 
         # Get network's prediction (with proper perspective handling)
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
         # Analyze policy distribution
-        top_indices = np.argsort(policy)[::-1][:10]
-        top_probs = [policy[idx] for idx in top_indices]
+        top_indices: np.ndarray = np.argsort(policy)[::-1][:10]
+        top_probs: list[float] = [policy[idx] for idx in top_indices]
 
         # Value head: should be POSITIVE (white has free material to capture)
         # Higher = more confident white is winning. Expected: +0.3 to +0.9 depending on piece value
-        value_assessment = ""
+        value_assessment: str = ""
         if value > 0.3:
             value_assessment = (
                 f"{Colors.GREEN}(Good: correctly sees advantage){Colors.ENDC}"
@@ -158,12 +167,12 @@ def test_free_capture(network, results: TestResults):
         )
 
         with np.errstate(divide="ignore", invalid="ignore"):
-            policy_safe = np.maximum(policy, 1e-10)
-            entropy = -np.nansum(policy_safe * np.log(policy_safe))
+            policy_safe: np.ndarray = np.maximum(policy, 1e-10)
+            entropy: float = -np.nansum(policy_safe * np.log(policy_safe))
 
         # Policy entropy: should be LOW (network should be confident about the capture)
         # Low entropy (~0-2) = confident, High entropy (>4) = uncertain/spread out
-        entropy_assessment = ""
+        entropy_assessment: str = ""
         if entropy < 2.0:
             entropy_assessment = f"{Colors.GREEN}(Good: confident/focused){Colors.ENDC}"
         elif entropy < 3.5:
@@ -182,9 +191,9 @@ def test_free_capture(network, results: TestResults):
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Type':<15}")
         print("  " + "-" * 45)
 
-        found_capture = False
-        capture_rank = None
-        capture_prob = None
+        found_capture: bool = False
+        capture_rank: int | None = None
+        capture_prob: float | None = None
 
         for i, idx in enumerate(top_indices):
             move = decode_move(idx, board)
@@ -207,7 +216,7 @@ def test_free_capture(network, results: TestResults):
                     print(f"  {i+1:<6} {move.uci():<8} {prob*100:>7.2f}% {move_type}")
 
         # Detailed analysis
-        detail = {
+        detail: dict[str, Any] = {
             "position": test["name"],
             "piece": chess.piece_name(test["target_piece"]),
             "value": test["piece_value"],
@@ -264,11 +273,15 @@ def test_free_capture(network, results: TestResults):
     # Summary statistics
     print(subheader("Capture Test Summary"))
 
-    capture_ranks = [d["capture_rank"] for d in total_details if d["capture_rank"]]
-    capture_probs = [d["capture_prob"] for d in total_details if d["capture_prob"]]
+    capture_ranks: list[int] = [
+        d["capture_rank"] for d in total_details if d["capture_rank"]
+    ]
+    capture_probs: list[float] = [
+        d["capture_prob"] for d in total_details if d["capture_prob"]
+    ]
 
-    avg_capture_rank = np.mean(capture_ranks) if capture_ranks else float("nan")
-    avg_capture_prob = np.mean(capture_probs) if capture_probs else 0.0
+    avg_capture_rank: float = np.mean(capture_ranks) if capture_ranks else float("nan")
+    avg_capture_prob: float = np.mean(capture_probs) if capture_probs else 0.0
 
     print(f"  Positions tested:     {len(test_positions)}")
     print(f"  Captures prioritized: {passed}/{len(test_positions)}")
@@ -292,7 +305,7 @@ def test_free_capture(network, results: TestResults):
             "free_capture", f"{d['position']}_value_eval", d["value_eval"]
         )
 
-    score = passed / len(test_positions)
+    score: float = passed / len(test_positions)
     results.add("Free Capture", passed == len(test_positions), score, 1.0)
 
     if score < 1.0:

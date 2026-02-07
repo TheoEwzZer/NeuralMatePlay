@@ -19,7 +19,7 @@ from typing import Optional
 
 
 # Piece type to plane offset mapping
-PIECE_TO_PLANE = {
+PIECE_TO_PLANE: dict[chess.PieceType, int] = {
     chess.PAWN: 0,
     chess.KNIGHT: 1,
     chess.BISHOP: 2,
@@ -44,8 +44,8 @@ TACTICAL_PLANES = 4
 DEFAULT_HISTORY_LENGTH = 3
 
 # Center squares for control evaluation
-CENTER_SQUARES = [chess.D4, chess.D5, chess.E4, chess.E5]
-EXTENDED_CENTER = [
+CENTER_SQUARES: list[chess.Square] = [chess.D4, chess.D5, chess.E4, chess.E5]
+EXTENDED_CENTER: list[chess.Square] = [
     chess.C3,
     chess.C4,
     chess.C5,
@@ -81,37 +81,39 @@ def encode_board_with_history(
     Returns:
         numpy array of shape (72, 8, 8).
     """
-    history_length = DEFAULT_HISTORY_LENGTH
-    num_position_planes = (history_length + 1) * PLANES_PER_POSITION  # 48
-    metadata_planes = 12  # Basic metadata + attack maps
-    total_planes = (
+    history_length: int = DEFAULT_HISTORY_LENGTH
+    num_position_planes: int = (history_length + 1) * PLANES_PER_POSITION  # 48
+    # Basic metadata + attack maps
+    metadata_planes: int = 12
+    total_planes: int = (
         num_position_planes + metadata_planes + SEMANTIC_PLANES + TACTICAL_PLANES
     )  # 72
 
-    planes = np.zeros((total_planes, 8, 8), dtype=np.float32)
+    planes: np.ndarray = np.zeros((total_planes, 8, 8), dtype=np.float32)
 
-    current_board = boards[0] if boards else chess.Board()
-    flip = from_perspective and current_board.turn == chess.BLACK
+    current_board: chess.Board = boards[0] if boards else chess.Board()
+    flip: bool = from_perspective and current_board.turn == chess.BLACK
 
     # Encode each position in history
     for i, board in enumerate(boards[: history_length + 1]):
-        plane_offset = i * PLANES_PER_POSITION
+        plane_offset: int = i * PLANES_PER_POSITION
         _encode_pieces(board, planes, plane_offset, flip=flip)
 
     # Zero-fill missing history
     for i in range(len(boards), history_length + 1):
-        pass  # Already zeros
+        # Already zeros
+        pass
 
     # Encode metadata (planes 48-59)
-    metadata_offset = num_position_planes  # 48
+    metadata_offset: int = num_position_planes  # 48
     _encode_metadata_54(current_board, planes, metadata_offset, flip=flip)
 
     # Encode semantic features (planes 60-67)
-    semantic_offset = num_position_planes + metadata_planes  # 60
+    semantic_offset: int = num_position_planes + metadata_planes  # 60
     _encode_semantic_features(current_board, planes, semantic_offset, flip=flip)
 
     # Encode tactical features (planes 68-71)
-    tactical_offset = semantic_offset + SEMANTIC_PLANES  # 68
+    tactical_offset: int = semantic_offset + SEMANTIC_PLANES  # 68
     _encode_tactical_features(current_board, planes, tactical_offset, flip=flip)
 
     return planes
@@ -136,31 +138,32 @@ def _encode_pieces(
         flip: Whether to flip perspective (for black).
     """
     # Iterate by piece type and color (faster than checking all 64 squares)
-    for piece_type in range(1, 7):  # PAWN=1 to KING=6
-        piece_plane = PIECE_TO_PLANE[piece_type]
+    # PAWN=1 to KING=6
+    for piece_type in range(1, 7):
+        piece_plane: int = PIECE_TO_PLANE[piece_type]
 
         for color in [chess.WHITE, chess.BLACK]:
             # Get all squares with this piece type and color (bitboard operation)
-            squares = board.pieces(piece_type, color)
+            squares: chess.SquareSet = board.pieces(piece_type, color)
             if not squares:
                 continue
 
             # Determine plane index based on color and flip
             if flip:
                 # When flipped, swap colors for plane assignment
-                display_color = not color
+                display_color: bool = not color
             else:
                 display_color = color
 
             if display_color == chess.WHITE:
-                plane_idx = offset + piece_plane
+                plane_idx: int = offset + piece_plane
             else:
                 plane_idx = offset + 6 + piece_plane
 
             # Set bits for all pieces of this type/color
             for square in squares:
-                file_idx = chess.square_file(square)
-                rank_idx = chess.square_rank(square)
+                file_idx: int = chess.square_file(square)
+                rank_idx: int = chess.square_rank(square)
 
                 if flip:
                     rank_idx = 7 - rank_idx
@@ -198,10 +201,10 @@ def _encode_attack_maps(
 
     # My attacks (plane 0)
     for square in chess.SQUARES:
-        attackers = board.attackers(my_color, square)
+        attackers: chess.SquareSet = board.attackers(my_color, square)
         if attackers:
-            file_idx = chess.square_file(square)
-            rank_idx = chess.square_rank(square)
+            file_idx: int = chess.square_file(square)
+            rank_idx: int = chess.square_rank(square)
             if flip:
                 rank_idx = 7 - rank_idx
             planes[offset, 7 - rank_idx, file_idx] = 1.0
@@ -248,30 +251,30 @@ def _encode_semantic_features(
         opp_color = chess.WHITE
     else:
         my_color = board.turn
-        opp_color = not board.turn
+        opp_color: bool = not board.turn
 
-    # Helper to set a square in a plane
     def set_square(plane_idx: int, square: int) -> None:
-        file_idx = chess.square_file(square)
-        rank_idx = chess.square_rank(square)
+        """Set a bit in the given plane at the given square, flipping rank if needed."""
+        file_idx: int = chess.square_file(square)
+        rank_idx: int = chess.square_rank(square)
         if flip:
             rank_idx = 7 - rank_idx
         planes[plane_idx, 7 - rank_idx, file_idx] = 1.0
 
     # Plane 0: King attackers - my pieces that attack opponent's king
-    opp_king_square = board.king(opp_color)
+    opp_king_square: int | None = board.king(opp_color)
     if opp_king_square is not None:
         # Mark squares around opponent king that my pieces attack
         for adj_square in _get_king_zone(opp_king_square):
-            attackers = board.attackers(my_color, adj_square)
+            attackers: chess.SquareSet = board.attackers(my_color, adj_square)
             for attacker_sq in attackers:
                 set_square(offset, attacker_sq)
 
     # Plane 1: King defenders - my pieces that defend squares around my king
-    my_king_square = board.king(my_color)
+    my_king_square: int | None = board.king(my_color)
     if my_king_square is not None:
         for adj_square in _get_king_zone(my_king_square):
-            defenders = board.attackers(my_color, adj_square)
+            defenders: chess.SquareSet = board.attackers(my_color, adj_square)
             for defender_sq in defenders:
                 set_square(offset + 1, defender_sq)
 
@@ -288,8 +291,8 @@ def _encode_semantic_features(
                 set_square(offset + 3, move.to_square)
 
     # Plane 4: Passed pawns - my pawns with no opposing pawns ahead
-    my_pawns = board.pieces(chess.PAWN, my_color)
-    opp_pawns = board.pieces(chess.PAWN, opp_color)
+    my_pawns: chess.SquareSet = board.pieces(chess.PAWN, my_color)
+    opp_pawns: chess.SquareSet = board.pieces(chess.PAWN, opp_color)
     for pawn_sq in my_pawns:
         if _is_passed_pawn(pawn_sq, my_color, opp_pawns):
             set_square(offset + 4, pawn_sq)
@@ -300,14 +303,16 @@ def _encode_semantic_features(
             set_square(offset + 5, pawn_sq)
 
     # Plane 6: Weak squares - squares in my half not defended by my pawns
-    my_half_ranks = range(0, 4) if my_color == chess.WHITE else range(4, 8)
+    my_half_ranks: range = range(0, 4) if my_color == chess.WHITE else range(4, 8)
     if flip:
         my_half_ranks = range(4, 8) if my_color == chess.WHITE else range(0, 4)
     for rank in my_half_ranks:
         for file in range(8):
-            square = chess.square(file, rank)
+            square: chess.Square = chess.square(file, rank)
             # Check if defended by my pawns
-            pawn_defenders = board.attackers(my_color, square) & my_pawns
+            pawn_defenders: chess.SquareSet = (
+                board.attackers(my_color, square) & my_pawns
+            )
             if not pawn_defenders:
                 set_square(offset + 6, square)
 
@@ -318,8 +323,8 @@ def _encode_semantic_features(
     # Also mark extended center with lower intensity (0.5)
     for ext_sq in EXTENDED_CENTER:
         if ext_sq not in CENTER_SQUARES and board.attackers(my_color, ext_sq):
-            file_idx = chess.square_file(ext_sq)
-            rank_idx = chess.square_rank(ext_sq)
+            file_idx: int = chess.square_file(ext_sq)
+            rank_idx: int = chess.square_rank(ext_sq)
             if flip:
                 rank_idx = 7 - rank_idx
             planes[offset + 7, 7 - rank_idx, file_idx] = 0.5
@@ -327,9 +332,9 @@ def _encode_semantic_features(
 
 def _get_king_zone(king_square: int) -> list[int]:
     """Get squares in the king's zone (king + adjacent squares)."""
-    zone = [king_square]
-    king_file = chess.square_file(king_square)
-    king_rank = chess.square_rank(king_square)
+    zone: list[int] = [king_square]
+    king_file: int = chess.square_file(king_square)
+    king_rank: int = chess.square_rank(king_square)
     for df in [-1, 0, 1]:
         for dr in [-1, 0, 1]:
             if df == 0 and dr == 0:
@@ -344,8 +349,8 @@ def _is_passed_pawn(
     pawn_sq: int, color: chess.Color, opp_pawns: chess.SquareSet
 ) -> bool:
     """Check if a pawn is passed (no opposing pawns ahead on same or adjacent files)."""
-    pawn_file = chess.square_file(pawn_sq)
-    pawn_rank = chess.square_rank(pawn_sq)
+    pawn_file: int = chess.square_file(pawn_sq)
+    pawn_rank: int = chess.square_rank(pawn_sq)
 
     # Direction of advance
     if color == chess.WHITE:
@@ -357,7 +362,7 @@ def _is_passed_pawn(
     for adj_file in [pawn_file - 1, pawn_file, pawn_file + 1]:
         if 0 <= adj_file < 8:
             for rank in ahead_ranks:
-                sq = chess.square(adj_file, rank)
+                sq: chess.Square = chess.square(adj_file, rank)
                 if sq in opp_pawns:
                     return False
     return True
@@ -365,12 +370,12 @@ def _is_passed_pawn(
 
 def _is_isolated_pawn(pawn_sq: int, friendly_pawns: chess.SquareSet) -> bool:
     """Check if a pawn is isolated (no friendly pawns on adjacent files)."""
-    pawn_file = chess.square_file(pawn_sq)
+    pawn_file: int = chess.square_file(pawn_sq)
 
     for adj_file in [pawn_file - 1, pawn_file + 1]:
         if 0 <= adj_file < 8:
             for rank in range(8):
-                sq = chess.square(adj_file, rank)
+                sq: chess.Square = chess.square(adj_file, rank)
                 if sq in friendly_pawns:
                     return False
     return True
@@ -403,18 +408,18 @@ def _encode_tactical_features(
         opp_color = chess.WHITE
     else:
         my_color = board.turn
-        opp_color = not board.turn
+        opp_color: bool = not board.turn
 
-    # Helper to set a square in a plane
     def set_square(plane_idx: int, square: int) -> None:
-        file_idx = chess.square_file(square)
-        rank_idx = chess.square_rank(square)
+        """Set a bit in the given plane at the given square, flipping rank if needed."""
+        file_idx: int = chess.square_file(square)
+        rank_idx: int = chess.square_rank(square)
         if flip:
             rank_idx = 7 - rank_idx
         planes[plane_idx, 7 - rank_idx, file_idx] = 1.0
 
     # Piece values for comparison
-    piece_values = {
+    piece_values: dict[chess.PieceType, int] = {
         chess.PAWN: 1,
         chess.KNIGHT: 3,
         chess.BISHOP: 3,
@@ -425,7 +430,7 @@ def _encode_tactical_features(
 
     # Plane 0: Pinned pieces - my pieces pinned to king
     for square in chess.SQUARES:
-        piece = board.piece_at(square)
+        piece: chess.Piece | None = board.piece_at(square)
         if piece and piece.color == my_color:
             if board.is_pinned(my_color, square):
                 set_square(offset, square)
@@ -434,9 +439,9 @@ def _encode_tactical_features(
     for square in chess.SQUARES:
         piece = board.piece_at(square)
         if piece and piece.color == my_color and piece.piece_type != chess.KING:
-            attackers = board.attackers(opp_color, square)
+            attackers: chess.SquareSet = board.attackers(opp_color, square)
             if attackers:
-                defenders = board.attackers(my_color, square)
+                defenders: chess.SquareSet = board.attackers(my_color, square)
                 if not defenders:
                     set_square(offset + 1, square)
 
@@ -444,12 +449,12 @@ def _encode_tactical_features(
     for square in chess.SQUARES:
         piece = board.piece_at(square)
         if piece and piece.color == my_color:
-            my_value = piece_values.get(piece.piece_type, 0)
-            attacks = board.attacks(square)
+            my_value: int = piece_values.get(piece.piece_type, 0)
+            attacks: chess.SquareSet = board.attacks(square)
             for target_sq in attacks:
-                target = board.piece_at(target_sq)
+                target: chess.Piece | None = board.piece_at(target_sq)
                 if target and target.color == opp_color:
-                    target_value = piece_values.get(target.piece_type, 0)
+                    target_value: int = piece_values.get(target.piece_type, 0)
                     if target_value > my_value:
                         set_square(offset + 2, square)
                         break
@@ -457,7 +462,7 @@ def _encode_tactical_features(
     # Plane 3: Trapped pieces - my pieces with very limited mobility (< 2 moves)
     for piece_type in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
         for square in board.pieces(piece_type, my_color):
-            mobility = sum(1 for m in board.legal_moves if m.from_square == square)
+            mobility: int = sum(1 for m in board.legal_moves if m.from_square == square)
             if mobility < 2:
                 set_square(offset + 3, square)
 
@@ -489,23 +494,28 @@ def _encode_metadata_54(
         flip: Whether perspective is flipped.
     """
     # Plane 0: Side to move (always 1 from current player's perspective)
-    planes[offset] = 1.0  # Always "my turn" from perspective
+    # Always "my turn" from perspective
+    planes[offset] = 1.0
 
     # Plane 1: Total move count (normalized)
-    move_count = min(board.fullmove_number, 200) / 200.0
+    move_count: float = min(board.fullmove_number, 200) / 200.0
     planes[offset + 1] = move_count
 
     # Planes 2-5: Castling rights (from perspective)
     if flip:
         # From black's perspective: black's rights are "my" rights
         if board.has_kingside_castling_rights(chess.BLACK):
-            planes[offset + 2] = 1.0  # My kingside
+            # My kingside
+            planes[offset + 2] = 1.0
         if board.has_queenside_castling_rights(chess.BLACK):
-            planes[offset + 3] = 1.0  # My queenside
+            # My queenside
+            planes[offset + 3] = 1.0
         if board.has_kingside_castling_rights(chess.WHITE):
-            planes[offset + 4] = 1.0  # Opponent kingside
+            # Opponent kingside
+            planes[offset + 4] = 1.0
         if board.has_queenside_castling_rights(chess.WHITE):
-            planes[offset + 5] = 1.0  # Opponent queenside
+            # Opponent queenside
+            planes[offset + 5] = 1.0
     else:
         # From white's perspective
         if board.has_kingside_castling_rights(chess.WHITE):
@@ -519,14 +529,14 @@ def _encode_metadata_54(
 
     # Plane 6: En passant square
     if board.ep_square is not None:
-        ep_file = chess.square_file(board.ep_square)
-        ep_rank = chess.square_rank(board.ep_square)
+        ep_file: int = chess.square_file(board.ep_square)
+        ep_rank: int = chess.square_rank(board.ep_square)
         if flip:
             ep_rank = 7 - ep_rank
         planes[offset + 6, 7 - ep_rank, ep_file] = 1.0
 
     # Plane 7: Halfmove clock (50-move rule, normalized)
-    halfmove_clock = min(board.halfmove_clock, 100) / 100.0
+    halfmove_clock: float = min(board.halfmove_clock, 100) / 100.0
     planes[offset + 7] = halfmove_clock
 
     # Plane 8: Repetition count
@@ -534,11 +544,14 @@ def _encode_metadata_54(
     # Note: requires move stack, may return False for standalone boards
     try:
         if board.is_repetition(3):
-            planes[offset + 8] = 1.0  # Threefold repetition (draw claimable)
+            # Threefold repetition (draw claimable)
+            planes[offset + 8] = 1.0
         elif board.is_repetition(2):
-            planes[offset + 8] = 0.5  # Position seen once before
+            # Position seen once before
+            planes[offset + 8] = 0.5
     except Exception:
-        pass  # No move stack available, leave as 0
+        # No move stack available, leave as 0
+        pass
 
     # Plane 9: Is in check
     if board.is_check():
@@ -599,19 +612,19 @@ def history_length_from_planes(num_planes: int) -> int:
     return (num_planes - 24) // 12 - 1
 
 
-class PositionHistory:
+class PositionHistory(object):
     """
     Helper class to maintain position history during a game.
     """
 
-    def __init__(self, history_length: int = DEFAULT_HISTORY_LENGTH):
+    def __init__(self, history_length: int = DEFAULT_HISTORY_LENGTH) -> None:
         """
         Initialize position history tracker.
 
         Args:
             history_length: Number of past positions to remember.
         """
-        self.history_length = history_length
+        self.history_length: int = history_length
         self._boards: list[chess.Board] = []
 
     def push(self, board: chess.Board) -> None:

@@ -1,5 +1,9 @@
 """Test: Passed Pawn Recognition."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions with passed pawns
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === BASIC PUSH (3 positions) ===
     {
         "name": "Push Passed Pawn (7th rank)",
@@ -131,40 +138,42 @@ TEST_POSITIONS = [
 ]
 
 
-def test_passed_pawn(network, results: TestResults):
+def test_passed_pawn(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network recognizes and handles passed pawns."""
     print(header("TEST: Passed Pawn Recognition"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_5 = np.argsort(policy)[::-1][:5]
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
 
         print(f"\n  Value: {value:+.4f}")
         print(f"  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Expected?':<12}")
         print("  " + "-" * 40)
 
-        found_at = None
-        expected_set = set(test["expected_moves"])
+        found_at: int | None = None
+        expected_set: set[str] = set(test["expected_moves"])
 
         for i, idx in enumerate(top_5):
-            move = decode_move(idx, board)
-            prob = policy[idx]
+            move: chess.Move | None = decode_move(idx, board)
+            prob: float = policy[idx]
             if move:
-                uci = move.uci()
-                is_expected = uci in expected_set
+                uci: str = move.uci()
+                is_expected: bool = uci in expected_set
                 if is_expected and found_at is None:
                     found_at = i + 1
-                exp_str = "YES" if is_expected else ""
-                color = Colors.GREEN if is_expected else ""
-                end_color = Colors.ENDC if color else ""
+                exp_str: str = "YES" if is_expected else ""
+                color: str = Colors.GREEN if is_expected else ""
+                end_color: str = Colors.ENDC if color else ""
                 print(
                     f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {exp_str}{end_color}"
                 )
@@ -188,7 +197,7 @@ def test_passed_pawn(network, results: TestResults):
         results.add_diagnostic("passed_pawn", f"{test['name']}_rank", found_at)
         results.add_diagnostic("passed_pawn", f"{test['name']}_value", float(value))
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("passed_pawn", "total_tested", total)
     results.add_diagnostic("passed_pawn", "correct", passed)
     results.add("Passed Pawn", score >= 0.5, score, 1.0)

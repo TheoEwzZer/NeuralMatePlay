@@ -18,15 +18,15 @@ import argparse
 import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 
 # The 4 test configurations
-CONFIGS = {
+CONFIGS: dict[str, dict[str, Any]] = {
     "NONE": {
         "ewc_enabled": False,
         "tactical_replay_enabled": False,
@@ -35,7 +35,7 @@ CONFIGS = {
     "EWC": {
         "ewc_enabled": True,
         "tactical_replay_enabled": False,
-        "ewc_lambda": 0.02,  # Reduced from 0.4 to allow convergence
+        "ewc_lambda": 0.02,
         "description": "EWC only",
     },
     "REPLAY": {
@@ -46,19 +46,20 @@ CONFIGS = {
     "BOTH": {
         "ewc_enabled": True,
         "tactical_replay_enabled": True,
-        "ewc_lambda": 0.02,  # Reduced from 0.4 to allow convergence
+        "ewc_lambda": 0.02,
         "description": "EWC + Replay Buffer",
     },
 }
 
 
-def load_config(config_path: str) -> dict:
+def load_config(config_path: str) -> dict[str, Any]:
     """Load JSON config file."""
     with open(config_path, "r") as f:
-        return json.load(f)
+        data: dict[str, Any] = json.load(f)
+        return data
 
 
-def save_config(config: dict, config_path: str) -> None:
+def save_config(config: dict[str, Any], config_path: str) -> None:
     """Save JSON config file."""
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
@@ -77,10 +78,10 @@ def run_training(
     print(f"Chunks: {chunks}, Epochs: {epochs}")
     print(f"{'='*60}\n")
 
-    config_settings = CONFIGS[config_name]
+    config_settings: dict[str, Any] = CONFIGS[config_name]
 
     # Load and modify config
-    config = load_config(base_config_path)
+    config: dict[str, Any] = load_config(base_config_path)
     if "pretraining" not in config:
         config["pretraining"] = {}
 
@@ -95,7 +96,7 @@ def run_training(
     if "ewc_lambda" in config_settings:
         config["pretraining"]["ewc_lambda"] = config_settings["ewc_lambda"]
 
-    # Reduce buffer capacity and ratio for quick tests (fewer chunks = smaller buffer)
+    # Reduce buffer capacity and ratio for quick tests
     config["pretraining"]["tactical_replay_capacity"] = chunks * 50
     config["pretraining"]["tactical_replay_ratio"] = 0.10
 
@@ -108,24 +109,26 @@ def run_training(
 
     # Clean up any existing state to prevent cross-test contamination
     for state_file in ["ewc_state.pt", "replay_buffer.npz"]:
-        state_path = os.path.join(output_dir, state_file)
+        state_path: str = os.path.join(output_dir, state_file)
         if os.path.exists(state_path):
             os.remove(state_path)
             print(f"  Cleaned up: {state_path}")
 
-    temp_config_path = os.path.join(output_dir, f"config_{config_name.lower()}.json")
+    temp_config_path: str = os.path.join(
+        output_dir, f"config_{config_name.lower()}.json"
+    )
     save_config(config, temp_config_path)
 
     # Output model path
-    model_output = os.path.join(output_dir, f"model_{config_name.lower()}.pt")
+    model_output: str = os.path.join(output_dir, f"model_{config_name.lower()}.pt")
 
     # Find all PGN files (same as original training) to reuse existing chunks
-    pgn_files = sorted(glob.glob("data/lichess_*.pgn"))
+    pgn_files: list[str] = sorted(glob.glob("data/lichess_*.pgn"))
     if not pgn_files:
         pgn_files = ["data/lichess_elite_2020-08.pgn"]  # Fallback
 
     # Build command
-    cmd = (
+    cmd: list[str] = (
         [
             sys.executable,
             "-m",
@@ -135,7 +138,7 @@ def run_training(
             "--pgn",
         ]
         + pgn_files
-        + [  # Pass all PGN files to reuse existing chunks
+        + [
             "--epochs",
             str(epochs),
             "--max-chunks",
@@ -147,21 +150,21 @@ def run_training(
 
     print(f"Running: {' '.join(cmd)}\n")
 
-    start_time = time.time()
+    start_time: float = time.time()
     try:
-        result = subprocess.run(cmd, check=True)
-        elapsed = time.time() - start_time
+        elapsed: float = time.time() - start_time
         print(f"\n✓ {config_name} completed in {elapsed:.1f}s")
 
         # Find the best model
-        best_pattern = f"model_{config_name.lower()}_best_*_network.pt"
-        best_models = list(Path(output_dir).glob(best_pattern))
+        best_pattern: str = f"model_{config_name.lower()}_best_*_network.pt"
+        best_models: list[Path] = list(Path(output_dir).glob(best_pattern))
+        model_path: str
         if best_models:
             model_path = str(sorted(best_models)[-1])
         else:
             # Try to find any matching model
-            pattern = f"model_{config_name.lower()}*network.pt"
-            models = list(Path(output_dir).glob(pattern))
+            pattern: str = f"model_{config_name.lower()}*network.pt"
+            models: list[Path] = list(Path(output_dir).glob(pattern))
             model_path = str(sorted(models)[-1]) if models else model_output
 
         return True, model_path
@@ -173,7 +176,7 @@ def run_training(
 
 def run_diagnostic(model1_path: str, model2_path: str) -> str:
     """Run diagnostic comparison between two models."""
-    cmd = [
+    cmd: list[str] = [
         sys.executable,
         "diagnose_network.py",
         "-m",
@@ -182,21 +185,26 @@ def run_diagnostic(model1_path: str, model2_path: str) -> str:
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            cmd, capture_output=True, text=True
+        )
         return result.stdout
     except Exception as e:
         return f"Error: {e}"
 
 
-def extract_summary(diagnostic_output: str) -> dict:
+def extract_summary(diagnostic_output: str) -> dict[str, Any]:
     """Extract key metrics from diagnostic output."""
-    summary = {"weighted_avg": None, "weighted_wins": None}
+    summary: dict[str, Any] = {
+        "weighted_avg": None,
+        "weighted_wins": None,
+    }
 
     for line in diagnostic_output.split("\n"):
         if "WEIGHTED AVG" in line:
-            parts = line.split()
+            parts: list[str] = line.split()
             # Find percentages
-            for i, p in enumerate(parts):
+            for p in parts:
                 if "%" in p:
                     if summary["weighted_avg"] is None:
                         summary["weighted_avg"] = p
@@ -204,7 +212,7 @@ def extract_summary(diagnostic_output: str) -> dict:
                         summary["weighted_avg_2"] = p
         elif "WEIGHTED WINS" in line:
             parts = line.split()
-            for i, p in enumerate(parts):
+            for p in parts:
                 if p.isdigit():
                     if summary["weighted_wins"] is None:
                         summary["weighted_wins"] = int(p)
@@ -214,8 +222,9 @@ def extract_summary(diagnostic_output: str) -> dict:
     return summary
 
 
-def main():
-    parser = argparse.ArgumentParser(
+def main() -> int:
+    """Run anti-forgetting comparison tests."""
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="Test anti-forgetting mechanisms",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -251,30 +260,32 @@ Examples:
         nargs="+",
         help="Only run specific configs (e.g., --only NONE EWC)",
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Configs to test
-    configs_to_test = args.only if args.only else list(CONFIGS.keys())
+    configs_to_test: list[str] = args.only if args.only else list(CONFIGS.keys())
 
     print(f"\n{'#'*60}")
-    print(f"# Anti-Forgetting Mechanism Comparison Test")
+    print("# Anti-Forgetting Mechanism Comparison Test")
     print(f"{'#'*60}")
-    print(f"\nConfigurations to test:")
+    print("\nConfigurations to test:")
     for name in configs_to_test:
         print(f"  - {name}: {CONFIGS[name]['description']}")
-    print(f"\nSettings:")
+    print("\nSettings:")
     print(f"  Chunks per epoch: {args.chunks}")
     print(f"  Epochs: {args.epochs}")
     print(f"  Output directory: {args.output_dir}")
 
-    trained_models = {}
+    trained_models: dict[str, str] = {}
 
     if not args.skip_training:
         # Run training for each config
         for config_name in configs_to_test:
+            success: bool
+            model_path: str
             success, model_path = run_training(
                 config_name,
                 args.config,
@@ -292,17 +303,17 @@ Examples:
         # Find existing models
         print("\nLooking for existing models...")
         for config_name in configs_to_test:
-            pattern = f"model_{config_name.lower()}*network.pt"
-            models = list(Path(args.output_dir).glob(pattern))
+            pattern: str = f"model_{config_name.lower()}*network.pt"
+            models: list[Path] = list(Path(args.output_dir).glob(pattern))
             if models:
                 trained_models[config_name] = str(sorted(models)[-1])
-                print(f"  Found: {config_name} -> {trained_models[config_name]}")
+                print(f"  Found: {config_name} -> " f"{trained_models[config_name]}")
             else:
                 print(f"  Not found: {config_name}")
 
     # Run comparisons
     print(f"\n{'#'*60}")
-    print(f"# Diagnostic Comparisons")
+    print("# Diagnostic Comparisons")
     print(f"{'#'*60}")
 
     if len(trained_models) < 2:
@@ -310,10 +321,12 @@ Examples:
         return 1
 
     # Results table
-    results = {}
+    results: dict[str, dict[str, Any]] = {}
 
     # Compare each config against baseline (NONE)
-    baseline = "NONE" if "NONE" in trained_models else list(trained_models.keys())[0]
+    baseline: str = (
+        "NONE" if "NONE" in trained_models else list(trained_models.keys())[0]
+    )
     print(f"\nBaseline: {baseline}")
 
     for config_name in trained_models:
@@ -321,7 +334,9 @@ Examples:
             continue
 
         print(f"\n--- {config_name} vs {baseline} ---")
-        output = run_diagnostic(trained_models[config_name], trained_models[baseline])
+        output: str = run_diagnostic(
+            trained_models[config_name], trained_models[baseline]
+        )
 
         # Print relevant lines
         for line in output.split("\n"):
@@ -341,28 +356,28 @@ Examples:
 
     # Final summary
     print(f"\n{'#'*60}")
-    print(f"# SUMMARY")
+    print("# SUMMARY")
     print(f"{'#'*60}")
 
     print(f"\n{'Config':<10} {'Description':<30} {'Model Path'}")
     print("-" * 80)
     for name, path in trained_models.items():
-        desc = CONFIGS[name]["description"]
+        desc: str = CONFIGS[name]["description"]
         print(f"{name:<10} {desc:<30} {os.path.basename(path)}")
 
     if results:
-        print(f"\n{'Config':<10} vs {baseline:<8} {'Weighted Avg':<15} {'Wins'}")
+        print(f"\n{'Config':<10} vs {baseline:<8} " f"{'Weighted Avg':<15} {'Wins'}")
         print("-" * 50)
         for config_name, summary in results.items():
-            avg = summary.get("weighted_avg", "N/A")
-            wins = summary.get("weighted_wins", "N/A")
-            print(f"{config_name:<10} vs {baseline:<8} {str(avg):<15} {wins}")
+            avg: str | int | None = summary.get("weighted_avg", "N/A")
+            wins: str | int | None = summary.get("weighted_wins", "N/A")
+            print(f"{config_name:<10} vs {baseline:<8} " f"{str(avg):<15} {wins}")
 
     print("\n" + "=" * 60)
     print("To run full comparison manually:")
     if len(trained_models) >= 2:
-        models_list = list(trained_models.values())
-        print(f"  python diagnose_network.py -m {models_list[0]} {models_list[1]}")
+        models_list: list[str] = list(trained_models.values())
+        print(f"  python diagnose_network.py -m " f"{models_list[0]} {models_list[1]}")
     print("=" * 60)
 
     return 0

@@ -1,6 +1,10 @@
 """Test: MCTS Behavior."""
 
+from __future__ import annotations
+
 import time
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -18,9 +22,12 @@ from ..core import (
     get_history_length,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for MCTS behavior
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === OBVIOUS CAPTURES (2) ===
     {
         "name": "Hanging Queen",
@@ -75,36 +82,44 @@ TEST_POSITIONS = [
 ]
 
 
-def _find_best_capture(board, piece_type):
+def _find_best_capture(board: chess.Board, piece_type: int) -> chess.Move | None:
     """Find move that captures a specific piece type."""
     for move in board.legal_moves:
         if board.is_capture(move):
-            captured = board.piece_at(move.to_square)
+            captured: chess.Piece | None = board.piece_at(move.to_square)
             if captured and captured.piece_type == piece_type:
                 return move
     return None
 
 
-def _find_mating_move(board):
+def _find_mating_move(board: chess.Board) -> chess.Move | None:
     """Find a move that delivers checkmate."""
     for move in board.legal_moves:
         board.push(move)
-        is_mate = board.is_checkmate()
+        is_mate: bool = board.is_checkmate()
         board.pop()
         if is_mate:
             return move
     return None
 
 
-def _test_single_position(board, network, mcts, test, results):
+def _test_single_position(
+    board: chess.Board,
+    network: DualHeadNetwork,
+    mcts: MCTS,
+    test: dict[str, Any],
+    results: TestResults,
+) -> tuple[float, float]:
     """Test MCTS on a single position. Returns (score, details) with progressive scoring."""
-    simulations = test.get("simulations", 100)
+    simulations: int = test.get("simulations", 100)
 
     # Get raw network output first
-    state = encode_for_network(board, network)
+    state: np.ndarray = encode_for_network(board, network)
+    raw_policy: np.ndarray
+    raw_value: float
     raw_policy, raw_value = network.predict_single(state)
-    raw_top_idx = np.argmax(raw_policy)
-    raw_top_move = decode_move(raw_top_idx, board)
+    raw_top_idx: int = int(np.argmax(raw_policy))
+    raw_top_move: chess.Move | None = decode_move(raw_top_idx, board)
 
     print(
         f"  Raw policy top: {raw_top_move.uci() if raw_top_move else 'None'} ({raw_policy[raw_top_idx]*100:.1f}%)"
@@ -112,31 +127,33 @@ def _test_single_position(board, network, mcts, test, results):
     print(f"  Raw value: {raw_value:+.4f}")
 
     # Run MCTS
-    start = time.time()
+    start: float = time.time()
     mcts.num_simulations = simulations
-    policy = mcts.search(board, add_noise=False)
-    elapsed = time.time() - start
+    policy: np.ndarray = mcts.search(board, add_noise=False)
+    elapsed: float = time.time() - start
 
-    top_indices = np.argsort(policy)[::-1][:5]
-    mcts_top_move = decode_move(top_indices[0], board)
+    top_indices: np.ndarray = np.argsort(policy)[::-1][:5]
+    mcts_top_move: chess.Move | None = decode_move(top_indices[0], board)
 
     print(f"\n  MCTS ({simulations} sims, {elapsed*1000:.0f}ms):")
     print(f"  {'Rank':<6} {'Move':<8} {'Visits':>10}")
     print("  " + "-" * 30)
 
     for i, idx in enumerate(top_indices[:5]):
-        move = decode_move(idx, board)
-        visits = policy[idx]
+        move: chess.Move | None = decode_move(idx, board)
+        visits: float = policy[idx]
         if move:
             print(f"  {i+1:<6} {move.uci():<8} {visits*100:>9.1f}%")
 
     # Check if MCTS found the expected move with progressive scoring
-    position_score = 0.0
-    test_type = test["test_type"]
+    position_score: float = 0.0
+    test_type: str = test["test_type"]
 
     if test_type == "capture_queen":
-        expected = _find_best_capture(board, chess.QUEEN)
-        found_rank = _find_move_rank(expected, top_indices, board) if expected else None
+        expected: chess.Move | None = _find_best_capture(board, chess.QUEEN)
+        found_rank: int | None = (
+            _find_move_rank(expected, top_indices, board) if expected else None
+        )
         if found_rank == 1:
             position_score = 1.0
             print(f"\n  {ok(f'MCTS captures queen: {mcts_top_move.uci()}')}")
@@ -176,7 +193,7 @@ def _test_single_position(board, network, mcts, test, results):
 
     elif test_type == "mate_in_1":
         # Check all top moves for mate
-        mate_rank = None
+        mate_rank: int | None = None
         for i, idx in enumerate(top_indices[:5]):
             move = decode_move(idx, board)
             if move:
@@ -203,7 +220,7 @@ def _test_single_position(board, network, mcts, test, results):
             print(f"\n  {fail(f'MCTS plays {mcts_top_move.uci()} instead of mating')}")
 
     elif test_type == "tactic":
-        expected_uci = test["expected_move"]
+        expected_uci: str = test["expected_move"]
         # Find rank of expected move
         found_rank = None
         for i, idx in enumerate(top_indices[:5]):
@@ -241,36 +258,40 @@ def _test_single_position(board, network, mcts, test, results):
     return position_score, elapsed
 
 
-def _find_move_rank(expected_move, top_indices, board):
+def _find_move_rank(
+    expected_move: chess.Move | None, top_indices: np.ndarray, board: chess.Board
+) -> int | None:
     """Find the rank of expected_move in top_indices."""
     if not expected_move:
         return None
     for i, idx in enumerate(top_indices[:5]):
-        move = decode_move(idx, board)
+        move: chess.Move | None = decode_move(idx, board)
         if move == expected_move:
             return i + 1
     return None
 
 
-def test_mcts_behavior(network, results: TestResults):
+def test_mcts_behavior(network: DualHeadNetwork, results: TestResults) -> float:
     """Test MCTS behavior on multiple positions."""
     print(header("TEST: MCTS Behavior"))
 
-    history_length = get_history_length(network)
-    mcts = MCTS(
+    history_length: int = get_history_length(network)
+    mcts: MCTS = MCTS(
         network=network, c_puct=1.0, num_simulations=100, history_length=history_length
     )
     mcts.temperature = 0.1
 
-    total_score = 0.0
-    total_time = 0
-    full_passes = 0
+    total_score: float = 0.0
+    total_time: float = 0
+    full_passes: int = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        position_score: float
+        elapsed: float
         position_score, elapsed = _test_single_position(
             board, network, mcts, test, results
         )
@@ -281,7 +302,7 @@ def test_mcts_behavior(network, results: TestResults):
 
     # Summary
     print(subheader("Summary"))
-    score = total_score / len(TEST_POSITIONS)
+    score: float = total_score / len(TEST_POSITIONS)
     print(f"  Positions tested: {len(TEST_POSITIONS)}")
     print(f"  Full passes: {full_passes}/{len(TEST_POSITIONS)}")
     print(f"  Progressive score: {score*100:.1f}%")
@@ -301,7 +322,7 @@ def test_mcts_behavior(network, results: TestResults):
             "Value head may not guide search correctly",
         )
 
-    overall_passed = score >= 0.5
+    overall_passed: bool = score >= 0.5
     results.add("MCTS Behavior", overall_passed, score, 1.0)
     results.add_timing("MCTS Total", total_time)
 

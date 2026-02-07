@@ -2,12 +2,16 @@
 
 This test measures whether the network has appropriate diversity based on
 position complexity:
-- Simple positions (clear best move) → should be CONCENTRATED (low entropy)
-- Complex positions (multiple good options) → should be DIVERSE (high entropy)
+- Simple positions (clear best move) -> should be CONCENTRATED (low entropy)
+- Complex positions (multiple good options) -> should be DIVERSE (high entropy)
 
 A good network should be confident when there's a clear answer and uncertain
 when the position is genuinely unclear.
 """
+
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 import chess
@@ -24,9 +28,12 @@ from ..core import (
     encode_for_network,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions categorized by expected diversity level
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === SIMPLE POSITIONS - Should be CONCENTRATED (low entropy OK) ===
     {
         "name": "Starting Position",
@@ -88,31 +95,34 @@ TEST_POSITIONS = [
 ]
 
 
-def _analyze_position(board, network):
+def _analyze_position(board: chess.Board, network: DualHeadNetwork) -> dict[str, Any]:
     """Analyze policy diversity for a single position."""
-    state = encode_for_network(board, network)
+    state: np.ndarray = encode_for_network(board, network)
+    policy: np.ndarray
     policy, _ = network.predict_single(state)
 
     # Calculate entropy
-    policy_clipped = np.clip(policy, 1e-10, 1.0)
+    policy_clipped: np.ndarray = np.clip(policy, 1e-10, 1.0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        entropy = -np.nansum(policy_clipped * np.log(policy_clipped))
-    max_entropy = np.log(len(policy))
-    normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
+        entropy: float = float(-np.nansum(policy_clipped * np.log(policy_clipped)))
+    max_entropy: float = float(np.log(len(policy)))
+    normalized_entropy: float = entropy / max_entropy if max_entropy > 0 else 0
 
     # Get statistics
-    top_prob = np.max(policy)
-    sorted_policy = np.sort(policy)[::-1]
-    top_5_prob = np.sum(sorted_policy[:5])
-    top_10_prob = np.sum(sorted_policy[:10])
-    num_above_1pct = np.sum(policy > 0.01)
-    num_above_5pct = np.sum(policy > 0.05)
+    top_prob: float = float(np.max(policy))
+    sorted_policy: np.ndarray = np.sort(policy)[::-1]
+    top_5_prob: float = float(np.sum(sorted_policy[:5]))
+    top_10_prob: float = float(np.sum(sorted_policy[:10]))
+    num_above_1pct: int = int(np.sum(policy > 0.01))
+    num_above_5pct: int = int(np.sum(policy > 0.05))
 
     # Legal move analysis
-    legal_moves = list(board.legal_moves)
-    legal_indices = [encode_move(m) for m in legal_moves]
-    legal_indices = [i for i in legal_indices if i is not None]
-    legal_prob = sum(policy[i] for i in legal_indices) if legal_indices else 0
+    legal_moves: list[chess.Move] = list(board.legal_moves)
+    legal_indices: list[int | None] = [encode_move(m) for m in legal_moves]
+    legal_indices_filtered: list[int] = [i for i in legal_indices if i is not None]
+    legal_prob: float = (
+        sum(policy[i] for i in legal_indices_filtered) if legal_indices_filtered else 0
+    )
 
     return {
         "policy": policy,
@@ -129,15 +139,15 @@ def _analyze_position(board, network):
     }
 
 
-def _score_diversity_match(stats, expected_diversity):
+def _score_diversity_match(stats: dict[str, Any], expected_diversity: str) -> float:
     """
     Score how well the actual diversity matches expected diversity.
 
     Returns a score from 0 to 1 based on whether the network's confidence
     level is appropriate for the position complexity.
     """
-    norm_entropy = stats["normalized_entropy"]
-    top_prob = stats["top_prob"]
+    norm_entropy: float = stats["normalized_entropy"]
+    top_prob: float = stats["top_prob"]
 
     if expected_diversity == "very_low":
         # Should be very concentrated (top move > 70%, entropy < 0.15)
@@ -195,39 +205,39 @@ def _score_diversity_match(stats, expected_diversity):
     return 0.5  # Default
 
 
-def test_policy_diversity(network, results: TestResults):
+def test_policy_diversity(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the policy head has ADAPTIVE diversity (appropriate to position complexity)."""
     print(header("TEST: Policy Head Diversity (Adaptive)"))
 
     print(
         f"\n  {Colors.CYAN}This test checks if diversity matches position complexity:{Colors.ENDC}"
     )
-    print(f"  - Simple positions (forced moves) → Should be CONCENTRATED")
-    print(f"  - Complex positions (many options) → Should be DIVERSE")
+    print(f"  - Simple positions (forced moves) -> Should be CONCENTRATED")
+    print(f"  - Complex positions (many options) -> Should be DIVERSE")
     print()
 
-    total_score = 0.0
-    total_legal_prob = 0.0
-    simple_scores = []
-    complex_scores = []
-    position_results = []
+    total_score: float = 0.0
+    total_legal_prob: float = 0.0
+    simple_scores: list[float] = []
+    complex_scores: list[float] = []
+    position_results: list[dict[str, Any]] = []
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
-        category = test["category"]
-        expected = test["expected_diversity"]
+        board: chess.Board = chess.Board(test["fen"])
+        category: str = test["category"]
+        expected_div: str = test["expected_diversity"]
 
         print(subheader(f"{test['name']} [{category.upper()}]: {test['description']}"))
-        print(f"  Expected diversity: {expected}")
+        print(f"  Expected diversity: {expected_div}")
 
-        stats = _analyze_position(board, network)
+        stats: dict[str, Any] = _analyze_position(board, network)
         position_results.append(stats)
 
         # Score based on match with expected diversity
-        diversity_score = _score_diversity_match(stats, expected)
+        diversity_score: float = _score_diversity_match(stats, expected_div)
 
         # Bonus/penalty for legal probability
-        legal_bonus = 0.0
+        legal_bonus: float = 0.0
         if stats["legal_prob"] >= 0.95:
             legal_bonus = 0.1
         elif stats["legal_prob"] >= 0.9:
@@ -235,7 +245,7 @@ def test_policy_diversity(network, results: TestResults):
         elif stats["legal_prob"] < 0.8:
             legal_bonus = -0.1
 
-        position_score = min(1.0, max(0.0, diversity_score + legal_bonus))
+        position_score: float = min(1.0, max(0.0, diversity_score + legal_bonus))
         total_score += position_score
         total_legal_prob += stats["legal_prob"]
 
@@ -253,17 +263,17 @@ def test_policy_diversity(network, results: TestResults):
         print(f"  Moves >5%: {stats['num_above_5pct']}")
 
         # Show top 5 moves
-        top_indices = np.argsort(stats["policy"])[::-1][:5]
+        top_indices: np.ndarray = np.argsort(stats["policy"])[::-1][:5]
         print(f"\n  Top 5 moves:")
         for i, idx in enumerate(top_indices):
-            move = decode_move(idx, board)
-            prob = stats["policy"][idx]
-            legal_str = (
+            move: chess.Move | None = decode_move(idx, board)
+            prob: float = float(stats["policy"][idx])
+            legal_str: str = (
                 ""
                 if move and move in stats["legal_moves"]
                 else f" {Colors.RED}(illegal){Colors.ENDC}"
             )
-            move_str = move.uci() if move else f"[idx {idx}]"
+            move_str: str = move.uci() if move else f"[idx {idx}]"
             print(f"    {i+1}. {move_str:<8} {prob*100:>6.2f}%{legal_str}")
 
         # Show score with color
@@ -288,11 +298,11 @@ def test_policy_diversity(network, results: TestResults):
         )
 
     # Aggregate statistics
-    num_positions = len(TEST_POSITIONS)
-    avg_score = total_score / num_positions
-    avg_legal_prob = total_legal_prob / num_positions
-    avg_simple = np.mean(simple_scores) if simple_scores else 0
-    avg_complex = np.mean(complex_scores) if complex_scores else 0
+    num_positions: int = len(TEST_POSITIONS)
+    avg_score: float = total_score / num_positions
+    avg_legal_prob: float = total_legal_prob / num_positions
+    avg_simple: float = float(np.mean(simple_scores)) if simple_scores else 0
+    avg_complex: float = float(np.mean(complex_scores)) if complex_scores else 0
 
     print(subheader("Summary Statistics"))
     print(f"  Positions tested: {num_positions}")
@@ -310,7 +320,7 @@ def test_policy_diversity(network, results: TestResults):
     results.add_diagnostic("policy_diversity", "complex_score", float(avg_complex))
 
     # Determine overall status
-    issues = []
+    issues: list[str] = []
 
     if avg_simple < 0.5:
         issues.append(
@@ -343,6 +353,7 @@ def test_policy_diversity(network, results: TestResults):
             "Policy head may not be learning move legality properly",
         )
 
+    test_passed: bool
     if issues:
         print(f"\n  {fail('Issues detected:')}")
         for issue in issues:

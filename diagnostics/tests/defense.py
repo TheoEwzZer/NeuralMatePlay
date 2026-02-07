@@ -1,5 +1,9 @@
 """Test: Defense (Avoid Hanging Pieces)."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,12 +19,15 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_defense(network, results: TestResults):
+
+def test_defense(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the network avoids hanging its own pieces."""
     print(header("TEST: Defense (Avoid Hanging Pieces)"))
 
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === PAWN ATTACKS (4 positions) ===
         {
             "name": "Knight attacked by pawn",
@@ -133,21 +140,21 @@ def test_defense(network, results: TestResults):
         },
     ]
 
-    passed = 0
+    passed: float = 0
 
     for test in test_positions:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(test["name"]))
         print(board)
 
-        piece_name = chess.piece_name(test["threatened_piece"])
-        threat_sq = chess.square_name(test["threatened_square"])
+        piece_name: str = chess.piece_name(test["threatened_piece"])
+        threat_sq: str = chess.square_name(test["threatened_square"])
 
         print(f"\n  Threatened: {piece_name} on {threat_sq}")
         print(f"  Attacker: pawn on {chess.square_name(test['attacker_square'])}")
 
         # Find good defensive moves
-        good_moves = []
+        good_moves: list[chess.Move] = []
         for move in board.legal_moves:
             # Move the threatened piece away
             if move.from_square == test["threatened_square"]:
@@ -159,15 +166,17 @@ def test_defense(network, results: TestResults):
         print(f"  Good defensive moves: {[m.uci() for m in good_moves[:8]]}")
 
         # Get network's prediction (with proper perspective handling)
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_idx = np.argmax(policy)
-        top_move = decode_move(top_idx, board)
-        top_prob = policy[top_idx]
+        top_idx: int = np.argmax(policy)
+        top_move: chess.Move | None = decode_move(top_idx, board)
+        top_prob: float = policy[top_idx]
 
         # Analyze top moves
-        top_5 = np.argsort(policy)[::-1][:5]
-        defense_found_at = None
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
+        defense_found_at: int | None = None
 
         print(f"\n  Value evaluation: {value:+.4f}")
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Defense?':<15}")
@@ -216,7 +225,7 @@ def test_defense(network, results: TestResults):
                 f"Plays {move} instead of defending",
             )
 
-    score = passed / len(test_positions)
+    score: float = passed / len(test_positions)
     results.add_diagnostic("defense", "total_tested", len(test_positions))
     results.add_diagnostic("defense", "defenses_made", passed)
     results.add("Defense", passed == len(test_positions), score, 1.0)

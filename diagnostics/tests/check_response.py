@@ -1,5 +1,9 @@
 """Test: Check Response."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -16,12 +20,15 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_check_response(network, results: TestResults):
+
+def test_check_response(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the network properly responds to check."""
     print(header("TEST: Check Response"))
 
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === BASIC CHECKS (4 positions) ===
         {
             "name": "Queen Check (diagonal)",
@@ -109,14 +116,14 @@ def test_check_response(network, results: TestResults):
         },
     ]
 
-    passed = 0
-    total = 0
+    passed: float = 0
+    total: int = 0
 
     for test in test_positions:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
 
         if not board.is_check():
-            name = test["name"]
+            name: str = test["name"]
             print(f"  {dim(f'Skipping {name}: not actually in check')}")
             continue
 

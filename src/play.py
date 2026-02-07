@@ -68,13 +68,20 @@ Examples:
     neural_mate_play --train --resume pretrained --iterations 100
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import sys
+from typing import Any
+
+from torch._C import device
+
+from src.config import PretrainingConfig, TrainingConfig
 
 # Add src directory to path for imports
-_src_dir = os.path.dirname(os.path.abspath(__file__))
-_project_dir = os.path.dirname(_src_dir)
+_src_dir: str = os.path.dirname(os.path.abspath(__file__))
+_project_dir: str = os.path.dirname(_src_dir)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 if _project_dir not in sys.path:
@@ -87,7 +94,7 @@ def set_device(device: str) -> None:
         os.environ["NEURALMATE_DEVICE"] = device
 
 
-def detect_mode(args) -> str:
+def detect_mode(args: argparse.Namespace) -> str:
     """Detect which mode to run based on arguments."""
     if args.pretrain:
         return "pretrain"
@@ -98,7 +105,7 @@ def detect_mode(args) -> str:
     return "play"
 
 
-def resolve_resume(resume_name: str, checkpoint_dir: str = "checkpoints") -> str:
+def resolve_resume(resume_name: str, checkpoint_dir: str = "checkpoints") -> str | None:
     """
     Resolve resume checkpoint name to a file path.
 
@@ -107,27 +114,29 @@ def resolve_resume(resume_name: str, checkpoint_dir: str = "checkpoints") -> str
         checkpoint_dir: Directory containing checkpoints.
 
     Returns:
-        Path to network file.
+        Path to network file, or None if not found.
     """
     from alphazero.checkpoint_manager import CheckpointManager
 
     if resume_name == "pretrained":
         # Look for pretrained best network
-        pretrained_path = os.path.join(checkpoint_dir, "pretrained_best_network.pt")
+        pretrained_path: str = os.path.join(
+            checkpoint_dir, "pretrained_best_network.pt"
+        )
         if os.path.exists(pretrained_path):
             return pretrained_path
         # Fallback to other pretrained names
         for name in ["pretrained.pt", "pretrained_network.pt"]:
-            path = os.path.join(checkpoint_dir, name)
+            path: str = os.path.join(checkpoint_dir, name)
             if os.path.exists(path):
                 return path
         print(f"Warning: No pretrained network found in {checkpoint_dir}")
         return None
 
-    cm = CheckpointManager(checkpoint_dir, verbose=False)
+    cm: CheckpointManager = CheckpointManager(checkpoint_dir, verbose=False)
 
     if resume_name == "latest":
-        latest = cm.get_latest_checkpoint()
+        latest: str | None = cm.get_latest_checkpoint()
         if latest:
             return os.path.join(checkpoint_dir, f"{latest}_network.pt")
         return None
@@ -142,16 +151,16 @@ def resolve_resume(resume_name: str, checkpoint_dir: str = "checkpoints") -> str
 
 
 def run_gui(
-    network_path: str = None,
+    network_path: str | None = None,
     num_simulations: int = 200,
     verbose: bool = False,
-    time_control: int = None,
+    time_control: int | None = None,
 ) -> int:
     """Launch the graphical user interface for playing."""
     try:
         from ui.app import ChessGameApp
 
-        app = ChessGameApp(
+        app: ChessGameApp = ChessGameApp(
             network_path=network_path,
             num_simulations=num_simulations,
             verbose=verbose,
@@ -167,7 +176,7 @@ def run_gui(
 
 
 def run_cli(
-    network_path: str = None,
+    network_path: str | None = None,
     num_simulations: int = 200,
     batch_size: int = 8,
 ) -> int:
@@ -182,6 +191,7 @@ def run_cli(
     print(f"Device: {get_device()}")
 
     # Load or create network
+    network: DualHeadNetwork
     if network_path and os.path.exists(network_path):
         print(f"Loading network from {network_path}")
         network = DualHeadNetwork.load(network_path)
@@ -190,7 +200,7 @@ def run_cli(
         network = DualHeadNetwork()
 
     # Create MCTS with batched inference and WDL-aware settings
-    mcts = MCTS(
+    mcts: MCTS = MCTS(
         network,
         num_simulations=num_simulations,
         batch_size=batch_size,
@@ -199,11 +209,13 @@ def run_cli(
         uncertainty_weight=0.2,
         draw_sibling_fpu=True,
     )
-    mcts.temperature = 0.1  # Deterministic play
+    # Deterministic play
+    mcts.temperature = 0.1
 
     # Game loop
-    board = chess.Board()
-    history = PositionHistory(3)  # Track position history
+    board: chess.Board = chess.Board()
+    # Track position history
+    history: PositionHistory = PositionHistory(3)
     history.push(board)
 
     print("\nCommands:")
@@ -224,7 +236,7 @@ def run_cli(
         if board.turn == chess.WHITE:
             # Human plays white
             while True:
-                user_input = input("Your move: ").strip().lower()
+                user_input: str = input("Your move: ").strip().lower()
 
                 if user_input == "quit":
                     print("Goodbye!")
@@ -243,7 +255,7 @@ def run_cli(
                     break
 
                 try:
-                    move = chess.Move.from_uci(user_input)
+                    move: chess.Move = chess.Move.from_uci(user_input)
                     if move in board.legal_moves:
                         board.push(move)
                         history.push(board)
@@ -258,18 +270,20 @@ def run_cli(
             if not board.is_game_over():
                 print("Thinking...")
                 # Pass history to MCTS (excluding current position)
-                history_boards = history.get_boards()[1:]
-                move = mcts.get_best_move(board, history_boards=history_boards)
-                if move:
-                    print(f"Engine plays: {board.san(move)}")
-                    board.push(move)
+                history_boards: list[chess.Board] = history.get_boards()[1:]
+                engine_move: chess.Move | None = mcts.get_best_move(
+                    board, history_boards=history_boards
+                )
+                if engine_move:
+                    print(f"Engine plays: {board.san(engine_move)}")
+                    board.push(engine_move)
                     history.push(board)
                 else:
                     print("Engine has no move (game over?)")
 
 
 def run_match(
-    networks: list,
+    networks: list[str],
     num_games: int,
     num_simulations: int,
     gui: bool = False,
@@ -290,15 +304,15 @@ def run_match(
         print("Error: Match mode requires two networks")
         return 1
 
-    network1_path = networks[0]
-    network2_path = networks[1]
+    network1_path: str = networks[0]
+    network2_path: str = networks[1]
 
     if gui:
         # Visual match mode
         try:
             from ui.match_app import MatchApp
 
-            app = MatchApp(
+            app: MatchApp = MatchApp(
                 network1_path=network1_path,
                 network2_path=network2_path,
                 num_games=num_games,
@@ -313,33 +327,36 @@ def run_match(
         # CLI match mode
         import chess
         from alphazero import DualHeadNetwork, get_device
-        from alphazero.arena import Arena, NetworkPlayer, RandomPlayer, PureMCTSPlayer
+        from alphazero.arena import NetworkPlayer, RandomPlayer, PureMCTSPlayer
         from src.chess_encoding.board_utils import get_raw_material_diff
 
-        device = get_device()
+        device: device = get_device()
         print("NeuralMate2 Match Mode")
         print("=" * 60)
         print(f"Device: {device}")
 
         # Helper to get history_length from network
-        def get_history_length(network):
-            planes = network.num_input_planes
+        def get_history_length(network: DualHeadNetwork) -> int:
+            """Compute history length from the network's input plane count."""
+            planes: int = network.num_input_planes
             # 72 planes = (history_length + 1) * 12 + 24 (metadata + semantic + tactical)
             return (planes - 24) // 12 - 1
 
         # Load player 1
-        history_length = 0
+        history_length: int = 0
+        player1: NetworkPlayer | RandomPlayer | PureMCTSPlayer
+        name1: str
         if network1_path.lower() == "random":
             player1 = RandomPlayer(name="Random")
             name1 = "Random"
-            printf("Player 1: Random")
+            print("Player 1: Random")
         elif network1_path.lower() == "mcts":
             player1 = PureMCTSPlayer(num_simulations=num_simulations, name="PureMCTS")
             name1 = "PureMCTS"
             print(f"Player 1: Pure MCTS ({num_simulations} simulations)")
         else:
             print(f"Loading player 1: {network1_path}")
-            net1 = DualHeadNetwork.load(network1_path, device=device)
+            net1: DualHeadNetwork = DualHeadNetwork.load(network1_path, device=device)
             history_length = get_history_length(net1)
             name1 = os.path.splitext(os.path.basename(network1_path))[0]
             player1 = NetworkPlayer(
@@ -350,18 +367,20 @@ def run_match(
             )
 
         # Load player 2
+        player2: NetworkPlayer | RandomPlayer | PureMCTSPlayer
+        name2: str
         if network2_path.lower() == "random":
             player2 = RandomPlayer(name="Random")
             name2 = "Random"
-            print(f"Player 2: Random")
+            print("Player 2: Random")
         elif network2_path.lower() == "mcts":
             player2 = PureMCTSPlayer(num_simulations=num_simulations, name="PureMCTS")
             name2 = "PureMCTS"
             print(f"Player 2: Pure MCTS ({num_simulations} simulations)")
         else:
             print(f"Loading player 2: {network2_path}")
-            net2 = DualHeadNetwork.load(network2_path, device=device)
-            hl2 = get_history_length(net2)
+            net2: DualHeadNetwork = DualHeadNetwork.load(network2_path, device=device)
+            hl2: int = get_history_length(net2)
             history_length = max(history_length, hl2)
             name2 = os.path.splitext(os.path.basename(network2_path))[0]
             player2 = NetworkPlayer(
@@ -377,17 +396,14 @@ def run_match(
         print("=" * 60)
         print()
 
-        arena = Arena(
-            num_games=num_games,
-            num_simulations=num_simulations,
-            max_moves=200,
-            history_length=history_length,
-        )
-
-        results = {"player1": 0, "player2": 0, "draws": 0}
+        results: dict[str, int] = {"player1": 0, "player2": 0, "draws": 0}
 
         for game_num in range(num_games):
             # Alternate colors
+            white: NetworkPlayer | RandomPlayer | PureMCTSPlayer
+            black: NetworkPlayer | RandomPlayer | PureMCTSPlayer
+            white_name: str
+            black_name: str
             if game_num % 2 == 0:
                 white, black = player1, player2
                 white_name, black_name = name1, name2
@@ -396,20 +412,24 @@ def run_match(
                 white_name, black_name = name2, name1
 
             # Play game
-            board = chess.Board()
+            board: chess.Board = chess.Board()
             white.reset()
             black.reset()
-            move_count = 0
+            move_count: int = 0
 
             while not board.is_game_over() and move_count < 200:
-                current = white if board.turn == chess.WHITE else black
-                move = current.select_move(board)
+                current: NetworkPlayer | RandomPlayer | PureMCTSPlayer = (
+                    white if board.turn == chess.WHITE else black
+                )
+                move: chess.Move | None = current.select_move(board)
                 if move is None:
                     break
                 board.push(move)
                 move_count += 1
 
             # Determine result
+            winner: str
+            termination: str
             if board.is_checkmate():
                 winner = "black" if board.turn == chess.WHITE else "white"
                 termination = "checkmate"
@@ -424,6 +444,7 @@ def run_match(
                 termination = "other"
 
             # Update results
+            winner_str: str
             if winner == "white":
                 if white_name == name1:
                     results["player1"] += 1
@@ -441,9 +462,9 @@ def run_match(
                 winner_str = "Draw"
 
             # Calculate material advantage for draws
-            material_info = ""
+            material_info: str = ""
             if winner_str == "Draw":
-                diff = get_raw_material_diff(board)
+                diff: int = get_raw_material_diff(board)
                 if diff > 0:
                     material_info = f" [W+{diff}]"
                 elif diff < 0:
@@ -470,10 +491,10 @@ def run_match(
 
 
 def run_train(
-    config_path: str = None,
+    config_path: str | None = None,
     iterations: int = 10,
-    output_path: str = None,
-    resume: str = None,
+    output_path: str | None = None,
+    resume: str | None = None,
     gui: bool = False,
 ) -> int:
     """
@@ -494,7 +515,7 @@ def run_train(
         try:
             from ui.training_app import TrainingApp
 
-            app = TrainingApp(
+            app: TrainingApp = TrainingApp(
                 config_path=config_path,
                 resume_checkpoint=resume,
                 iterations=iterations,
@@ -508,15 +529,16 @@ def run_train(
     else:
         # CLI training mode - reuse train.py logic
         from alphazero import DualHeadNetwork, AlphaZeroTrainer
-        from config import Config
+        from src.config import Config
 
         # Load config
+        config: Config
         if config_path:
             config = Config.load(config_path)
         else:
             config = Config.default()
 
-        cfg = config.training
+        cfg: TrainingConfig = config.training
         cfg.iterations = iterations
         if output_path:
             cfg.checkpoint_path = os.path.dirname(output_path) or "checkpoints"
@@ -530,13 +552,14 @@ def run_train(
         print(f"  Checkpoint path: {cfg.checkpoint_path}")
 
         # Create or load network
+        network: DualHeadNetwork
         if resume:
-            checkpoint_path = resolve_resume(resume, cfg.checkpoint_path)
+            checkpoint_path: str | None = resolve_resume(resume, cfg.checkpoint_path)
             if checkpoint_path and os.path.exists(checkpoint_path):
                 print(f"\nLoading network from {checkpoint_path}")
                 network = DualHeadNetwork.load(checkpoint_path)
             else:
-                print(f"\nCheckpoint not found, creating new network")
+                print("\nCheckpoint not found, creating new network")
                 network = DualHeadNetwork()
         elif config.network:
             print("\nCreating network with config")
@@ -549,21 +572,26 @@ def run_train(
             network = DualHeadNetwork()
 
         # Create trainer
-        trainer = AlphaZeroTrainer(network, cfg)
+        trainer: AlphaZeroTrainer = AlphaZeroTrainer(network, cfg)
 
         # Training callback
-        def callback(data: dict) -> None:
-            phase = data.get("phase", "")
+        def callback(data: dict[str, Any]) -> None:
+            """Print training progress to console."""
+            phase: str = data.get("phase", "")
 
             if phase == "self_play":
-                games = data.get("games_played", 0)
-                total = data.get("total_games", 0)
-                print(f"\r  Self-play: {games}/{total} games", end="", flush=True)
+                games: int = data.get("games_played", 0)
+                total: int = data.get("total_games", 0)
+                print(
+                    f"\r  Self-play: {games}/{total} games",
+                    end="",
+                    flush=True,
+                )
 
             elif phase == "training":
-                epoch = data.get("epoch", 0)
-                epochs = data.get("epochs", 0)
-                loss = data.get("total_loss", 0)
+                epoch: int = data.get("epoch", 0)
+                epochs: int = data.get("epochs", 0)
+                loss: float = data.get("total_loss", 0)
                 print(
                     f"\r  Training: epoch {epoch}/{epochs}, loss={loss:.4f}",
                     end="",
@@ -571,14 +599,14 @@ def run_train(
                 )
 
             elif phase == "iteration_complete":
-                iteration = data.get("iteration", 0)
-                stats = data.get("stats", {})
+                iteration: int = data.get("iteration", 0)
+                stats: dict[str, Any] = data.get("stats", {})
                 print(f"\n  Iteration {iteration} complete")
                 print(f"    Buffer: {stats.get('buffer_size', 0)} positions")
                 print(f"    LR: {stats.get('learning_rate', 0):.6f}")
 
             elif phase == "arena_complete":
-                elo = data.get("elo", 1500)
+                elo: float = data.get("elo", 1500)
                 print(f"  Arena ELO: {elo:.0f}")
 
         # Run training
@@ -604,9 +632,9 @@ def run_train(
 
 
 def run_pretrain(
-    config_path: str = None,
+    config_path: str | None = None,
     epochs: int = 10,
-    output_path: str = None,
+    output_path: str | None = None,
 ) -> int:
     """
     Run supervised pretraining on master games.
@@ -619,16 +647,17 @@ def run_pretrain(
     Returns:
         Exit code.
     """
-    from config import Config
+    from src.config import Config
     from pretraining.pretrain import pretrain
 
     # Load config
+    config: Config
     if config_path:
         config = Config.load(config_path)
     else:
         config = Config.default()
 
-    cfg = config.pretraining
+    cfg: PretrainingConfig = config.pretraining
     cfg.epochs = epochs
     if output_path:
         cfg.output_path = output_path
@@ -653,7 +682,7 @@ def run_pretrain(
 
 def main() -> int:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="NeuralMate2 Chess Engine",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -803,13 +832,13 @@ Examples:
         help="Time control in minutes per player (e.g., --time 5 for 5 min each)",
     )
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Set device
     set_device(args.device)
 
     # Detect mode
-    mode = detect_mode(args)
+    mode: str = detect_mode(args)
 
     if mode == "pretrain":
         return run_pretrain(args.config, args.epochs, args.output)
@@ -831,8 +860,9 @@ Examples:
             gui=args.gui,
         )
 
-    else:  # play mode
-        network_path = args.network[0] if args.network else None
+    # play mode
+    else:
+        network_path: str | None = args.network[0] if args.network else None
         if args.cli:
             return run_cli(network_path, args.simulations)
         else:

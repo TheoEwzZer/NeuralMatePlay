@@ -14,7 +14,7 @@ from collections import deque
 import numpy as np
 
 
-class ReplayBuffer:
+class ReplayBuffer(object):
     """
     Circular buffer for storing and sampling training examples.
 
@@ -25,7 +25,7 @@ class ReplayBuffer:
         self,
         max_size: int = 500000,
         recent_weight: float = 0.8,
-    ):
+    ) -> None:
         """
         Initialize replay buffer.
 
@@ -34,12 +34,12 @@ class ReplayBuffer:
             recent_weight: Weight for sampling from recent examples (0-1).
                            0.8 means 80% of samples come from the recent 25%.
         """
-        self.max_size = max_size
-        self.recent_weight = recent_weight
+        self.max_size: int = max_size
+        self.recent_weight: float = recent_weight
 
-        self._states: deque = deque(maxlen=max_size)
-        self._policies: deque = deque(maxlen=max_size)
-        self._values: deque = deque(maxlen=max_size)
+        self._states: deque[np.ndarray] = deque(maxlen=max_size)
+        self._policies: deque[np.ndarray] = deque(maxlen=max_size)
+        self._values: deque[float] = deque(maxlen=max_size)
 
     def add(
         self,
@@ -77,9 +77,11 @@ class ReplayBuffer:
             # Value from the perspective of the player to move
             # Alternates based on whose turn it was
             if i % 2 == 0:
-                value = outcome  # White's perspective
+                # White's perspective
+                value: float = outcome
             else:
-                value = -outcome  # Black's perspective
+                # Black's perspective
+                value = -outcome
 
             self.add(state, policy, value)
 
@@ -95,7 +97,7 @@ class ReplayBuffer:
         Returns:
             Tuple of (states, policies, values) as numpy arrays.
         """
-        n = len(self)
+        n: int = len(self)
         if n == 0:
             raise ValueError("Cannot sample from empty buffer")
 
@@ -103,33 +105,33 @@ class ReplayBuffer:
 
         # Split between recent and old samples
         recent_count = int(batch_size * self.recent_weight)
-        old_count = batch_size - recent_count
+        old_count: int = batch_size - recent_count
 
         # Recent samples from last 25% of buffer
-        recent_start = max(0, n - n // 4)
-        recent_indices = random.sample(
+        recent_start: int = max(0, n - n // 4)
+        recent_indices: list[int] = random.sample(
             range(recent_start, n), min(recent_count, n - recent_start)
         )
 
         # Old samples from first 75% of buffer
         if recent_start > 0 and old_count > 0:
-            old_indices = random.sample(
+            old_indices: list[int] = random.sample(
                 range(0, recent_start), min(old_count, recent_start)
             )
         else:
             old_indices = []
 
         # Combine indices
-        indices = recent_indices + old_indices
+        indices: list[int] = recent_indices + old_indices
 
         # Fill remaining with random samples if needed
         while len(indices) < batch_size:
             indices.append(random.randrange(n))
 
         # Gather samples
-        states = np.array([self._states[i] for i in indices])
-        policies = np.array([self._policies[i] for i in indices])
-        values = np.array([self._values[i] for i in indices])
+        states: np.ndarray = np.array([self._states[i] for i in indices])
+        policies: np.ndarray = np.array([self._policies[i] for i in indices])
+        values: np.ndarray = np.array([self._values[i] for i in indices])
 
         return states, policies, values
 
@@ -145,16 +147,16 @@ class ReplayBuffer:
         Returns:
             Tuple of (states, policies, values) as numpy arrays.
         """
-        n = len(self)
+        n: int = len(self)
         if n == 0:
             raise ValueError("Cannot sample from empty buffer")
 
         batch_size = min(batch_size, n)
-        indices = random.sample(range(n), batch_size)
+        indices: list[int] = random.sample(range(n), batch_size)
 
-        states = np.array([self._states[i] for i in indices])
-        policies = np.array([self._policies[i] for i in indices])
-        values = np.array([self._values[i] for i in indices])
+        states: np.ndarray = np.array([self._states[i] for i in indices])
+        policies: np.ndarray = np.array([self._policies[i] for i in indices])
+        values: np.ndarray = np.array([self._values[i] for i in indices])
 
         return states, policies, values
 
@@ -168,9 +170,9 @@ class ReplayBuffer:
         if len(self) == 0:
             raise ValueError("Buffer is empty")
 
-        states = np.array(list(self._states))
-        policies = np.array(list(self._policies))
-        values = np.array(list(self._values))
+        states: np.ndarray = np.array(list(self._states))
+        policies: np.ndarray = np.array(list(self._policies))
+        values: np.ndarray = np.array(list(self._values))
 
         return states, policies, values
 
@@ -196,7 +198,7 @@ class ReplayBuffer:
             return 0
 
         purge_count = int(len(self) * ratio)
-        purge_count = min(purge_count, len(self))
+        purge_count: int = min(purge_count, len(self))
 
         for _ in range(purge_count):
             self._states.pop()
@@ -249,7 +251,7 @@ class ReplayBuffer:
         ):
             self.add(state, policy, float(value))
 
-    def get_statistics(self) -> dict:
+    def get_statistics(self) -> dict[str, int | float]:
         """
         Get buffer statistics.
 
@@ -263,7 +265,7 @@ class ReplayBuffer:
                 "fill_ratio": 0.0,
             }
 
-        values = np.array(list(self._values))
+        values: np.ndarray = np.array(list(self._values))
 
         return {
             "size": len(self),

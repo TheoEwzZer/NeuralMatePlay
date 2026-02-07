@@ -1,5 +1,9 @@
 """Test: Tempo Understanding."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for tempo understanding
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === GAIN TEMPO ===
     {
         "name": "Gain Tempo with Attack",
@@ -82,21 +89,23 @@ TEST_POSITIONS = [
 ]
 
 
-def test_tempo(network, results: TestResults):
+def test_tempo(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network understands tempo."""
     print(header("TEST: Tempo Understanding"))
 
-    passed = 0
-    total = 0
+    passed: float = 0
+    total: int = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_5 = np.argsort(policy)[::-1][:5]
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
 
         print(f"\n  Value: {value:+.4f}")
         print(f"  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Quality':<12}")
@@ -104,11 +113,11 @@ def test_tempo(network, results: TestResults):
 
         if test["tempo_type"] == "gain" or test["tempo_type"] == "avoid_waste":
             total += 1
-            expected_set = set(test.get("expected_moves", []))
-            bad_set = set(test.get("bad_moves", []))
+            expected_set: set[str] = set(test.get("expected_moves", []))
+            bad_set: set[str] = set(test.get("bad_moves", []))
 
-            good_found_at = None
-            bad_found_at = None
+            good_found_at: int | None = None
+            bad_found_at: int | None = None
 
             for i, idx in enumerate(top_5):
                 move = decode_move(idx, board)
@@ -154,7 +163,7 @@ def test_tempo(network, results: TestResults):
             results.add_diagnostic("tempo", f"{test['name']}_good_rank", good_found_at)
             results.add_diagnostic("tempo", f"{test['name']}_bad_rank", bad_found_at)
 
-    score = passed / total if total > 0 else 0
+    score: float = passed / total if total > 0 else 0
     results.add_diagnostic("tempo", "total_tested", total)
     results.add_diagnostic("tempo", "correct", passed)
     results.add("Tempo", score >= 0.4, score, 1.0)

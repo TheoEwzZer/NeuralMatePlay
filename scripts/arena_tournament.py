@@ -26,21 +26,20 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 # Add project root and src to path for imports
-project_root = os.path.join(os.path.dirname(__file__), "..")
+project_root: str = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "src"))
 
-from alphazero import DualHeadNetwork
-from alphazero.arena import Arena, NetworkPlayer
+from src.alphazero import DualHeadNetwork
+from src.alphazero.arena import Arena, NetworkPlayer
 from diagnostics.core.network_loader import get_available_checkpoints
 from diagnostics.core.colors import Colors, header, subheader
 
 
 @dataclass
-class PlayerStats:
+class PlayerStats(object):
     """Statistics for a single player in the tournament."""
 
     name: str
@@ -49,11 +48,12 @@ class PlayerStats:
     wins: int = 0
     losses: int = 0
     draws: int = 0
-    points: float = 0.0  # 1 for win, 0.5 for draw
+    # 1 for win, 0.5 for draw
+    points: float = 0.0
     games_played: int = 0
 
     # Head-to-head results: opponent_num -> (wins, losses, draws)
-    head_to_head: dict = field(default_factory=dict)
+    head_to_head: dict[int, tuple[int, int, int]] = field(default_factory=dict)
 
     @property
     def win_rate(self) -> float:
@@ -70,10 +70,12 @@ class PlayerStats:
 
 
 def load_checkpoints(
-    checkpoint_dir: str, checkpoint_type: str, max_checkpoints: Optional[int] = None
-):
+    checkpoint_dir: str, checkpoint_type: str, max_checkpoints: int | None = None
+) -> list[tuple[int, str]]:
     """Load all available checkpoints."""
-    checkpoints = get_available_checkpoints(checkpoint_dir, checkpoint_type)
+    checkpoints: list[tuple[int, str]] = get_available_checkpoints(
+        checkpoint_dir, checkpoint_type
+    )
 
     if not checkpoints:
         print(
@@ -83,10 +85,10 @@ def load_checkpoints(
 
     if max_checkpoints and len(checkpoints) > max_checkpoints:
         # Keep evenly distributed checkpoints including first and last
-        step = (
+        step: float = (
             (len(checkpoints) - 1) / (max_checkpoints - 1) if max_checkpoints > 1 else 1
         )
-        indices = [int(i * step) for i in range(max_checkpoints)]
+        indices: list[int] = [int(i * step) for i in range(max_checkpoints)]
         checkpoints = [checkpoints[i] for i in indices]
 
     return checkpoints
@@ -97,8 +99,8 @@ def run_tournament(
     checkpoint_type: str = "pretrain",
     num_games: int = 10,
     num_simulations: int = 100,
-    max_checkpoints: Optional[int] = None,
-):
+    max_checkpoints: int | None = None,
+) -> None:
     """Run a round-robin tournament between all checkpoints."""
 
     print(header("ARENA TOURNAMENT"))
@@ -109,7 +111,9 @@ def run_tournament(
     print()
 
     # Load checkpoints
-    checkpoints = load_checkpoints(checkpoint_dir, checkpoint_type, max_checkpoints)
+    checkpoints: list[tuple[int, str]] = load_checkpoints(
+        checkpoint_dir, checkpoint_type, max_checkpoints
+    )
 
     if len(checkpoints) < 2:
         print(f"{Colors.RED}Need at least 2 checkpoints for a tournament!{Colors.ENDC}")
@@ -117,22 +121,22 @@ def run_tournament(
 
     print(f"Found {len(checkpoints)} checkpoints:")
     for num, path in checkpoints:
-        label = "epoch" if checkpoint_type == "pretrain" else "iteration"
-        print(f"  - {label} {num}: {os.path.basename(path)}")
+        cp_label: str = "epoch" if checkpoint_type == "pretrain" else "iteration"
+        print(f"  - {cp_label} {num}: {os.path.basename(path)}")
     print()
 
     # Calculate total matches
-    n = len(checkpoints)
-    total_matches = n * (n - 1) // 2
-    total_games = total_matches * num_games
+    n: int = len(checkpoints)
+    total_matches: int = n * (n - 1) // 2
+    total_games: int = total_matches * num_games
 
     print(f"Total matches: {total_matches}")
     print(f"Total games:   {total_games}")
     print()
 
     # Initialize player stats
-    label = "Epoch" if checkpoint_type == "pretrain" else "Iter"
-    players = {}
+    label: str = "Epoch" if checkpoint_type == "pretrain" else "Iter"
+    players: dict[int, PlayerStats] = {}
     for num, path in checkpoints:
         players[num] = PlayerStats(
             name=f"{label} {num}",
@@ -142,7 +146,7 @@ def run_tournament(
 
     # Load networks
     print(subheader("Loading Networks"))
-    networks = {}
+    networks: dict[int, DualHeadNetwork] = {}
     for num, path in checkpoints:
         print(f"  Loading {label} {num}...", end=" ", flush=True)
         try:
@@ -154,7 +158,7 @@ def run_tournament(
     print()
 
     # Create arena
-    arena = Arena(
+    arena: Arena = Arena(
         num_games=num_games,
         num_simulations=num_simulations,
         max_moves=200,
@@ -162,10 +166,10 @@ def run_tournament(
 
     # Run round-robin
     print(subheader("Running Matches"))
-    match_count = 0
-    start_time = time.time()
+    match_count: int = 0
+    start_time: float = time.time()
 
-    checkpoint_nums = sorted(players.keys())
+    checkpoint_nums: list[int] = sorted(players.keys())
 
     for i, num1 in enumerate(checkpoint_nums):
         for num2 in checkpoint_nums[i + 1 :]:
@@ -176,25 +180,25 @@ def run_tournament(
             )
 
             # Create players
-            player1 = NetworkPlayer(
+            player1: NetworkPlayer = NetworkPlayer(
                 networks[num1],
                 num_simulations=num_simulations,
                 name=players[num1].name,
             )
-            player2 = NetworkPlayer(
+            player2: NetworkPlayer = NetworkPlayer(
                 networks[num2],
                 num_simulations=num_simulations,
                 name=players[num2].name,
             )
 
             # Play match
-            match_start = time.time()
-            results = arena.play_match(player1, player2)
-            match_time = time.time() - match_start
+            match_start: float = time.time()
+            results: dict[str, int] = arena.play_match(player1, player2)
+            match_time: float = time.time() - match_start
 
-            p1_wins = results["player1_wins"]
-            p2_wins = results["player2_wins"]
-            draws = results["draws"]
+            p1_wins: int = results["player1_wins"]
+            p2_wins: int = results["player2_wins"]
+            draws: int = results["draws"]
 
             # Update stats
             players[num1].wins += p1_wins
@@ -212,6 +216,7 @@ def run_tournament(
             players[num2].head_to_head[num1] = (p2_wins, p1_wins, draws)
 
             # Print result
+            result_str: str
             if p1_wins > p2_wins:
                 result_str = f"{Colors.GREEN}{p1_wins}-{p2_wins}{Colors.ENDC}"
             elif p2_wins > p1_wins:
@@ -224,7 +229,7 @@ def run_tournament(
 
             print(f"  Result: {result_str} ({match_time:.1f}s)")
 
-    total_time = time.time() - start_time
+    total_time: float = time.time() - start_time
 
     # Print results
     print()
@@ -236,7 +241,7 @@ def run_tournament(
     print(subheader("Final Rankings"))
 
     # Sort by points (desc), then win rate (desc), then checkpoint number (desc)
-    ranked = sorted(
+    ranked: list[PlayerStats] = sorted(
         players.values(),
         key=lambda p: (p.points, p.win_rate, p.checkpoint_num),
         reverse=True,
@@ -249,21 +254,25 @@ def run_tournament(
     print("-" * 76)
 
     for rank, player in enumerate(ranked, 1):
-        score = f"{player.score_rate*100:.1f}%"
-        win_rate = f"{player.win_rate*100:.1f}%"
+        score: str = f"{player.score_rate*100:.1f}%"
+        win_rate: str = f"{player.win_rate*100:.1f}%"
 
         # Color based on rank
+        color: str
         if rank == 1:
             color = Colors.GREEN
         elif rank == len(ranked):
             color = Colors.RED
         else:
             color = ""
-        end_color = Colors.ENDC if color else ""
+        end_color: str = Colors.ENDC if color else ""
 
-        print(
-            f"{color}{rank:<6}{player.name:<12}{player.points:<10.1f}{player.wins:<6}{player.draws:<6}{player.losses:<6}{score:<10}{win_rate:<10}{end_color}"
+        line: str = (
+            f"{rank:<6}{player.name:<12}{player.points:<10.1f}"
+            f"{player.wins:<6}{player.draws:<6}{player.losses:<6}"
+            f"{score:<10}{win_rate:<10}"
         )
+        print(f"{color}{line}{end_color}")
 
     print()
 
@@ -273,7 +282,7 @@ def run_tournament(
     print()
 
     # Header row
-    header_row = f"{'':>10}"
+    header_row: str = f"{'':>10}"
     for num in checkpoint_nums:
         header_row += f"{label[:1]}{num:>4} "
     print(header_row)
@@ -281,11 +290,14 @@ def run_tournament(
 
     # Data rows
     for num1 in checkpoint_nums:
-        row = f"{label[:1]}{num1:>4}     "
+        row: str = f"{label[:1]}{num1:>4}     "
         for num2 in checkpoint_nums:
             if num1 == num2:
                 row += "  -  "
             elif num2 in players[num1].head_to_head:
+                w: int
+                l: int
+                d: int
                 w, l, d = players[num1].head_to_head[num2]
                 if w > l:
                     row += f"{Colors.GREEN}{w}-{l}{Colors.ENDC}  "
@@ -300,7 +312,7 @@ def run_tournament(
     print()
 
     # Winner announcement
-    winner = ranked[0]
+    winner: PlayerStats = ranked[0]
     print(f"{Colors.GREEN}=== WINNER: {winner.name} ==={Colors.ENDC}")
     print(f"    Points: {winner.points:.1f} | Win Rate: {winner.win_rate*100:.1f}%")
     print()
@@ -310,31 +322,38 @@ def run_tournament(
 
     # Best against specific opponents
     for player in ranked:
-        best_opponent = None
-        best_score = -1
-        worst_opponent = None
-        worst_score = float("inf")
+        best_opponent: int | None = None
+        best_score: float = -1
+        worst_opponent: int | None = None
+        worst_score: float = float("inf")
 
         for opp_num, (w, l, d) in player.head_to_head.items():
-            score = w + 0.5 * d
-            if score > best_score:
-                best_score = score
+            opp_score: float = w + 0.5 * d
+            if opp_score > best_score:
+                best_score = opp_score
                 best_opponent = opp_num
-            if score < worst_score:
-                worst_score = score
+            if opp_score < worst_score:
+                worst_score = opp_score
                 worst_opponent = opp_num
 
         if best_opponent is not None:
-            w, l, d = player.head_to_head[best_opponent]
+            bw: int
+            bl: int
+            bd: int
+            bw, bl, bd = player.head_to_head[best_opponent]
             print(f"{player.name}:")
-            print(f"  Best vs:  {label} {best_opponent} ({w}-{l}, {d}D)")
-            if worst_opponent != best_opponent:
-                w, l, d = player.head_to_head[worst_opponent]
-                print(f"  Worst vs: {label} {worst_opponent} ({w}-{l}, {d}D)")
+            print(f"  Best vs:  {label} {best_opponent} ({bw}-{bl}, {bd}D)")
+            if worst_opponent != best_opponent and worst_opponent is not None:
+                ww: int
+                wl: int
+                wd: int
+                ww, wl, wd = player.head_to_head[worst_opponent]
+                print(f"  Worst vs: {label} {worst_opponent} ({ww}-{wl}, {wd}D)")
 
 
-def main():
-    parser = argparse.ArgumentParser(
+def main() -> None:
+    """Run arena tournament CLI."""
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="Run round-robin tournament between checkpoints",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -384,7 +403,7 @@ def main():
         help="Quick mode: 4 games, 50 simulations",
     )
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Quick mode overrides
     if args.quick:

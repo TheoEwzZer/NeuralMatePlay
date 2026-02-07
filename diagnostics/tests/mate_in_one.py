@@ -1,5 +1,9 @@
 """Test: Mate in 1."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -16,12 +20,15 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_mate_in_one(network, results: TestResults):
+
+def test_mate_in_one(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the network can find mate in 1."""
     print(header("TEST: Mate in 1"))
 
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === BACK RANK MATES (4 positions) ===
         {
             "name": "Back Rank Mate (Queen)",
@@ -113,16 +120,16 @@ def test_mate_in_one(network, results: TestResults):
         },
     ]
 
-    passed = 0
-    total_valid = 0
+    passed: float = 0
+    total_valid: int = 0
 
     for test in test_positions:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
         # Find all mate-in-1 moves
-        mate_moves = []
+        mate_moves: list[chess.Move] = []
         for move in board.legal_moves:
             board.push(move)
             if board.is_checkmate():
@@ -138,17 +145,19 @@ def test_mate_in_one(network, results: TestResults):
         print(f"\n  Mating moves: {[m.uci() for m in mate_moves]}")
 
         # Get network's prediction (with proper perspective handling)
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_idx = np.argmax(policy)
-        top_move = decode_move(top_idx, board)
-        top_prob = policy[top_idx]
+        top_idx: int = np.argmax(policy)
+        top_move: chess.Move | None = decode_move(top_idx, board)
+        top_prob: float = policy[top_idx]
 
         print(f"  Value evaluation: {value:+.4f}")
 
         # Check all top moves
-        top_5 = np.argsort(policy)[::-1][:5]
-        mate_found_at = None
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
+        mate_found_at: int | None = None
 
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Mate?':<10}")
         print("  " + "-" * 35)
@@ -219,7 +228,7 @@ def test_mate_in_one(network, results: TestResults):
         results.add("Mate in 1", False, 0.0, 1.0)
         return 0.0
 
-    score = passed / total_valid
+    score: float = passed / total_valid
     results.add_diagnostic("mate_in_1", "total_tested", total_valid)
     results.add_diagnostic("mate_in_1", "mates_found", passed)
     results.add("Mate in 1", passed >= total_valid * 0.5, score, 1.0)

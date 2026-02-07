@@ -5,36 +5,57 @@ Defines colors, fonts, and styling utilities for consistent
 appearance across the application.
 """
 
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional, Callable
+from collections.abc import Callable
+from typing import LiteralString, Optional
 
 
 # Color palette - Modern dark theme
-COLORS = {
+COLORS: dict[str, str] = {
     # Background colors
-    "bg_primary": "#1a1a2e",  # Main background
-    "bg_secondary": "#16213e",  # Panel background
-    "bg_tertiary": "#0f3460",  # Elevated elements
+    # Main background
+    "bg_primary": "#1a1a2e",
+    # Panel background
+    "bg_secondary": "#16213e",
+    # Elevated elements
+    "bg_tertiary": "#0f3460",
     # Chess board colors
-    "light_square": "#ebecd0",  # Light squares (cream)
-    "dark_square": "#739552",  # Dark squares (green)
+    # Light squares (cream)
+    "light_square": "#ebecd0",
+    # Dark squares (green)
+    "dark_square": "#739552",
     # Highlight colors
-    "selected_light": "#f5f682",  # Selected light square
-    "selected_dark": "#b9ca43",  # Selected dark square
-    "hover_light": "#ffffff",  # Drag hover on light square
-    "hover_dark": "#c8c8c8",  # Drag hover on dark square
-    "legal_move": "#646d40",  # Legal move indicator
-    "last_move": "#f6f669",  # Last move highlight
-    "check": "#e94560",  # King in check
+    # Selected light square
+    "selected_light": "#f5f682",
+    # Selected dark square
+    "selected_dark": "#b9ca43",
+    # Drag hover on light square
+    "hover_light": "#ffffff",
+    # Drag hover on dark square
+    "hover_dark": "#c8c8c8",
+    # Legal move indicator
+    "legal_move": "#646d40",
+    # Last move highlight
+    "last_move": "#f6f669",
+    # King in check
+    "check": "#e94560",
     # Accent colors
-    "accent": "#e94560",  # Primary accent (red-pink)
-    "accent_secondary": "#0ead69",  # Secondary accent (green)
-    "accent_tertiary": "#4cc9f0",  # Tertiary accent (blue)
+    # Primary accent (red-pink)
+    "accent": "#e94560",
+    # Secondary accent (green)
+    "accent_secondary": "#0ead69",
+    # Tertiary accent (blue)
+    "accent_tertiary": "#4cc9f0",
     # Text colors
-    "text_primary": "#ffffff",  # Primary text
-    "text_secondary": "#a0a0a0",  # Secondary text
-    "text_muted": "#666666",  # Muted text
+    # Primary text
+    "text_primary": "#ffffff",
+    # Secondary text
+    "text_secondary": "#a0a0a0",
+    # Muted text
+    "text_muted": "#666666",
     # Button colors
     "button_bg": "#0f3460",
     "button_hover": "#1a4a7a",
@@ -81,9 +102,12 @@ COLORS = {
     # Opening display
     "opening_eco": "#a78bfa",
     # Timer colors
-    "timer_urgent": "#ef4444",  # Red - < 30s
-    "timer_warning": "#f59e0b",  # Orange - < 1min
-    "player_active_bg": "#3b82f6",  # Blue - active player timer background
+    # Red - < 30s
+    "timer_urgent": "#ef4444",
+    # Orange - < 1min
+    "timer_warning": "#f59e0b",
+    # Blue - active player timer background
+    "player_active_bg": "#3b82f6",
 }
 
 # Font configurations
@@ -101,23 +125,35 @@ FONTS = {
 }
 
 # Chess piece Unicode characters
-PIECE_UNICODE = {
-    "K": "\u2654",  # White King
-    "Q": "\u2655",  # White Queen
-    "R": "\u2656",  # White Rook
-    "B": "\u2657",  # White Bishop
-    "N": "\u2658",  # White Knight
-    "P": "\u2659",  # White Pawn
-    "k": "\u265a",  # Black King
-    "q": "\u265b",  # Black Queen
-    "r": "\u265c",  # Black Rook
-    "b": "\u265d",  # Black Bishop
-    "n": "\u265e",  # Black Knight
-    "p": "\u265f",  # Black Pawn
+PIECE_UNICODE: dict[str, str] = {
+    # White King
+    "K": "\u2654",
+    # White Queen
+    "Q": "\u2655",
+    # White Rook
+    "R": "\u2656",
+    # White Bishop
+    "B": "\u2657",
+    # White Knight
+    "N": "\u2658",
+    # White Pawn
+    "P": "\u2659",
+    # Black King
+    "k": "\u265a",
+    # Black Queen
+    "q": "\u265b",
+    # Black Rook
+    "r": "\u265c",
+    # Black Bishop
+    "b": "\u265d",
+    # Black Knight
+    "n": "\u265e",
+    # Black Pawn
+    "p": "\u265f",
 }
 
 # Alternative piece symbols (for better rendering on some systems)
-PIECE_UNICODE_ALT = {
+PIECE_UNICODE_ALT: dict[str, str] = {
     "K": "♔",
     "Q": "♕",
     "R": "♖",
@@ -133,7 +169,7 @@ PIECE_UNICODE_ALT = {
 }
 
 # Status icons for accessibility (don't rely on color alone)
-STATUS_ICONS = {
+STATUS_ICONS: dict[str, str] = {
     "success": "✓",
     "warning": "⚠",
     "error": "✗",
@@ -252,9 +288,9 @@ def apply_theme(root: tk.Tk) -> None:
 def create_styled_button(
     parent: tk.Widget,
     text: str,
-    command: callable = None,
+    command: Callable[[], None] | None = None,
     style: str = "normal",
-    width: int = None,
+    width: int | None = None,
 ) -> tk.Button:
     """
     Create a styled button.
@@ -285,7 +321,6 @@ def create_styled_button(
     btn = tk.Button(
         parent,
         text=text,
-        command=command,
         bg=bg,
         fg=COLORS["text_primary"],
         font=FONTS["body_bold"],
@@ -296,15 +331,19 @@ def create_styled_button(
         padx=20,
         pady=10,
     )
+    if command is not None:
+        btn.configure(command=command)
 
     if width:
         btn.configure(width=width)
 
     # Hover effects
-    def on_enter(e):
+    def on_enter(e: tk.Event[tk.Button]) -> None:
+        """Apply hover background color."""
         btn.configure(bg=hover_bg)
 
-    def on_leave(e):
+    def on_leave(e: tk.Event[tk.Button]) -> None:
+        """Restore default background color."""
         btn.configure(bg=bg)
 
     btn.bind("<Enter>", on_enter)
@@ -346,7 +385,7 @@ def create_styled_label(
 
 def create_panel(
     parent: tk.Widget,
-    title: str = None,
+    title: str | None = None,
     padding: int = 15,
 ) -> tk.Frame:
     """
@@ -389,7 +428,7 @@ class ProgressBar(tk.Canvas):
         width: int = 200,
         height: int = 10,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(
             parent,
             width=width,
@@ -398,13 +437,13 @@ class ProgressBar(tk.Canvas):
             highlightthickness=0,
             **kwargs,
         )
-        self.width = width
-        self.height = height
+        self.width: int = width
+        self.height: int = height
         self._value = 0
 
     def set_value(self, value: float) -> None:
         """Set progress value (0.0 to 1.0)."""
-        self._value = max(0, min(1, value))
+        self._value: float = max(0, min(1, value))
         self.delete("progress")
 
         if self._value > 0:
@@ -431,9 +470,9 @@ class Spinner(tk.Canvas):
         self,
         parent: tk.Widget,
         size: int = 24,
-        color: str = None,
+        color: str | None = None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(
             parent,
             width=size,
@@ -442,11 +481,11 @@ class Spinner(tk.Canvas):
             highlightthickness=0,
             **kwargs,
         )
-        self.size = size
-        self.color = color or COLORS["accent"]
-        self._angle = 0
-        self._running = False
-        self._animation_id = None
+        self.size: int = size
+        self.color: str = color or COLORS["accent"]
+        self._angle: int = 0
+        self._running: bool = False
+        self._animation_id: str | None = None
 
     def start(self) -> None:
         """Start the spinner animation."""
@@ -468,23 +507,18 @@ class Spinner(tk.Canvas):
             return
 
         self.delete("spinner")
-        cx = self.size // 2
-        cy = self.size // 2
-        radius = self.size // 2 - 3
+        cx: int = self.size // 2
+        cy: int = self.size // 2
+        radius: int = self.size // 2 - 3
 
         # Draw arc segments with varying opacity
         import math
 
         for i in range(8):
-            start_angle = (self._angle + i * 45) % 360
-            # Vary the color intensity for each segment
-            intensity = int(255 * (i + 1) / 8)
-            segment_color = f"#{intensity:02x}{intensity//4:02x}{intensity//3:02x}"
+            start_angle: int = (self._angle + i * 45) % 360
 
-            x1 = cx + radius * math.cos(math.radians(start_angle))
-            y1 = cy + radius * math.sin(math.radians(start_angle))
-            x2 = cx + radius * math.cos(math.radians(start_angle + 30))
-            y2 = cy + radius * math.sin(math.radians(start_angle + 30))
+            x1: float = cx + radius * math.cos(math.radians(start_angle))
+            y1: float = cy + radius * math.sin(math.radians(start_angle))
 
             self.create_line(
                 cx,
@@ -513,11 +547,11 @@ class ThinkingIndicator(tk.Label):
         parent: tk.Widget,
         text: str = "Thinking",
         **kwargs,
-    ):
-        self.base_text = text
-        self._dots = 0
-        self._running = False
-        self._animation_id = None
+    ) -> None:
+        self.base_text: str = text
+        self._dots: int = 0
+        self._running: bool = False
+        self._animation_id: str | None = None
 
         super().__init__(
             parent,
@@ -547,7 +581,7 @@ class ThinkingIndicator(tk.Label):
             return
 
         self._dots = (self._dots + 1) % 4
-        dots = "." * self._dots + " " * (3 - self._dots)
+        dots: str = "." * self._dots + " " * (3 - self._dots)
         self.configure(text=f"{self.base_text}{dots}")
         self._animation_id = self.after(400, self._animate)
 
@@ -557,7 +591,7 @@ class ThinkingIndicator(tk.Label):
         super().destroy()
 
 
-class Tooltip:
+class Tooltip(object):
     """Tooltip widget that appears on hover."""
 
     def __init__(
@@ -565,10 +599,10 @@ class Tooltip:
         widget: tk.Widget,
         text: str,
         delay: int = 500,
-    ):
-        self.widget = widget
-        self.text = text
-        self.delay = delay
+    ) -> None:
+        self.widget: tk.Widget = widget
+        self.text: str = text
+        self.delay: int = delay
         self._tooltip_window: Optional[tk.Toplevel] = None
         self._schedule_id: Optional[str] = None
 
@@ -576,11 +610,11 @@ class Tooltip:
         widget.bind("<Leave>", self._on_leave)
         widget.bind("<ButtonPress>", self._on_leave)
 
-    def _on_enter(self, event=None) -> None:
+    def _on_enter(self, event: tk.Event[tk.Widget] | None = None) -> None:
         """Schedule tooltip display."""
         self._schedule_id = self.widget.after(self.delay, self._show)
 
-    def _on_leave(self, event=None) -> None:
+    def _on_leave(self, event: tk.Event[tk.Widget] | None = None) -> None:
         """Cancel and hide tooltip."""
         if self._schedule_id:
             self.widget.after_cancel(self._schedule_id)
@@ -592,8 +626,8 @@ class Tooltip:
         if self._tooltip_window:
             return
 
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        x: int = self.widget.winfo_rootx() + 20
+        y: int = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
 
         self._tooltip_window = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
@@ -648,12 +682,12 @@ class StatusLabel(tk.Frame):
         text: str = "",
         status: str = "info",
         **kwargs,
-    ):
+    ) -> None:
         bg = kwargs.pop("bg", COLORS["bg_primary"])
         super().__init__(parent, bg=bg, **kwargs)
 
-        self._status = status
-        self._text = text
+        self._status: str = status
+        self._text: str = text
 
         # Icon label
         self._icon_label = tk.Label(
@@ -677,7 +711,7 @@ class StatusLabel(tk.Frame):
 
     def _get_status_color(self, status: str) -> str:
         """Get color for status type."""
-        color_map = {
+        color_map: dict[str, str] = {
             "success": COLORS["success"],
             "warning": COLORS["warning"],
             "error": COLORS["error"],
@@ -699,11 +733,11 @@ class StatusLabel(tk.Frame):
 
 
 def create_confirmation_dialog(
-    parent: tk.Widget,
+    parent: tk.Misc,
     title: str,
     message: str,
     on_confirm: Callable[[], None],
-    on_cancel: Callable[[], None] = None,
+    on_cancel: Callable[[], None] | None = None,
     confirm_text: str = "Confirm",
     cancel_text: str = "Cancel",
 ) -> tk.Toplevel:
@@ -725,7 +759,7 @@ def create_confirmation_dialog(
     dialog = tk.Toplevel(parent)
     dialog.title(title)
     dialog.configure(bg=COLORS["bg_primary"])
-    dialog.transient(parent)
+    dialog.transient(parent.winfo_toplevel())
     dialog.grab_set()
 
     # Center on parent
@@ -747,19 +781,25 @@ def create_confirmation_dialog(
     btn_frame = tk.Frame(dialog, bg=COLORS["bg_primary"])
     btn_frame.pack(pady=10)
 
-    def confirm():
+    def confirm() -> None:
+        """Close dialog and execute confirm callback."""
         dialog.destroy()
         on_confirm()
 
-    def cancel():
+    def cancel() -> None:
+        """Close dialog and execute cancel callback if provided."""
         dialog.destroy()
         if on_cancel:
             on_cancel()
 
-    cancel_btn = create_styled_button(btn_frame, cancel_text, cancel, style="outline")
+    cancel_btn: tk.Button = create_styled_button(
+        btn_frame, cancel_text, cancel, style="outline"
+    )
     cancel_btn.pack(side=tk.LEFT, padx=5)
 
-    confirm_btn = create_styled_button(btn_frame, confirm_text, confirm, style="accent")
+    confirm_btn: tk.Button = create_styled_button(
+        btn_frame, confirm_text, confirm, style="accent"
+    )
     confirm_btn.pack(side=tk.LEFT, padx=5)
 
     # Handle ESC key
@@ -767,8 +807,8 @@ def create_confirmation_dialog(
 
     # Center dialog on screen
     dialog.update_idletasks()
-    x = (dialog.winfo_screenwidth() - 300) // 2
-    y = (dialog.winfo_screenheight() - 150) // 2
+    x: int = (dialog.winfo_screenwidth() - 300) // 2
+    y: int = (dialog.winfo_screenheight() - 150) // 2
     dialog.geometry(f"+{x}+{y}")
 
     return dialog

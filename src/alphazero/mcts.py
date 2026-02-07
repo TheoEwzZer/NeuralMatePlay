@@ -11,10 +11,11 @@ Features:
 """
 
 import math
-from typing import Optional
+from typing import Any, Iterator, Literal, Optional
 from dataclasses import dataclass, field
 
 import chess
+from matplotlib.pylab import Generator
 import numpy as np
 
 from .network import DualHeadNetwork
@@ -31,18 +32,23 @@ from .spatial_encoding import (
 
 
 @dataclass
-class MCTSNode:
+class MCTSNode(object):
     """
     Node in the MCTS tree.
 
     Stores visit counts, value estimates, and child nodes.
     """
 
-    prior: float = 0.0  # P(s, a) - prior probability from policy network
-    visit_count: int = 0  # N(s, a) - number of visits
-    total_value: float = 0.0  # W(s, a) - total value from all visits
-    virtual_loss: int = 0  # Virtual loss for parallel search
-    children: dict = field(default_factory=dict)  # move -> MCTSNode
+    # P(s, a) - prior probability from policy network
+    prior: float = 0.0
+    # N(s, a) - number of visits
+    visit_count: int = 0
+    # W(s, a) - total value from all visits
+    total_value: float = 0.0
+    # Virtual loss for parallel search
+    virtual_loss: int = 0
+    # move -> MCTSNode
+    children: dict[chess.Move, "MCTSNode"] = field(default_factory=dict)
     is_expanded: bool = False
     # WDL probabilities: [P(win), P(draw), P(loss)] - summed for averaging
     total_wdl: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float32))
@@ -68,7 +74,7 @@ class MCTSNode:
         return self.visit_count + self.virtual_loss
 
 
-class MCTS:
+class MCTS(object):
     """
     Monte Carlo Tree Search with neural network guidance.
 
@@ -86,13 +92,18 @@ class MCTS:
         dirichlet_epsilon: float = 0.25,
         batch_size: int = 8,
         history_length: int = DEFAULT_HISTORY_LENGTH,
-        fpu_reduction: float = 0.25,  # First Play Urgency reduction
-        temperature: float = 0.0,  # 0 = deterministic, >0 = sample from policy
+        # First Play Urgency reduction
+        fpu_reduction: float = 0.25,
+        # 0 = deterministic, >0 = sample from policy
+        temperature: float = 0.0,
         # WDL-aware parameters
-        contempt: float = 0.0,  # Dynamic draw penalty (scales with W-L)
-        uncertainty_weight: float = 0.0,  # Exploration bonus for sharp positions
-        draw_sibling_fpu: bool = False,  # Adaptive FPU when draw is found
-    ):
+        # Dynamic draw penalty (scales with W-L)
+        contempt: float = 0.0,
+        # Exploration bonus for sharp positions
+        uncertainty_weight: float = 0.0,
+        # Adaptive FPU when draw is found
+        draw_sibling_fpu: bool = False,
+    ) -> None:
         """
         Initialize MCTS.
 
@@ -111,22 +122,22 @@ class MCTS:
             uncertainty_weight: Bonus for exploring sharp positions (high W and L).
             draw_sibling_fpu: If True, don't reduce FPU when a draw move is found.
         """
-        self.network = network
-        self.num_simulations = num_simulations
-        self.c_puct = c_puct
-        self.dirichlet_alpha = dirichlet_alpha
-        self.dirichlet_epsilon = dirichlet_epsilon
-        self.batch_size = batch_size
-        self.history_length = history_length
-        self.fpu_reduction = fpu_reduction
-        self.temperature = temperature
+        self.network: DualHeadNetwork = network
+        self.num_simulations: int = num_simulations
+        self.c_puct: float = c_puct
+        self.dirichlet_alpha: float = dirichlet_alpha
+        self.dirichlet_epsilon: float = dirichlet_epsilon
+        self.batch_size: int = batch_size
+        self.history_length: int = history_length
+        self.fpu_reduction: float = fpu_reduction
+        self.temperature: float = temperature
         # WDL-aware settings
-        self.contempt = contempt
-        self.uncertainty_weight = uncertainty_weight
-        self.draw_sibling_fpu = draw_sibling_fpu
+        self.contempt: float = contempt
+        self.uncertainty_weight: float = uncertainty_weight
+        self.draw_sibling_fpu: bool = draw_sibling_fpu
 
         # Random number generator
-        self._rng = np.random.default_rng(42)
+        self._rng: Generator = np.random.default_rng(42)
 
         # Transposition table (position hash -> node)
         self._transposition_table: dict[str, MCTSNode] = {}
@@ -134,7 +145,8 @@ class MCTS:
         # Evaluation cache (position hash -> (policy, value, wdl))
         # Avoids re-evaluating same positions reached via different paths
         self._eval_cache: dict[str, tuple[np.ndarray, float, np.ndarray]] = {}
-        self._max_eval_cache_size = 50000  # ~400MB max (8KB per entry)
+        # ~400MB max (8KB per entry)
+        self._max_eval_cache_size = 50000
 
         # Position history tracker
         self._history = PositionHistory(history_length)
@@ -159,10 +171,12 @@ class MCTS:
         """
         # Store initial history for use during simulations
         # history_boards should be [T-1, T-2, ...] (most recent first, excluding current)
-        self._initial_history = history_boards if history_boards is not None else []
+        self._initial_history: list[chess.Board] = (
+            history_boards if history_boards is not None else []
+        )
 
         # Get or create root node
-        root = self._get_or_create_node(board)
+        root: MCTSNode = self._get_or_create_node(board)
 
         # Expand root if needed
         if not root.is_expanded:
@@ -176,17 +190,19 @@ class MCTS:
         self._run_batched_simulations(board, root, self.num_simulations)
 
         # Build policy from visit counts
-        policy = np.zeros(MOVE_ENCODING_SIZE, dtype=np.float32)
-        flip = board.turn == chess.BLACK
+        policy: np.ndarray[tuple[int], np.dtype[np.floating]] = np.zeros(
+            MOVE_ENCODING_SIZE, dtype=np.float32
+        )
+        flip: bool = board.turn == chess.BLACK
 
-        total_visits = sum(child.visit_count for child in root.children.values())
+        total_visits: int = sum(child.visit_count for child in root.children.values())
 
         # Check for REAL winning moves: must be checkmate (not just high Q-value)
         # Q-values > 1.0 are numerical errors, not real wins
         winning_moves = []
         for move, child in root.children.items():
             if child.visit_count > 0:
-                test_board = board.copy()
+                test_board: chess.Board = board.copy()
                 test_board.push(move)
                 if test_board.is_checkmate():
                     winning_moves.append((move, child))
@@ -194,7 +210,7 @@ class MCTS:
         if winning_moves:
             # Found checkmate(s): select the one with most visits (most explored)
             best_move, _ = max(winning_moves, key=lambda x: x[1].visit_count)
-            idx = encode_move_from_perspective(best_move, flip)
+            idx: int | None = encode_move_from_perspective(best_move, flip)
             if idx is not None:
                 policy[idx] = 1.0
         elif total_visits == 0:
@@ -234,32 +250,32 @@ class MCTS:
                     policy /= policy_sum
             else:
                 # Temperature 0: deterministic selection by visits
-                sorted_children = sorted(
+                sorted_children: list[tuple[chess.Move, MCTSNode]] = sorted(
                     [(m, c) for m, c in root.children.items() if c.visit_count > 0],
                     key=lambda x: (x[1].visit_count, -x[1].q_value),
                     reverse=True,
                 )
 
                 best_move = None
-                winning_mates = []  # (move, mate_distance) - mats pour nous
-                losing_mates = (
-                    []
-                )  # (move, mate_distance, visits) - mats pour adversaire
+                # (move, mate_distance) - mates for us
+                winning_mates = []
+                # (move, mate_distance, visits) - mates for opponent
+                losing_mates = []
 
-                # Analyser chaque coup
+                # Analyze each move
                 for move, child in sorted_children:
                     test_board = board.copy()
                     test_board.push(move)
 
-                    # Mat en 1 pour nous ? (100% fiable)
+                    # Mate for us? (to play immediately)
                     if test_board.is_checkmate():
                         winning_mates.append((move, 1))
                         continue
 
-                    # Seulement si le coup a été suffisamment exploré (évite faux positifs)
+                    # Only if the move has been explored enough (avoids false positives)
                     if child.visit_count >= 5:
-                        # Mat plus profond pour nous ? (via MCTS tree)
-                        our_mate = self._find_forced_mate(
+                        # Deeper mate for us? (via MCTS tree)
+                        our_mate: int | None = self._find_forced_mate(
                             child,
                             test_board,
                             is_our_turn=False,
@@ -270,8 +286,8 @@ class MCTS:
                             winning_mates.append((move, our_mate))
                             continue
 
-                        # Mat pour l'adversaire ? (à éviter)
-                        opp_mate = self._find_forced_mate(
+                        # Mate for the opponent? (to avoid)
+                        opp_mate: int | None = self._find_forced_mate(
                             child,
                             test_board,
                             is_our_turn=True,
@@ -281,13 +297,13 @@ class MCTS:
                         if opp_mate is not None:
                             losing_mates.append((move, opp_mate, child.visit_count))
 
-                # Priorité 1: Jouer le mat le plus rapide pour nous
+                # Priority 1: Play the fastest mate for us
                 if winning_mates:
                     winning_mates.sort(key=lambda x: x[1])
                     best_move = winning_mates[0][0]
                 else:
-                    # Priorité 2: Coup le plus visité qui ne mène pas à un mat adverse
-                    # NI à une nulle par répétition (si on ne perd pas gravement)
+                    # Priority 2: Most visited move that doesn't lead to opponent mate
+                    # NOR to a draw by repetition (if we're not losing badly)
                     dominated_moves = {m for m, _, _ in losing_mates}
                     # repetition_moves already computed above
                     dominated_moves = dominated_moves | repetition_moves
@@ -297,14 +313,13 @@ class MCTS:
                             best_move = move
                             break
 
-                    # Priorité 3: Tous les coups perdent → mat le plus loin, puis plus visité
+                    # Priority 3: All moves lose → longest mate distance, then most visited
                     if best_move is None and losing_mates:
-                        # Trier par: mat_distance DESC (plus loin = mieux), puis visits DESC
+                        # Sort by: mate_distance DESC (further = better), then visits DESC
                         losing_mates.sort(key=lambda x: (-x[1], -x[2]))
                         best_move = losing_mates[0][0]
-                        mate_dist = losing_mates[0][1]
 
-                    # Fallback: prendre le plus visité
+                    # Fallback: take the most visited
                     if best_move is None and sorted_children:
                         best_move = sorted_children[0][0]
 
@@ -314,7 +329,9 @@ class MCTS:
                         policy[idx] = 1.0
 
         # Apply temperature
-        if self.temperature > 0 and self.temperature != 1.0:
+        if self.temperature > 0 and not np.isclose(
+            self.temperature, 1.0, rtol=1e-09, atol=1e-09
+        ):
             # Raise to power of 1/temperature
             policy = np.power(policy + 1e-10, 1.0 / self.temperature)
             policy /= policy.sum() + 1e-10
@@ -341,14 +358,14 @@ class MCTS:
         if not list(board.legal_moves):
             return None
 
-        policy = self.search(board, add_noise, history_boards)
+        policy: np.ndarray = self.search(board, add_noise, history_boards)
 
         # Sample or select best move based on temperature
         if self.temperature > 0:
             # Sample from policy
             policy = policy / (policy.sum() + 1e-10)
             try:
-                idx = self._rng.choice(len(policy), p=policy)
+                idx: int | np.intp = self._rng.choice(len(policy), p=policy)
             except ValueError:
                 # Fallback to argmax if sampling fails
                 idx = np.argmax(policy)
@@ -356,17 +373,17 @@ class MCTS:
             idx = np.argmax(policy)
 
         # Decode move
-        flip = board.turn == chess.BLACK
-        move = decode_move_from_perspective(idx, board, flip)
+        flip: bool = board.turn == chess.BLACK
+        move: chess.Move | None = decode_move_from_perspective(idx, board, flip)
 
         # Fallback to most visited child if decode fails
         if move is None:
-            root = self._get_or_create_node(board)
+            root: MCTSNode = self._get_or_create_node(board)
             if root.children:
                 # Check for checkmate first
                 for m, c in root.children.items():
                     if c.visit_count > 0:
-                        test_board = board.copy()
+                        test_board: chess.Board = board.copy()
                         test_board.push(m)
                         if test_board.is_checkmate():
                             move = m
@@ -388,7 +405,8 @@ class MCTS:
         Returns:
             Value of the terminal/leaf state.
         """
-        path = [(None, node)]  # (move, node) pairs
+        # (move, node) pairs
+        path: list[tuple[chess.Move | None, MCTSNode]] = [(None, node)]
 
         # Selection: traverse tree to leaf
         while node.is_expanded and node.children:
@@ -397,7 +415,7 @@ class MCTS:
                 break
 
             # Select best child using PUCT
-            move, child = self._select_child(node, board)
+            move, child = self._select_child(node)
 
             # Safety check: verify move is legal (transposition table can cause issues)
             if move is None or move not in board.legal_moves:
@@ -414,11 +432,11 @@ class MCTS:
         # Get value
         if board.is_game_over():
             # Terminal state
-            result = board.result()
+            result: str = board.result()
             if result == "1-0":
                 value = 1.0
             elif result == "0-1":
-                value = -1.0
+                value: float = -1.0
             else:
                 value = 0.0
             # Adjust for perspective
@@ -478,19 +496,19 @@ class MCTS:
             - is_terminal: True if leaf is a terminal game state
             - history_boards: list of boards [current, T-1, T-2, ...] for encoding
         """
-        node = root
-        path = [(None, node)]
+        node: MCTSNode = root
+        path: list[tuple[chess.Move | None, MCTSNode]] = [(None, node)]
 
         # Build history: start with initial history and root position
         # history_boards will be [current, T-1, T-2, ...] at the end
         # Take the LAST history_length positions and reverse to get [T-1, T-2, T-3] order
         if self._initial_history:
-            recent_history = list(
+            recent_history: list[chess.Board] = list(
                 reversed(self._initial_history[-self.history_length :])
             )
         else:
             recent_history = []
-        history_boards = [root_board.copy()] + recent_history
+        history_boards: list[chess.Board] = [root_board.copy()] + recent_history
 
         # Selection: traverse tree to leaf
         while node.is_expanded and node.children:
@@ -499,7 +517,7 @@ class MCTS:
                 return path, board, True, history_boards
 
             # Select best child using PUCT
-            move, child = self._select_child(node, board)
+            move, child = self._select_child(node)
 
             # Safety check: verify move is legal (transposition table can cause issues)
             if move is None or move not in board.legal_moves:
@@ -518,12 +536,12 @@ class MCTS:
             history_boards = [board.copy()] + history_boards[: self.history_length]
 
         # Check if terminal at leaf
-        is_terminal = board.is_game_over()
+        is_terminal: bool = board.is_game_over()
 
         return path, board, is_terminal, history_boards
 
+    @staticmethod
     def _backpropagate(
-        self,
         path: list[tuple[chess.Move | None, MCTSNode]],
         value: float,
         wdl: np.ndarray | None = None,
@@ -563,8 +581,8 @@ class MCTS:
                     [wdl[2], wdl[1], wdl[0]], dtype=np.float32
                 )
 
+    @staticmethod
     def _expand_node_with_eval(
-        self,
         node: MCTSNode,
         board: chess.Board,
         policy: np.ndarray,
@@ -590,15 +608,15 @@ class MCTS:
         node.total_wdl = wdl.copy()
 
         # Create children for legal moves
-        flip = board.turn == chess.BLACK
-        legal_moves = list(board.legal_moves)
+        flip: bool = board.turn == chess.BLACK
+        legal_moves: list[chess.Move] = list(board.legal_moves)
 
         # Mask and renormalize policy
         policy_sum = 0.0
         move_priors = []
 
         for move in legal_moves:
-            idx = encode_move_from_perspective(move, flip)
+            idx: int | None = encode_move_from_perspective(move, flip)
             if idx is not None and idx < len(policy):
                 prior = policy[idx]
             else:
@@ -634,26 +652,46 @@ class MCTS:
 
         while simulations_done < num_simulations:
             # Determine batch size for this iteration
-            remaining = num_simulations - simulations_done
-            current_batch_size = min(self.batch_size, remaining)
+            remaining: int = num_simulations - simulations_done
+            current_batch_size: int = min(self.batch_size, remaining)
 
             # Collect leaves (apply virtual loss during traversal)
-            pending_leaves = []  # List of (path, board, node, is_terminal, history)
+            # List of (path, board, node, is_terminal, history)
+            pending_leaves: list[
+                tuple[
+                    list[tuple[chess.Move | None, MCTSNode]],
+                    chess.Board,
+                    MCTSNode,
+                    bool,
+                    list[chess.Board],
+                ]
+            ] = []
 
             for _ in range(current_batch_size):
-                board_copy = board.copy()
+                board_copy: chess.Board = board.copy()
                 path, leaf_board, is_terminal, history = self._collect_leaf(
                     board_copy, root, board
                 )
-                leaf_node = path[-1][1]
+                leaf_node: MCTSNode = path[-1][1]
                 pending_leaves.append(
                     (path, leaf_board, leaf_node, is_terminal, history)
                 )
 
             # Separate terminal, already expanded, and new leaves
-            terminal_leaves = []
-            expanded_leaves = []
-            new_leaves = []
+            terminal_leaves: list[
+                tuple[list[tuple[chess.Move | None, MCTSNode]], chess.Board, MCTSNode]
+            ] = []
+            expanded_leaves: list[
+                tuple[list[tuple[chess.Move | None, MCTSNode]], chess.Board, MCTSNode]
+            ] = []
+            new_leaves: list[
+                tuple[
+                    list[tuple[chess.Move | None, MCTSNode]],
+                    chess.Board,
+                    MCTSNode,
+                    list[chess.Board],
+                ]
+            ] = []
 
             for path, leaf_board, leaf_node, is_terminal, history in pending_leaves:
                 if is_terminal:
@@ -666,12 +704,12 @@ class MCTS:
 
             # Handle terminal leaves
             for path, leaf_board, leaf_node in terminal_leaves:
-                result = leaf_board.result()
+                result: str = leaf_board.result()
                 if result == "1-0":
                     value = 1.0
-                    wdl = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+                    wdl: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=np.float32)
                 elif result == "0-1":
-                    value = -1.0
+                    value: float = -1.0
                     wdl = np.array([0.0, 0.0, 1.0], dtype=np.float32)
                 else:
                     value = 0.0
@@ -694,11 +732,20 @@ class MCTS:
             # Batch evaluate new leaves (with cache lookup)
             if new_leaves:
                 # Separate cached and uncached positions
-                cached_evals = []  # (index, policy, value, wdl)
-                to_evaluate = []  # (index, state, leaf_board)
+                # (index, policy, value, wdl)
+                cached_evals = []
+                # (index, state, leaf_board)
+                to_evaluate = []
 
                 for i, (path, leaf_board, leaf_node, history) in enumerate(new_leaves):
-                    cached = self._get_cached_eval(leaf_board)
+                    cached: (
+                        tuple[
+                            np.ndarray,
+                            float,
+                            np.ndarray,
+                        ]
+                        | None
+                    ) = self._get_cached_eval(leaf_board)
                     if cached is not None:
                         cached_evals.append((i, cached[0], cached[1], cached[2]))
                     else:
@@ -706,20 +753,23 @@ class MCTS:
                         # Pad with duplicates if history is shorter than needed
                         if len(history) < self.history_length + 1:
                             # Pad with oldest position (or current if no history)
-                            pad_board = history[-1] if history else leaf_board
-                            history = history + [pad_board] * (
+                            pad_board: chess.Board = (
+                                history[-1] if history else leaf_board
+                            )
+                            history: list[chess.Board] = history + [pad_board] * (
                                 self.history_length + 1 - len(history)
                             )
-                        state = encode_board_with_history(
+                        state: np.ndarray = encode_board_with_history(
                             history, from_perspective=True
                         )
                         to_evaluate.append((i, state, leaf_board))
 
                 # Batch evaluate uncached positions
-                eval_results = {}  # index -> (policy, value, wdl)
+                # index -> (policy, value, wdl)
+                eval_results = {}
 
                 if to_evaluate:
-                    states_array = np.array(
+                    states_array: np.ndarray = np.array(
                         [s for _, s, _ in to_evaluate], dtype=np.float32
                     )
                     policies, values, wdl_batch = self.network.predict_batch_with_wdl(
@@ -751,9 +801,7 @@ class MCTS:
                     self._backpropagate(path, value, wdl)
                     simulations_done += 1
 
-    def _select_child(
-        self, node: MCTSNode, board: chess.Board
-    ) -> tuple[chess.Move, MCTSNode]:
+    def _select_child(self, node: MCTSNode) -> tuple[chess.Move, MCTSNode]:
         """
         Select child node using PUCT formula with WDL enhancements.
 
@@ -764,13 +812,17 @@ class MCTS:
         Returns:
             Tuple of (selected_move, selected_child).
         """
-        sqrt_total = math.sqrt(max(1, node.visit_count))
+        if not node.children:
+            raise ValueError("Cannot select child from a node with no children")
 
+        sqrt_total: float = math.sqrt(max(1, node.visit_count))
+
+        # Initialize with first child to avoid None
+        iterator: Iterator[tuple[chess.Move, MCTSNode]] = iter(node.children.items())
+        best_move, best_child = next(iterator)
         best_score = float("-inf")
-        best_move = None
-        best_child = None
 
-        # Draw-Sibling-FPU: check if any sibling is a confirmed draw
+        # Draw-Sibling-FPU
         draw_found = False
         if self.draw_sibling_fpu:
             for child in node.children.values():
@@ -778,45 +830,41 @@ class MCTS:
                     draw_found = True
                     break
 
-        # FPU (First Play Urgency) - no reduction if draw found
         if draw_found:
-            fpu_value = node.q_value  # Compare against current position
+            fpu_value: float = node.q_value
         else:
             fpu_value = node.q_value - self.fpu_reduction
 
         for move, child in node.children.items():
             if child.effective_visits == 0:
-                q = fpu_value
+                q: float = fpu_value
             else:
-                # Negate Q-value: child stores value from child's perspective,
-                # but parent needs value from parent's perspective
                 q = -child.q_value
 
-                # Dynamic contempt: only penalize draws when winning
-                # When losing, contempt=0 to let MCTS play for complications/blunders
-                if self.contempt != 0.0 and node.visit_count > 0:
-                    node_wdl = node.wdl  # Current position WDL
-                    # Only apply contempt when winning (W > L), else 0
+                if (
+                    not np.isclose(self.contempt, 0.0, rtol=1e-09, atol=1e-09)
+                    and node.visit_count > 0
+                ):
+                    node_wdl: np.ndarray = node.wdl
                     win_margin = node_wdl[0] - node_wdl[2]
                     dynamic_contempt = self.contempt * max(win_margin, 0.0)
                     draw_prob = child.wdl[1]
                     q -= dynamic_contempt * draw_prob
 
-            # PUCT formula
-            u = self.c_puct * child.prior * sqrt_total / (1 + child.effective_visits)
+            u: float = (
+                self.c_puct * child.prior * sqrt_total / (1 + child.effective_visits)
+            )
 
-            # Uncertainty bonus: explore sharp positions more
             if self.uncertainty_weight > 0.0 and child.visit_count > 0:
-                # uncertainty = sqrt(W * L), maximized when position is sharp
-                uncertainty = math.sqrt(child.wdl[0] * child.wdl[2])
+                uncertainty: float = math.sqrt(child.wdl[0] * child.wdl[2])
                 u *= 1.0 + self.uncertainty_weight * uncertainty
 
-            score = q + u
+            score: float = q + u
 
             if score > best_score:
-                best_score = score
-                best_move = move
-                best_child = child
+                best_score: float = score
+                best_move: chess.Move = move
+                best_child: MCTSNode = child
 
         return best_move, best_child
 
@@ -838,7 +886,14 @@ class MCTS:
             return
 
         # Check cache first
-        cached = self._get_cached_eval(board)
+        cached: (
+            tuple[
+                np.ndarray,
+                float,
+                np.ndarray,
+            ]
+            | None
+        ) = self._get_cached_eval(board)
         if cached is not None:
             policy, value, wdl = cached
         else:
@@ -848,7 +903,7 @@ class MCTS:
                 # Build history from initial_history (for root node)
                 # Take the LAST history_length positions and reverse to get [T-1, T-2, T-3] order
                 if self._initial_history:
-                    recent_history = list(
+                    recent_history: list[chess.Board] = list(
                         reversed(self._initial_history[-self.history_length :])
                     )
                 else:
@@ -857,12 +912,14 @@ class MCTS:
 
             # Pad if needed
             if len(history_boards) < self.history_length + 1:
-                pad_board = history_boards[-1] if history_boards else board
+                pad_board: chess.Board = history_boards[-1] if history_boards else board
                 history_boards = history_boards + [pad_board] * (
                     self.history_length + 1 - len(history_boards)
                 )
 
-            state = encode_board_with_history(history_boards, from_perspective=True)
+            state: np.ndarray = encode_board_with_history(
+                history_boards, from_perspective=True
+            )
             policy, value, wdl = self.network.predict_single_with_wdl(state)
             # Cache the result
             self._cache_eval(board, policy, value, wdl)
@@ -873,15 +930,15 @@ class MCTS:
         node.total_wdl = wdl.copy()
 
         # Create children for legal moves
-        flip = board.turn == chess.BLACK
-        legal_moves = list(board.legal_moves)
+        flip: bool = board.turn == chess.BLACK
+        legal_moves: list[chess.Move] = list(board.legal_moves)
 
         # Mask and renormalize policy
         policy_sum = 0.0
         move_priors = []
 
         for move in legal_moves:
-            idx = encode_move_from_perspective(move, flip)
+            idx: int | None = encode_move_from_perspective(move, flip)
             if idx is not None and idx < len(policy):
                 prior = policy[idx]
             else:
@@ -908,11 +965,11 @@ class MCTS:
             return
 
         # Generate Dirichlet noise
-        num_moves = len(node.children)
-        noise = self._rng.dirichlet([self.dirichlet_alpha] * num_moves)
+        num_moves: int = len(node.children)
+        noise: np.ndarray = self._rng.dirichlet([self.dirichlet_alpha] * num_moves)
 
         # Apply noise to priors
-        for i, (move, child) in enumerate(node.children.items()):
+        for i, (_, child) in enumerate(node.children.items()):
             child.prior = (
                 1 - self.dirichlet_epsilon
             ) * child.prior + self.dirichlet_epsilon * noise[i]
@@ -930,8 +987,8 @@ class MCTS:
         # Use board FEN + turn as key (different turns = different nodes)
         # This prevents transposition bugs where same position with different
         # side to move would share children (causing illegal moves)
-        turn = "w" if board.turn == chess.WHITE else "b"
-        key = f"{board.board_fen()} {turn}"
+        turn: Literal["w"] | Literal["b"] = "w" if board.turn == chess.WHITE else "b"
+        key: str = f"{board.board_fen()} {turn}"
 
         if key not in self._transposition_table:
             self._transposition_table[key] = MCTSNode()
@@ -964,30 +1021,33 @@ class MCTS:
             Number of simulations preserved (visit count of new root),
             or 0 if position wasn't in the tree.
         """
-        new_root = None
+        new_root: MCTSNode | None = None
         preserved_visits = 0
 
-        # Try to find the child node from the parent's children
         if new_board.move_stack:
-            last_move = new_board.peek()
+            last_move: chess.Move = new_board.peek()
             new_board.pop()
 
-            old_turn = "w" if new_board.turn == chess.WHITE else "b"
-            old_key = f"{new_board.board_fen()} {old_turn}"
-            old_root = self._transposition_table.get(old_key)
+            old_turn: Literal["w"] | Literal["b"] = (
+                "w" if new_board.turn == chess.WHITE else "b"
+            )
+            old_key: str = f"{new_board.board_fen()} {old_turn}"
+            old_root: MCTSNode | None = self._transposition_table.get(old_key)
 
             new_board.push(last_move)
 
             if old_root and last_move in old_root.children:
                 new_root = old_root.children[last_move]
-                preserved_visits = new_root.visit_count
+                preserved_visits: int = new_root.visit_count
 
         # Clear transposition table and set new root
         self._transposition_table.clear()
 
         if new_root:
-            turn = "w" if new_board.turn == chess.WHITE else "b"
-            new_key = f"{new_board.board_fen()} {turn}"
+            turn: Literal["w"] | Literal["b"] = (
+                "w" if new_board.turn == chess.WHITE else "b"
+            )
+            new_key: str = f"{new_board.board_fen()} {turn}"
             self._transposition_table[new_key] = new_root
 
         # Clear eval cache (old positions no longer needed)
@@ -1009,7 +1069,7 @@ class MCTS:
             Tuple of (policy, value, wdl) if cached, None otherwise.
         """
         # Use FEN with side-to-move for unique key
-        key = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
+        key: str = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
         return self._eval_cache.get(key)
 
     def _cache_eval(
@@ -1032,7 +1092,7 @@ class MCTS:
         if len(self._eval_cache) >= self._max_eval_cache_size:
             self._eval_cache.clear()
 
-        key = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
+        key: str = board.board_fen() + ("w" if board.turn == chess.WHITE else "b")
         self._eval_cache[key] = (policy.copy(), value, wdl.copy())
 
     def get_pv(self, board: chess.Board, depth: int = 50) -> list[chess.Move]:
@@ -1047,8 +1107,8 @@ class MCTS:
             List of moves in the PV.
         """
         pv = []
-        current_board = board.copy()
-        node = self._get_or_create_node(current_board)
+        current_board: chess.Board = board.copy()
+        node: MCTSNode = self._get_or_create_node(current_board)
 
         for _ in range(depth):
             if not node.children:
@@ -1064,7 +1124,7 @@ class MCTS:
             # Check for checkmate first
             checkmate_move = None
             for m, c in visited_children:
-                test_board = current_board.copy()
+                test_board: chess.Board = current_board.copy()
                 test_board.push(m)
                 if test_board.is_checkmate():
                     checkmate_move = (m, c)
@@ -1098,7 +1158,7 @@ class MCTS:
         Returns:
             Mate in X (number of our moves), or None if no forced mate found.
         """
-        root = self._get_or_create_node(board)
+        root: MCTSNode = self._get_or_create_node(board)
         if not root.children:
             return None
 
@@ -1131,13 +1191,15 @@ class MCTS:
         if not node.children:
             return None
 
-        visited = [(m, c) for m, c in node.children.items() if c.visit_count > 0]
+        visited: list[tuple[chess.Move, MCTSNode]] = [
+            (m, c) for m, c in node.children.items() if c.visit_count > 0
+        ]
         if not visited:
             return None
 
         if is_our_turn:
             # Our turn: find the fastest mate among all our options
-            best_mate = None
+            best_mate: int | None = None
             for move, child in visited:
                 temp_board = board.copy()
                 temp_board.push(move)
@@ -1146,7 +1208,7 @@ class MCTS:
                     # Mate in 1!
                     return our_moves + 1
 
-                child_mate = self._find_forced_mate(
+                child_mate: int | None = self._find_forced_mate(
                     child, temp_board, False, our_moves + 1, max_our_moves
                 )
                 if child_mate is not None:
@@ -1157,9 +1219,9 @@ class MCTS:
         else:
             # Opponent's turn: ALL responses must lead to mate (forced)
             # Return the worst case (longest mate) among opponent's options
-            worst_mate = None
+            worst_mate: int | None = None
             for move, child in visited:
-                temp_board = board.copy()
+                temp_board: chess.Board = board.copy()
                 temp_board.push(move)
 
                 if temp_board.is_checkmate():
@@ -1188,10 +1250,10 @@ class MCTS:
         Returns:
             Dictionary mapping moves to visit counts.
         """
-        node = self._get_or_create_node(board)
+        node: MCTSNode = self._get_or_create_node(board)
         return {move: child.visit_count for move, child in node.children.items()}
 
-    def get_root_statistics(self, board: chess.Board) -> list[dict]:
+    def get_root_statistics(self, board: chess.Board) -> list[dict[str, Any]]:
         """
         Get detailed statistics for all moves at root.
 
@@ -1204,16 +1266,16 @@ class MCTS:
             List of dicts with keys: move, visits, q_value, prior, wdl
             Sorted by visits descending.
         """
-        node = self._get_or_create_node(board)
+        node: MCTSNode = self._get_or_create_node(board)
         stats = []
 
         for move, child in node.children.items():
             # Get WDL from child's perspective and flip for current player
             # Child stores [P(win), P(draw), P(loss)] from opponent's view
             # We flip to [P(loss), P(draw), P(win)] = current player's view
-            child_wdl = child.wdl
+            child_wdl: np.ndarray = child.wdl
             # Flip: current player's win = opponent's loss
-            flipped_wdl = np.array(
+            flipped_wdl: np.ndarray = np.array(
                 [child_wdl[2], child_wdl[1], child_wdl[0]], dtype=np.float32
             )
 
@@ -1221,11 +1283,11 @@ class MCTS:
             our_mate_in = None
             opponent_mate_in = None
 
-            test_board = board.copy()
+            test_board: chess.Board = board.copy()
             test_board.push(move)
 
             # Check if this move leads to draw by repetition
-            leads_to_draw_repetition = test_board.is_repetition(3)
+            leads_to_draw_repetition: bool = test_board.is_repetition(3)
 
             # Direct check: is this move checkmate? (mate in 1)
             if test_board.is_checkmate():
@@ -1233,12 +1295,12 @@ class MCTS:
             elif child.visit_count > 0:
                 # Check deeper mates via MCTS tree
                 # Check if WE have a forced mate (good for us)
-                our_mate_in = self._find_forced_mate(
+                our_mate_in: int | None = self._find_forced_mate(
                     child, test_board, is_our_turn=False, our_moves=0, max_our_moves=5
                 )
                 # Check if OPPONENT has a forced mate (bad for us)
                 if our_mate_in is None:
-                    opponent_mate_in = self._find_forced_mate(
+                    opponent_mate_in: int | None = self._find_forced_mate(
                         child,
                         test_board,
                         is_our_turn=True,
@@ -1255,10 +1317,14 @@ class MCTS:
                     "q_value": -child.q_value if child.visit_count > 0 else 0.0,
                     "prior": child.prior,
                     "total_value": child.total_value,
-                    "wdl": flipped_wdl,  # [P(win), P(draw), P(loss)] for current player
-                    "our_mate_in": our_mate_in,  # Forced mate FOR US (winning)
-                    "opponent_mate_in": opponent_mate_in,  # Forced mate for opponent (losing)
-                    "leads_to_draw_repetition": leads_to_draw_repetition,  # Draw by repetition
+                    # [P(win), P(draw), P(loss)] for current player
+                    "wdl": flipped_wdl,
+                    # Forced mate FOR US (winning)
+                    "our_mate_in": our_mate_in,
+                    # Forced mate for opponent (losing)
+                    "opponent_mate_in": opponent_mate_in,
+                    # Draw by repetition
+                    "leads_to_draw_repetition": leads_to_draw_repetition,
                 }
             )
 
@@ -1276,7 +1342,7 @@ class MCTS:
         Returns:
             Value from current player's perspective (-1 to +1).
         """
-        node = self._get_or_create_node(board)
+        node: MCTSNode = self._get_or_create_node(board)
         if node.visit_count > 0:
             return node.q_value
         return 0.0
@@ -1291,18 +1357,19 @@ class MCTS:
         Returns:
             Maximum depth reached in the tree (0 if no children).
         """
-        node = self._get_or_create_node(board)
+        node: MCTSNode = self._get_or_create_node(board)
         return self._compute_tree_depth(node)
 
     def _compute_tree_depth(self, node: MCTSNode) -> int:
         """Recursively compute max depth from a node."""
         if not node.children:
             return 0
-        max_child_depth = -1  # -1 means no visited children yet
+        # -1 means no visited children yet
+        max_child_depth = -1
         for child in node.children.values():
             if child.visit_count > 0:
-                child_depth = self._compute_tree_depth(child)
-                max_child_depth = max(max_child_depth, child_depth)
+                child_depth: int = self._compute_tree_depth(child)
+                max_child_depth: int = max(max_child_depth, child_depth)
         # Only count this level if at least one child was visited
         if max_child_depth == -1:
             return 0
@@ -1318,7 +1385,7 @@ class MCTS:
         Returns:
             Maximum number of children at any node with visits > 0.
         """
-        node = self._get_or_create_node(board)
+        node: MCTSNode = self._get_or_create_node(board)
         return self._compute_max_branching(node)
 
     def _compute_max_branching(self, node: MCTSNode) -> int:
@@ -1326,11 +1393,13 @@ class MCTS:
         if not node.children:
             return 0
         # Count children with visits
-        visited_children = [c for c in node.children.values() if c.visit_count > 0]
-        current_branching = len(visited_children)
-        max_branching = current_branching
+        visited_children: list[MCTSNode] = [
+            c for c in node.children.values() if c.visit_count > 0
+        ]
+        current_branching: int = len(visited_children)
+        max_branching: int = current_branching
         for child in visited_children:
-            child_max = self._compute_max_branching(child)
+            child_max: int = self._compute_max_branching(child)
             max_branching = max(max_branching, child_max)
         return max_branching
 
@@ -1356,15 +1425,15 @@ class MCTS:
         lines.append("MCTS Search Tree")
         lines.append("=" * 60)
 
-        root = self._get_or_create_node(board)
-        total_visits = sum(child.visit_count for child in root.children.values())
+        root: MCTSNode = self._get_or_create_node(board)
+        total_visits: int = sum(child.visit_count for child in root.children.values())
 
         lines.append(f"Total simulations: {total_visits}")
         lines.append(f"Root value: {root.q_value:+.3f}")
         lines.append("")
 
         # Sort children by visit count (use Q-value as tiebreaker: lower = better for us)
-        sorted_children = sorted(
+        sorted_children: list[tuple[chess.Move, MCTSNode]] = sorted(
             root.children.items(),
             key=lambda x: (
                 x[1].visit_count,
@@ -1380,10 +1449,10 @@ class MCTS:
         lines.append("-" * 60)
 
         for move, child in sorted_children[:top_n]:
-            pct = (child.visit_count / max(total_visits, 1)) * 100
+            pct: float = (child.visit_count / max(total_visits, 1)) * 100
             # Negate Q-value: stored Q is from opponent's perspective,
             # but we want to show value for the player making this move
-            display_q = -child.q_value if child.visit_count > 0 else 0.0
+            display_q: float = -child.q_value if child.visit_count > 0 else 0.0
             lines.append(
                 f"{board.san(move):<8} {child.visit_count:>8} {pct:>6.1f}% "
                 f"{display_q:>+8.3f} {child.prior:>6.1%}"
@@ -1392,10 +1461,10 @@ class MCTS:
         lines.append("")
 
         # Show principal variation
-        pv = self.get_pv(board, depth=10)
+        pv: list[chess.Move] = self.get_pv(board, depth=10)
         if pv:
-            pv_san = []
-            temp_board = board.copy()
+            pv_san: list[str] = []
+            temp_board: chess.Board = board.copy()
             for move in pv:
                 pv_san.append(temp_board.san(move))
                 temp_board.push(move)
@@ -1403,13 +1472,13 @@ class MCTS:
             lines.append("")
 
         # Show tree structure for top moves
-        actual_depth = self._compute_tree_depth(root)
-        actual_branching = self._compute_max_branching(root)
-        mate_in = self.get_mate_in(board)
+        actual_depth: int = self._compute_tree_depth(root)
+        actual_branching: int = self._compute_max_branching(root)
+        mate_in: int | None = self.get_mate_in(board)
         if mate_in == 1:
             mate_str = " - Mate"
         elif mate_in:
-            mate_str = f" - Mate in {mate_in - 1}"
+            mate_str: str = f" - Mate in {mate_in - 1}"
         else:
             mate_str = ""
         lines.append(
@@ -1430,7 +1499,7 @@ class MCTS:
         board: chess.Board,
         top_n: int = 3,
         max_depth: int = 3,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         Get the search tree as a nested data structure for GUI display.
 
@@ -1442,10 +1511,10 @@ class MCTS:
         Returns:
             List of dicts, each with keys: san, visits, q_value, prior, children
         """
-        root = self._get_or_create_node(board)
+        root: MCTSNode = self._get_or_create_node(board)
 
         # Sort children by visit count
-        sorted_children = sorted(
+        sorted_children: list[tuple[chess.Move, MCTSNode]] = sorted(
             root.children.items(),
             key=lambda x: x[1].visit_count,
             reverse=True,
@@ -1469,17 +1538,17 @@ class MCTS:
         depth: int,
         max_depth: int,
         top_n: int,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Build a tree node data dict recursively."""
-        san_move = board.san(move)
+        san_move: str = board.san(move)
         # Negate Q-value: stored Q is from opponent's perspective
-        display_q = -node.q_value if node.visit_count > 0 else 0.0
+        display_q: float = -node.q_value if node.visit_count > 0 else 0.0
 
         # Check for forced mates at this node (only at root level)
         our_mate_in = None
         opponent_mate_in = None
         if depth == 0:
-            next_board = board.copy()
+            next_board: chess.Board = board.copy()
             next_board.push(move)
 
             # Direct check: is this move checkmate?
@@ -1487,11 +1556,11 @@ class MCTS:
                 our_mate_in = 1
             elif node.visit_count > 0:
                 # Check deeper mates via MCTS tree
-                our_mate_in = self._find_forced_mate(
+                our_mate_in: int | None = self._find_forced_mate(
                     node, next_board, is_our_turn=False, our_moves=0, max_our_moves=5
                 )
                 if our_mate_in is None:
-                    opponent_mate_in = self._find_forced_mate(
+                    opponent_mate_in: int | None = self._find_forced_mate(
                         node, next_board, is_our_turn=True, our_moves=0, max_our_moves=5
                     )
 
@@ -1511,7 +1580,7 @@ class MCTS:
             next_board.push(move)
 
             # Sort and add top children
-            sorted_children = sorted(
+            sorted_children: list[tuple[chess.Move, MCTSNode]] = sorted(
                 node.children.items(),
                 key=lambda x: x[1].visit_count,
                 reverse=True,
@@ -1519,7 +1588,7 @@ class MCTS:
 
             for child_move, child_node in sorted_children[:top_n]:
                 if child_node.visit_count > 0:
-                    child_data = self._build_tree_node_data(
+                    child_data: dict[str, Any] = self._build_tree_node_data(
                         next_board, child_move, child_node, depth + 1, max_depth, top_n
                     )
                     node_data["children"].append(child_data)
@@ -1548,13 +1617,13 @@ class MCTS:
             max_depth: Maximum depth to display.
             top_n: Number of top children to show.
         """
-        indent = "  " * depth
-        prefix = "├─" if depth > 0 else ""
+        indent: str = "  " * depth
+        prefix: Literal["├─"] | Literal[""] = "├─" if depth > 0 else ""
 
-        san_move = board.san(move)
+        san_move: str = board.san(move)
         # Negate Q-value: stored Q is from opponent's perspective,
         # but we want to show value for the player making this move
-        display_q = -node.q_value if node.visit_count > 0 else 0.0
+        display_q: float = -node.q_value if node.visit_count > 0 else 0.0
         lines.append(
             f"{indent}{prefix}{san_move} "
             f"(N={node.visit_count}, Q={display_q:+.3f}, P={node.prior:.1%})"
@@ -1564,11 +1633,11 @@ class MCTS:
             return
 
         # Apply move to get next board state
-        next_board = board.copy()
+        next_board: chess.Board = board.copy()
         next_board.push(move)
 
         # Sort and show top children
-        sorted_children = sorted(
+        sorted_children: list[tuple[chess.Move, MCTSNode]] = sorted(
             node.children.items(),
             key=lambda x: x[1].visit_count,
             reverse=True,

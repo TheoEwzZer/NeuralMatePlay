@@ -43,8 +43,8 @@ class EvalGraph(tk.Canvas):
 
         self._width = width
         self._height = height
-        self._eval_history: List[float] = []
-        self._wdl_history: List[Optional[np.ndarray]] = []  # WDL for each move
+        self._eval_history: list[float] = []
+        self._wdl_history: list[Optional[np.ndarray]] = []  # WDL for each move
         self._current_move = 0
         self._max_eval = 1.0  # Fixed scaling -1 to +1
         self._min_eval = -1.0
@@ -270,7 +270,7 @@ class EvalGraph(tk.Canvas):
             )
 
     def _draw_filled_regions(
-        self, points: List[Tuple[float, float]], center_y: float
+        self, points: list[Tuple[float, float]], center_y: float
     ) -> None:
         """Draw filled regions above/below zero line."""
         if len(points) < 2:
@@ -475,7 +475,7 @@ class EvalGraph(tk.Canvas):
 
     def set_history(
         self,
-        history: List[float],
+        history: list[float],
         wdl_history: Optional[List[Optional[np.ndarray]]] = None,
     ) -> None:
         """
@@ -512,6 +512,6 @@ class EvalGraph(tk.Canvas):
         self._min_eval = -1.0
         self._draw_graph()
 
-    def get_history(self) -> List[float]:
+    def get_history(self) -> list[float]:
         """Get the evaluation history."""
         return list(self._eval_history)

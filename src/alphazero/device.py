@@ -1,5 +1,6 @@
 """Device management for PyTorch (CPU/GPU selection)."""
 
+from typing import Any
 import torch
 
 
@@ -47,19 +48,19 @@ def supports_mixed_precision() -> bool:
         return False
 
     # Check compute capability (need >= 7.0 for good FP16 support)
-    capability = torch.cuda.get_device_capability()
+    capability: tuple[int, int] = torch.cuda.get_device_capability()
     return capability[0] >= 7
 
 
-def get_device_info() -> dict:
+def get_device_info() -> dict[str, Any]:
     """
     Get information about the current device.
 
     Returns:
         Dictionary with device information.
     """
-    device = get_device()
-    info = {
+    device: torch.device = get_device()
+    info: dict[str, Any] = {
         "device": str(device),
         "type": device.type,
     }

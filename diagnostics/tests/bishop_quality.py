@@ -1,5 +1,9 @@
 """Test: Good vs Bad Bishop."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -13,9 +17,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for bishop quality evaluation
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === GOOD BISHOPS ===
     {
         "name": "Active Bishop (Open Diagonal)",
@@ -93,22 +100,24 @@ TEST_POSITIONS = [
 ]
 
 
-def test_bishop_quality(network, results: TestResults):
+def test_bishop_quality(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network evaluates bishop quality correctly."""
     print(header("TEST: Good vs Bad Bishop"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        expected = test["expected_eval"]
-        quality = test["bishop_quality"]
+        expected: str = test["expected_eval"]
+        quality: str = test["bishop_quality"]
 
         print(f"\n  Bishop quality: {quality}")
         print(f"  Value: {value:+.4f} (expected: {expected})")
@@ -144,7 +153,7 @@ def test_bishop_quality(network, results: TestResults):
         results.add_diagnostic("bishop_quality", f"{test['name']}_value", float(value))
         results.add_diagnostic("bishop_quality", f"{test['name']}_type", quality)
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("bishop_quality", "total_tested", total)
     results.add_diagnostic("bishop_quality", "correct", passed)
     results.add("Bishop Quality", score >= 0.4, score, 1.0)

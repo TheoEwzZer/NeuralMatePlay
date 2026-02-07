@@ -1,5 +1,9 @@
 """Test: Basic Tactics."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -16,12 +20,15 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_tactics(network, results: TestResults):
+
+def test_tactics(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the network can find basic tactics."""
     print(header("TEST: Basic Tactics"))
 
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === FORKS (4 positions) ===
         {
             "name": "Knight Fork Setup",
@@ -113,34 +120,36 @@ def test_tactics(network, results: TestResults):
         },
     ]
 
-    passed = 0
-    tactical_found = 0
+    passed: float = 0
+    tactical_found: int = 0
 
     for test in test_positions:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_5 = np.argsort(policy)[::-1][:5]
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
 
         print(f"\n  Value evaluation: {value:+.4f}")
         print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Check?':<8} {'Notes':<20}")
         print("  " + "-" * 55)
 
-        tactical_rank = None
+        tactical_rank: int | None = None
 
         for i, idx in enumerate(top_5):
-            move = decode_move(idx, board)
-            prob = policy[idx]
+            move: chess.Move | None = decode_move(idx, board)
+            prob: float = policy[idx]
             if move:
                 board.push(move)
-                is_check = board.is_check()
+                is_check: bool = board.is_check()
                 board.pop()
 
-                check_str = "+" if is_check else ""
-                notes = ""
+                check_str: str = "+" if is_check else ""
+                notes: str = ""
 
                 if test.get("tactical_move"):
                     if move.uci() == test["tactical_move"]:
@@ -150,10 +159,13 @@ def test_tactics(network, results: TestResults):
                         if i == 0:
                             tactical_found += 1
 
-                color = Colors.GREEN if notes else (Colors.YELLOW if is_check else "")
-                end_color = Colors.ENDC if color else ""
+                color: str = (
+                    Colors.GREEN if notes else (Colors.YELLOW if is_check else "")
+                )
+                end_color: str = Colors.ENDC if color else ""
                 print(
-                    f"  {color}{i+1:<6} {move.uci():<8} {prob*100:>7.2f}% {check_str:<8} {notes}{end_color}"
+                    f"  {color}{i+1:<6} {move.uci():<8} {prob*100:>7.2f}%"
+                    f" {check_str:<8} {notes}{end_color}"
                 )
 
         if test.get("tactical_move"):
@@ -182,7 +194,7 @@ def test_tactics(network, results: TestResults):
         )
         results.add_diagnostic("tactics", f"{test['name']}_value", float(value))
 
-    score = passed / len(test_positions)
+    score: float = passed / len(test_positions)
     results.add_diagnostic("tactics", "total_tested", len(test_positions))
     results.add_diagnostic("tactics", "tactical_found", tactical_found)
     results.add("Tactics", score >= 0.5, score, 1.0)

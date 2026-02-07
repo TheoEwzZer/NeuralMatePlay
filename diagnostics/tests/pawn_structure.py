@@ -1,5 +1,9 @@
 """Test: Pawn Structure Understanding."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -13,9 +17,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for pawn structure evaluation
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === DOUBLED PAWNS ===
     {
         "name": "Doubled Pawns (White)",
@@ -95,22 +102,24 @@ TEST_POSITIONS = [
 ]
 
 
-def test_pawn_structure(network, results: TestResults):
+def test_pawn_structure(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network understands pawn structure."""
     print(header("TEST: Pawn Structure"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        expected = test["expected_eval"]
-        structure = test["structure_type"]
+        expected: str = test["expected_eval"]
+        structure: str = test["structure_type"]
 
         print(f"\n  Structure type: {structure}")
         print(f"  Value: {value:+.4f} (expected: {expected})")
@@ -146,7 +155,7 @@ def test_pawn_structure(network, results: TestResults):
         results.add_diagnostic("pawn_structure", f"{test['name']}_value", float(value))
         results.add_diagnostic("pawn_structure", f"{test['name']}_type", structure)
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("pawn_structure", "total_tested", total)
     results.add_diagnostic("pawn_structure", "correct", passed)
     results.add("Pawn Structure", score >= 0.4, score, 1.0)

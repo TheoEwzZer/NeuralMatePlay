@@ -1,5 +1,9 @@
 """Test: Basic Endgame Understanding."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import chess
 
 from ..core import (
@@ -12,12 +16,15 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_endgame(network, results: TestResults):
+
+def test_endgame(network: DualHeadNetwork, results: TestResults) -> float:
     """Test basic endgame understanding."""
     print(header("TEST: Endgame Understanding"))
 
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === BASIC PIECE ENDGAMES (4) ===
         {
             "name": "K+R vs K (White winning)",
@@ -96,8 +103,8 @@ def test_endgame(network, results: TestResults):
         },
     ]
 
-    passed = 0
-    value_errors = []
+    passed: float = 0
+    value_errors: list[dict[str, Any]] = []
 
     print(
         f"\n  {'Position':<30} {'Material':>10} {'Expected':>10} {'Actual':>10} {'Status':>10}"
@@ -105,12 +112,15 @@ def test_endgame(network, results: TestResults):
     print("  " + "-" * 75)
 
     for test in test_positions:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
+        policy: Any
+        value: float
         policy, value = predict_for_board(board, network)
 
-        expected = test["expected_eval"]
-        material = test["material_diff"]
+        expected: str = test["expected_eval"]
+        material: int = test["material_diff"]
 
+        status: str
         # Progressive scoring based on how close the evaluation is
         if expected == "positive":
             if value > 0.2:
@@ -173,7 +183,7 @@ def test_endgame(network, results: TestResults):
                     }
                 )
 
-        exp_str = (
+        exp_str: str = (
             "+" if expected == "positive" else ("-" if expected == "negative" else "=")
         )
         print(
@@ -209,7 +219,7 @@ def test_endgame(network, results: TestResults):
                     f"Expected negative (material {err['material']:+d}), got {err['actual']:+.4f}",
                 )
 
-    score = passed / len(test_positions)
+    score: float = passed / len(test_positions)
     results.add_diagnostic("endgame", "total_tested", len(test_positions))
     results.add_diagnostic("endgame", "correct_evals", passed)
     results.add(

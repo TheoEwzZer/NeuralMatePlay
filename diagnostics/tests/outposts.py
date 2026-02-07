@@ -1,5 +1,9 @@
 """Test: Outpost Recognition."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for outpost understanding
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === KNIGHT OUTPOSTS ===
     {
         "name": "Classic d5 Outpost",
@@ -81,33 +88,35 @@ TEST_POSITIONS = [
 ]
 
 
-def test_outposts(network, results: TestResults):
+def test_outposts(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network recognizes outposts."""
     print(header("TEST: Outpost Recognition"))
 
-    passed = 0
-    total = 0
+    passed: float = 0
+    total: int = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        outpost_type = test["outpost_type"]
+        outpost_type: str = test["outpost_type"]
         print(f"\n  Outpost type: {outpost_type}")
 
         if "expected_moves" in test:
             total += 1
-            top_5 = np.argsort(policy)[::-1][:5]
-            expected_set = set(test["expected_moves"])
+            top_5: np.ndarray = np.argsort(policy)[::-1][:5]
+            expected_set: set[str] = set(test["expected_moves"])
 
             print(f"  Value: {value:+.4f}")
             print(f"  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Outpost?':<12}")
             print("  " + "-" * 40)
 
-            found_at = None
+            found_at: int | None = None
             for i, idx in enumerate(top_5):
                 move = decode_move(idx, board)
                 prob = policy[idx]
@@ -136,7 +145,7 @@ def test_outposts(network, results: TestResults):
 
         else:
             total += 1
-            expected = test["expected_eval"]
+            expected: str = test["expected_eval"]
             print(f"  Value: {value:+.4f} (expected: {expected})")
 
             if expected == "positive" and value > 0.0:
@@ -154,7 +163,7 @@ def test_outposts(network, results: TestResults):
 
             results.add_diagnostic("outposts", f"{test['name']}_value", float(value))
 
-    score = passed / total if total > 0 else 0
+    score: float = passed / total if total > 0 else 0
     results.add_diagnostic("outposts", "total_tested", total)
     results.add_diagnostic("outposts", "correct", passed)
     results.add("Outposts", score >= 0.4, score, 1.0)

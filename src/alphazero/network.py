@@ -11,7 +11,7 @@ Architecture: SE-ResNet with Spatial Attention
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional, Self
 
 import numpy as np
 import torch
@@ -29,7 +29,7 @@ class SEBlock(nn.Module):
     Adaptively weights channel importance based on global information.
     """
 
-    def __init__(self, channels: int, reduction: int = 8):
+    def __init__(self, channels: int, reduction: int = 8) -> None:
         super().__init__()
         self.squeeze = nn.AdaptiveAvgPool2d(1)
         self.excite = nn.Sequential(
@@ -56,7 +56,7 @@ class SEResBlock(nn.Module):
     Conv -> GroupNorm -> GELU -> Conv -> GroupNorm -> SE -> Add -> GELU
     """
 
-    def __init__(self, channels: int, se_reduction: int = 8):
+    def __init__(self, channels: int, se_reduction: int = 8) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
         self.gn1 = nn.GroupNorm(8, channels)
@@ -65,7 +65,7 @@ class SEResBlock(nn.Module):
         self.se = SEBlock(channels, se_reduction)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
+        residual: torch.Tensor = x
 
         out = self.conv1(x)
         out = self.gn1(out)
@@ -88,11 +88,11 @@ class SpatialAttention(nn.Module):
     Uses multi-head self-attention over spatial positions.
     """
 
-    def __init__(self, channels: int, num_heads: int = 4):
+    def __init__(self, channels: int, num_heads: int = 4) -> None:
         super().__init__()
-        self.channels = channels
-        self.num_heads = num_heads
-        self.head_dim = channels // num_heads
+        self.channels: int = channels
+        self.num_heads: int = num_heads
+        self.head_dim: int = channels // num_heads
 
         self.qkv = nn.Conv2d(channels, channels * 3, 1, bias=False)
         self.proj = nn.Conv2d(channels, channels, 1, bias=False)
@@ -100,12 +100,14 @@ class SpatialAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, c, h, w = x.shape
-        residual = x
+        residual: torch.Tensor = x
 
         # Compute Q, K, V
-        qkv = self.qkv(x)  # (b, 3*c, h, w)
+        # (b, 3*c, h, w)
+        qkv = self.qkv(x)
         qkv = qkv.reshape(b, 3, self.num_heads, self.head_dim, h * w)
-        qkv = qkv.permute(1, 0, 2, 4, 3)  # (3, b, heads, hw, head_dim)
+        # (3, b, heads, hw, head_dim)
+        qkv = qkv.permute(1, 0, 2, 4, 3)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         # Attention with numerical stability
@@ -116,8 +118,10 @@ class SpatialAttention(nn.Module):
         attn = F.softmax(attn, dim=-1)
 
         # Apply attention to values
-        out = attn @ v  # (b, heads, hw, head_dim)
-        out = out.permute(0, 1, 3, 2)  # (b, heads, head_dim, hw)
+        # (b, heads, hw, head_dim)
+        out = attn @ v
+        # (b, heads, head_dim, hw)
+        out = out.permute(0, 1, 3, 2)
         out = out.reshape(b, c, h, w)
 
         out = self.proj(out)
@@ -132,7 +136,9 @@ class SEResBlockWithAttention(nn.Module):
     SE-ResBlock followed by spatial attention.
     """
 
-    def __init__(self, channels: int, se_reduction: int = 8, num_heads: int = 4):
+    def __init__(
+        self, channels: int, se_reduction: int = 8, num_heads: int = 4
+    ) -> None:
         super().__init__()
         self.resblock = SEResBlock(channels, se_reduction)
         self.attention = SpatialAttention(channels, num_heads)
@@ -148,7 +154,7 @@ class PolicyHead(nn.Module):
     Policy head: outputs probability distribution over moves.
     """
 
-    def __init__(self, in_channels: int, policy_size: int = MOVE_ENCODING_SIZE):
+    def __init__(self, in_channels: int, policy_size: int = MOVE_ENCODING_SIZE) -> None:
         super().__init__()
         self.conv = nn.Conv2d(in_channels, 32, 1, bias=False)
         self.gn = nn.GroupNorm(8, 32)
@@ -164,7 +170,8 @@ class PolicyHead(nn.Module):
         x = self.fc(x)
         # Clamp logits to prevent softmax overflow (|logit| > 88 causes overflow in float16)
         x = torch.clamp(x, min=-50, max=50)
-        return x  # Clamped logits (softmax applied externally)
+        # Clamped logits (softmax applied externally)
+        return x
 
 
 class WDLHead(nn.Module):
@@ -182,17 +189,18 @@ class WDLHead(nn.Module):
     Used by Leela Chess Zero with proven success.
     """
 
-    def __init__(self, in_channels: int, hidden_size: int = 512):
+    def __init__(self, in_channels: int, hidden_size: int = 512) -> None:
         super().__init__()
         self.conv = nn.Conv2d(in_channels, 8, 1, bias=False)
         self.gn = nn.GroupNorm(4, 8)
         self.fc1 = nn.Linear(8 * 8 * 8, hidden_size)
         self.dropout = nn.Dropout(0.3)
-        self.fc2 = nn.Linear(hidden_size, 3)  # 3 classes: win, draw, loss
+        # 3 classes: win, draw, loss
+        self.fc2 = nn.Linear(hidden_size, 3)
 
         self._init_weights()
 
-    def _init_weights(self):
+    def _init_weights(self) -> None:
         """Initialize weights for balanced initial predictions."""
         nn.init.xavier_uniform_(self.fc2.weight)
         nn.init.zeros_(self.fc2.bias)
@@ -215,7 +223,8 @@ class WDLHead(nn.Module):
         x = F.gelu(x)
         x = self.dropout(x)
         x = self.fc2(x)
-        return x  # logits, softmax applied externally
+        # logits, softmax applied externally
+        return x
 
     @staticmethod
     def logits_to_value(wdl_logits: torch.Tensor) -> torch.Tensor:
@@ -228,8 +237,7 @@ class WDLHead(nn.Module):
         Returns:
             Expected value: P(win) - P(loss), shape (...)
         """
-        wdl_probs = F.softmax(wdl_logits, dim=-1)
-        # value = P(win) * 1 + P(draw) * 0 + P(loss) * (-1) = P(win) - P(loss)
+        wdl_probs: torch.Tensor = F.softmax(wdl_logits, dim=-1)
         return wdl_probs[..., 0] - wdl_probs[..., 2]
 
     @staticmethod
@@ -266,15 +274,15 @@ class DualHeadNetwork(nn.Module):
         policy_size: int = MOVE_ENCODING_SIZE,
         se_reduction: int = 8,
         attention_heads: int = 4,
-    ):
+    ) -> None:
         super().__init__()
 
-        self._num_input_planes = num_input_planes
-        self._num_filters = num_filters
-        self._num_residual_blocks = num_residual_blocks
-        self._policy_size = policy_size
-        self._se_reduction = se_reduction
-        self._attention_heads = attention_heads
+        self._num_input_planes: int = num_input_planes
+        self._num_filters: int = num_filters
+        self._num_residual_blocks: int = num_residual_blocks
+        self._policy_size: int = policy_size
+        self._se_reduction: int = se_reduction
+        self._attention_heads: int = attention_heads
 
         # Input convolution
         self.input_conv = nn.Conv2d(
@@ -286,12 +294,12 @@ class DualHeadNetwork(nn.Module):
         self.res_blocks = nn.ModuleList()
 
         # First N-2 blocks: SE-ResBlocks only
-        num_plain_blocks = max(0, num_residual_blocks - 2)
+        num_plain_blocks: int = max(0, num_residual_blocks - 2)
         for _ in range(num_plain_blocks):
             self.res_blocks.append(SEResBlock(num_filters, se_reduction))
 
         # Last 2 blocks: SE-ResBlocks with attention
-        num_attention_blocks = min(2, num_residual_blocks)
+        num_attention_blocks: int = min(2, num_residual_blocks)
         for _ in range(num_attention_blocks):
             self.res_blocks.append(
                 SEResBlockWithAttention(num_filters, se_reduction, attention_heads)
@@ -319,7 +327,7 @@ class DualHeadNetwork(nn.Module):
         """Number of residual blocks."""
         return self._num_residual_blocks
 
-    def get_config(self) -> dict:
+    def get_config(self) -> dict[str, int]:
         """Get network configuration for serialization."""
         return {
             "num_input_planes": self._num_input_planes,
@@ -357,7 +365,7 @@ class DualHeadNetwork(nn.Module):
         # Output heads
         policy = self.policy_head(x)
         wdl_logits = self.wdl_head(x)
-        value = WDLHead.logits_to_value(wdl_logits)
+        value: torch.Tensor = WDLHead.logits_to_value(wdl_logits)
 
         return policy, value, wdl_logits
 
@@ -374,25 +382,25 @@ class DualHeadNetwork(nn.Module):
             - value: float in [-1, +1]
         """
         self.eval()
-        device = get_device()
-        use_amp = device.type == "cuda" and supports_mixed_precision()
+        device: torch.device = get_device()
+        use_amp: bool = device.type == "cuda" and supports_mixed_precision()
 
         with torch.inference_mode():
             # Add batch dimension, use non_blocking for async transfer
-            x = torch.from_numpy(state).unsqueeze(0)
-            dtype = torch.float16 if use_amp else torch.float32
+            x: torch.Tensor = torch.from_numpy(state).unsqueeze(0)
+            dtype: torch.dtype = torch.float16 if use_amp else torch.float32
             x = x.to(device, dtype=dtype, non_blocking=True)
 
             # FP16 inference for speed (if available)
             if use_amp:
-                with torch.amp.autocast(device_type="cuda"):
+                with torch.amp.autocast(device_type="cuda"):  # type: ignore
                     policy_logits, value, _ = self(x)
             else:
                 policy_logits, value, _ = self(x)
 
             # Clamp logits for numerical stability and apply softmax
-            policy_logits = torch.clamp(policy_logits, min=-50, max=50)
-            policy = F.softmax(policy_logits, dim=-1)
+            policy_logits: torch.Tensor = torch.clamp(policy_logits, min=-50, max=50)
+            policy: torch.Tensor = F.softmax(policy_logits, dim=-1)
 
             return policy[0].cpu().numpy(), value[0].item()
 
@@ -409,25 +417,25 @@ class DualHeadNetwork(nn.Module):
             - values: numpy array of shape (batch,)
         """
         self.eval()
-        device = get_device()
-        use_amp = device.type == "cuda" and supports_mixed_precision()
+        device: torch.device = get_device()
+        use_amp: bool = device.type == "cuda" and supports_mixed_precision()
 
         with torch.inference_mode():
             # Use non_blocking for async transfer
-            x = torch.from_numpy(states)
-            dtype = torch.float16 if use_amp else torch.float32
+            x: torch.Tensor = torch.from_numpy(states)
+            dtype: torch.dtype = torch.float16 if use_amp else torch.float32
             x = x.to(device, dtype=dtype, non_blocking=True)
 
             # FP16 inference for speed (if available)
             if use_amp:
-                with torch.amp.autocast(device_type="cuda"):
+                with torch.amp.autocast(device_type="cuda"):  # type: ignore
                     policy_logits, values, _ = self(x)
             else:
                 policy_logits, values, _ = self(x)
 
             # Clamp logits for numerical stability and apply softmax
-            policy_logits = torch.clamp(policy_logits, min=-50, max=50)
-            policies = F.softmax(policy_logits, dim=-1)
+            policy_logits: torch.Tensor = torch.clamp(policy_logits, min=-50, max=50)
+            policies: torch.Tensor = F.softmax(policy_logits, dim=-1)
 
             return policies.cpu().numpy(), values.cpu().numpy()
 
@@ -447,23 +455,23 @@ class DualHeadNetwork(nn.Module):
             - wdl_probs: numpy array of shape (3,) with [P(win), P(draw), P(loss)]
         """
         self.eval()
-        device = get_device()
-        use_amp = device.type == "cuda" and supports_mixed_precision()
+        device: torch.device = get_device()
+        use_amp: bool = device.type == "cuda" and supports_mixed_precision()
 
         with torch.inference_mode():
-            x = torch.from_numpy(state).unsqueeze(0)
-            dtype = torch.float16 if use_amp else torch.float32
+            x: torch.Tensor = torch.from_numpy(state).unsqueeze(0)
+            dtype: torch.dtype = torch.float16 if use_amp else torch.float32
             x = x.to(device, dtype=dtype, non_blocking=True)
 
             if use_amp:
-                with torch.amp.autocast(device_type="cuda"):
+                with torch.amp.autocast(device_type="cuda"):  # type: ignore
                     policy_logits, value, wdl_logits = self(x)
             else:
                 policy_logits, value, wdl_logits = self(x)
 
-            policy_logits = torch.clamp(policy_logits, min=-50, max=50)
-            policy = F.softmax(policy_logits, dim=-1)
-            wdl_probs = F.softmax(wdl_logits, dim=-1)
+            policy_logits: torch.Tensor = torch.clamp(policy_logits, min=-50, max=50)
+            policy: torch.Tensor = F.softmax(policy_logits, dim=-1)
+            wdl_probs: torch.Tensor = F.softmax(wdl_logits, dim=-1)
 
             return (
                 policy[0].cpu().numpy(),
@@ -487,23 +495,23 @@ class DualHeadNetwork(nn.Module):
             - wdl_probs: numpy array of shape (batch, 3) with [P(win), P(draw), P(loss)]
         """
         self.eval()
-        device = get_device()
-        use_amp = device.type == "cuda" and supports_mixed_precision()
+        device: torch.device = get_device()
+        use_amp: bool = device.type == "cuda" and supports_mixed_precision()
 
         with torch.inference_mode():
-            x = torch.from_numpy(states)
-            dtype = torch.float16 if use_amp else torch.float32
+            x: torch.Tensor = torch.from_numpy(states)
+            dtype: torch.dtype = torch.float16 if use_amp else torch.float32
             x = x.to(device, dtype=dtype, non_blocking=True)
 
             if use_amp:
-                with torch.amp.autocast(device_type="cuda"):
+                with torch.amp.autocast(device_type="cuda"):  # type: ignore
                     policy_logits, values, wdl_logits = self(x)
             else:
                 policy_logits, values, wdl_logits = self(x)
 
-            policy_logits = torch.clamp(policy_logits, min=-50, max=50)
-            policies = F.softmax(policy_logits, dim=-1)
-            wdl_probs = F.softmax(wdl_logits, dim=-1)
+            policy_logits: torch.Tensor = torch.clamp(policy_logits, min=-50, max=50)
+            policies: torch.Tensor = F.softmax(policy_logits, dim=-1)
+            wdl_probs: torch.Tensor = F.softmax(wdl_logits, dim=-1)
 
             return (
                 policies.cpu().numpy(),
@@ -532,7 +540,9 @@ class DualHeadNetwork(nn.Module):
         )
 
     @classmethod
-    def load(cls, path: str, device: Optional[str] = None) -> "DualHeadNetwork":
+    def load(
+        cls, path: str, device: str | torch.device | None = None
+    ) -> "DualHeadNetwork":
         """
         Load network from file.
 
@@ -562,12 +572,12 @@ class DualHeadNetwork(nn.Module):
         # Filter out deprecated auxiliary head weights (phase_head, moves_left_head)
         # This allows loading old checkpoints that had these heads
         deprecated_prefixes = ("phase_head.", "moves_left_head.")
-        filtered_state_dict = {
+        filtered_state_dict: dict[Any, Any] = {
             k: v for k, v in state_dict.items() if not k.startswith(deprecated_prefixes)
         }
 
         # Create network with config
-        network = cls(**config)
+        network: Self = cls(**config)
         network.load_state_dict(filtered_state_dict)
         network.to(device)
         network.eval()

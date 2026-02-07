@@ -39,8 +39,8 @@ class MoveList(tk.Frame):
             highlightthickness=1,
         )
 
-        self._moves: List[chess.Move] = []
-        self._sans: List[str] = []  # SAN notation strings
+        self._moves: list[chess.Move] = []
+        self._sans: list[str] = []  # SAN notation strings
         self._current_index = -1  # Current position in move list
 
         self._create_widgets(bg)
@@ -106,7 +106,7 @@ class MoveList(tk.Frame):
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
 
         # Move item references for highlighting
-        self._move_labels: List[tk.Label] = []
+        self._move_labels: list[tk.Label] = []
 
     def _on_frame_configure(self, event: tk.Event) -> None:
         """Update scroll region."""
@@ -146,8 +146,8 @@ class MoveList(tk.Frame):
 
     def set_moves_from_list(
         self,
-        moves: List[chess.Move],
-        sans: List[str],
+        moves: list[chess.Move],
+        sans: list[str],
         current_index: int = -1,
     ) -> None:
         """
@@ -385,7 +385,7 @@ class MoveList(tk.Frame):
         self._current_index = -1
         self._rebuild_display()
 
-    def get_moves(self) -> List[chess.Move]:
+    def get_moves(self) -> list[chess.Move]:
         """Get the list of moves."""
         return list(self._moves)
 

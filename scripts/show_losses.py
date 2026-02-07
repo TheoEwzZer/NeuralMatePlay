@@ -4,25 +4,31 @@
 import argparse
 import pickle
 from pathlib import Path
+from typing import Any
 
 
-def load_state(path: Path) -> dict:
+def load_state(path: Path) -> dict[str, Any]:
     """Load a state.pkl file."""
     try:
         with open(path, "rb") as f:
-            return pickle.load(f)
+            state: dict[str, Any] = pickle.load(f)
+            return state
     except Exception as e:
         print(f"Error loading {path}: {e}")
         return {}
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Show loss history from checkpoints")
+def main() -> None:
+    """Show loss history CLI."""
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description="Show loss history from checkpoints"
+    )
     parser.add_argument(
         "--dir",
         type=str,
         default=None,
-        help="Directory containing checkpoints (default: models for pretrained, checkpoints for iteration)",
+        help="Directory containing checkpoints "
+        "(default: models for pretrained, checkpoints for iteration)",
     )
     parser.add_argument(
         "--type",
@@ -31,37 +37,45 @@ def main():
         choices=["pretrained", "iteration"],
         help="Checkpoint type (default: pretrained)",
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Default directory based on checkpoint type
     if args.dir is None:
         args.dir = "checkpoints" if args.type == "iteration" else "models"
 
-    checkpoint_dir = Path(args.dir)
+    checkpoint_dir: Path = Path(args.dir)
     if not checkpoint_dir.exists():
         print(f"Directory not found: {checkpoint_dir}")
         return
 
     # Find all state.pkl files (support both regular and "saved_" prefixed files)
+    patterns: list[str]
     if args.type == "pretrained":
-        patterns = ["pretrained_best_*_state.pkl", "saved_pretrained_best_*_state.pkl"]
+        patterns = [
+            "pretrained_best_*_state.pkl",
+            "saved_pretrained_best_*_state.pkl",
+        ]
     else:
-        patterns = ["iteration_*_state.pkl", "saved_iteration_*_state.pkl"]
+        patterns = [
+            "iteration_*_state.pkl",
+            "saved_iteration_*_state.pkl",
+        ]
 
     # Collect files from all patterns
-    state_files_set = set()
+    state_files_set: set[Path] = set()
     for pattern in patterns:
         state_files_set.update(checkpoint_dir.glob(pattern))
 
     # Sort by checkpoint number
-    def get_checkpoint_num(path):
+    def get_checkpoint_num(path: Path) -> int:
+        """Extract checkpoint number from filename."""
         try:
-            parts = path.stem.split("_")
+            parts: list[str] = path.stem.split("_")
             return int(parts[-2])
         except (ValueError, IndexError):
             return 0
 
-    state_files = sorted(state_files_set, key=get_checkpoint_num)
+    state_files: list[Path] = sorted(state_files_set, key=get_checkpoint_num)
 
     if not state_files:
         print(f"No state files found matching {patterns} in {checkpoint_dir}")
@@ -81,34 +95,40 @@ def main():
 
     # Load and display each checkpoint
     for state_file in state_files:
-        state = load_state(state_file)
+        state: dict[str, Any] = load_state(state_file)
         if not state:
             continue
 
         # Extract checkpoint number from filename
-        name = state_file.stem  # e.g., "pretrained_best_8_state"
-        parts = name.split("_")
+        # e.g., "pretrained_best_8_state"
+        name: str = state_file.stem
+        parts: list[str] = name.split("_")
+        checkpoint_num: int | str
         try:
-            checkpoint_num = int(parts[-2])  # Get the number before "_state"
+            # Get the number before "_state"
+            checkpoint_num = int(parts[-2])
         except (ValueError, IndexError):
             checkpoint_num = "?"
 
         # epoch for pretrained, iteration for training checkpoints
-        epoch = state.get("epoch", state.get("iteration", "?"))
-        train_loss = state.get("train_loss", None)
-        val_loss = state.get("val_loss", state.get("best_val_loss", None))
-        train_policy = state.get("train_policy", None)
-        train_value = state.get("train_value", None)
-        val_policy = state.get("val_policy", None)
-        val_value = state.get("val_value", None)
+        epoch: int | str = state.get("epoch", state.get("iteration", "?"))
+        train_loss: float | None = state.get("train_loss", None)
+        val_loss: float | None = state.get("val_loss", state.get("best_val_loss", None))
+        train_policy: float | None = state.get("train_policy", None)
+        train_value: float | None = state.get("train_value", None)
+        val_policy: float | None = state.get("val_policy", None)
+        val_value: float | None = state.get("val_value", None)
 
         # Format values
-        def fmt(v):
+        def fmt(v: float | None) -> str:
+            """Format a float value or return '-' if None."""
             return f"{v:.5f}" if v is not None else "-"
 
         print(
-            f"  {checkpoint_num:<4} {epoch:<6} {fmt(train_loss):<12} {fmt(val_loss):<12} "
-            f"{fmt(train_policy):<10} {fmt(train_value):<10} {fmt(val_policy):<10} {fmt(val_value):<10}"
+            f"  {checkpoint_num:<4} {epoch:<6} "
+            f"{fmt(train_loss):<12} {fmt(val_loss):<12} "
+            f"{fmt(train_policy):<10} {fmt(train_value):<10} "
+            f"{fmt(val_policy):<10} {fmt(val_value):<10}"
         )
 
     print("  " + "-" * 84)

@@ -14,7 +14,6 @@ Options:
     -c, --compare        Compare all checkpoints
     -m, --models M1 M2   Compare two specific model files
     -t, --type TYPE      Checkpoint type: train or pretrain
-    -q, --quick          Quick comparison (fewer tests)
 
 Examples:
     python diagnose_network.py models                    # Test latest checkpoint
@@ -24,12 +23,13 @@ Examples:
     python diagnose_network.py -m model1.pt model2.pt   # Compare two models
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+_project_root: str = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, _project_root)
+sys.path.insert(0, os.path.join(_project_root, "src"))
 
 from diagnostics.main import main
 

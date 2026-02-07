@@ -1,5 +1,9 @@
 """Test: WDL Head Health (MCTS Critical)."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -14,13 +18,16 @@ from ..core import (
     encode_for_network,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_wdl_head_health(network, results: TestResults):
+
+def test_wdl_head_health(network: DualHeadNetwork, results: TestResults) -> float:
     """
     Test if the WDL head is healthy enough for MCTS to work.
 
     A collapsed WDL head outputs ~0 for all positions, making MCTS blind.
-    This test is CRITICAL because MCTS = Policy × Value, so a broken
+    This test is CRITICAL because MCTS = Policy * Value, so a broken
     WDL head renders the entire system useless regardless of policy quality.
 
     Tests:
@@ -31,7 +38,7 @@ def test_wdl_head_health(network, results: TestResults):
     print(header("TEST: WDL Head Health (MCTS Critical)"))
 
     # Diverse test positions: clearly winning, clearly losing, neutral, and SUBTLE
-    test_positions = [
+    test_positions: list[tuple[str, str, float]] = [
         # === CLEARLY WINNING FOR WHITE ===
         ("k7/8/1K6/8/8/8/8/7Q w - - 0 1", "White Q vs nothing", 1.0),
         ("8/8/8/8/8/2k5/8/KR6 w - - 0 1", "White R vs nothing", 0.9),
@@ -103,18 +110,22 @@ def test_wdl_head_health(network, results: TestResults):
     print(f"\n  {'Position':<25} {'Expected':>10} {'Actual':>10} {'Status':>10}")
     print("  " + "-" * 60)
 
-    values = []
-    expected = []
-    correct_direction = 0
+    values: list[float] = []
+    expected: list[float] = []
+    correct_direction: int = 0
 
     for fen, desc, expected_sign in test_positions:
-        board = chess.Board(fen)
-        state = encode_for_network(board, network)
+        board: chess.Board = chess.Board(fen)
+        state: np.ndarray = encode_for_network(board, network)
+        _: np.ndarray
+        value: float
         _, value = network.predict_single(state)
         values.append(value)
         expected.append(expected_sign)
 
         # Check if direction is correct (stricter for subtle positions)
+        is_correct: bool
+        status: str
         if expected_sign > 0.5:
             # Clearly winning: must be positive
             is_correct = value > 0.1
@@ -147,29 +158,33 @@ def test_wdl_head_health(network, results: TestResults):
     print("  " + "-" * 60)
 
     # Calculate health metrics
-    value_std = np.std(values)
-    value_range = max(values) - min(values)
-    value_mean = np.mean(values)
+    value_std: float = float(np.std(values))
+    value_range: float = max(values) - min(values)
+    value_mean: float = float(np.mean(values))
 
     # Separation between winning and losing (use clear positions only)
-    winning_values = [v for v, e in zip(values, expected) if e > 0.5]
-    losing_values = [v for v, e in zip(values, expected) if e < -0.5]
+    winning_values: list[float] = [v for v, e in zip(values, expected) if e > 0.5]
+    losing_values: list[float] = [v for v, e in zip(values, expected) if e < -0.5]
 
+    separation: float
     if winning_values and losing_values:
-        separation = np.mean(winning_values) - np.mean(losing_values)
+        separation = float(np.mean(winning_values) - np.mean(losing_values))
     else:
         separation = 0.0
 
     print(subheader("Health Metrics"))
     print(
-        f"  Value std deviation:    {value_std:.4f}  {'(OK)' if value_std > 0.1 else '(COLLAPSED!)'}"
+        f"  Value std deviation:    {value_std:.4f}"
+        f"  {'(OK)' if value_std > 0.1 else '(COLLAPSED!)'}"
     )
     print(
-        f"  Value range:            {value_range:.4f}  {'(OK)' if value_range > 0.3 else '(TOO NARROW!)'}"
+        f"  Value range:            {value_range:.4f}"
+        f"  {'(OK)' if value_range > 0.3 else '(TOO NARROW!)'}"
     )
     print(f"  Value mean:             {value_mean:+.4f}")
     print(
-        f"  Win/Loss separation:    {separation:.4f}  {'(OK)' if separation > 0.2 else '(CANNOT DISTINGUISH!)'}"
+        f"  Win/Loss separation:    {separation:.4f}"
+        f"  {'(OK)' if separation > 0.2 else '(CANNOT DISTINGUISH!)'}"
     )
     print(f"  Correct directions:     {correct_direction}/{len(test_positions)}")
 
@@ -183,12 +198,14 @@ def test_wdl_head_health(network, results: TestResults):
 
     # Calculate health score (0-1)
     # Weights: correct_directions (40%), std (20%), range (20%), separation (20%)
-    direction_score = correct_direction / len(test_positions)
-    std_score = min(1.0, value_std / 0.3)  # Perfect if std >= 0.3
-    range_score = min(1.0, value_range / 1.0)  # Perfect if range >= 1.0
-    sep_score = min(1.0, max(0, separation) / 0.5)  # Perfect if separation >= 0.5
+    direction_score: float = correct_direction / len(test_positions)
+    std_score: float = min(1.0, value_std / 0.3)  # Perfect if std >= 0.3
+    range_score: float = min(1.0, value_range / 1.0)  # Perfect if range >= 1.0
+    sep_score: float = min(
+        1.0, max(0, separation) / 0.5
+    )  # Perfect if separation >= 0.5
 
-    health_score = (
+    health_score: float = (
         0.4 * direction_score  # Most important: correct sign
         + 0.2 * std_score
         + 0.2 * range_score
@@ -196,7 +213,7 @@ def test_wdl_head_health(network, results: TestResults):
     )
 
     # Critical failure detection
-    is_collapsed = value_std < 0.05 or value_range < 0.1
+    is_collapsed: bool = value_std < 0.05 or value_range < 0.1
 
     print(subheader("MCTS Usability Score"))
 
@@ -206,14 +223,16 @@ def test_wdl_head_health(network, results: TestResults):
             f"  {Colors.RED}MCTS is effectively BLIND - cannot distinguish positions{Colors.ENDC}"
         )
         print(
-            f"  {Colors.RED}Network will make random-like moves regardless of policy quality{Colors.ENDC}"
+            f"  {Colors.RED}Network will make random-like moves regardless of policy quality"
+            f"{Colors.ENDC}"
         )
         health_score = 0.0  # Force zero score
         results.add_issue(
             "CRITICAL",
             "wdl_head",
             "WDL HEAD COLLAPSED - MCTS UNUSABLE",
-            f"std={value_std:.4f}, range={value_range:.4f}. Network outputs ~constant value for all positions.",
+            f"std={value_std:.4f}, range={value_range:.4f}."
+            f" Network outputs ~constant value for all positions.",
         )
         results.add_recommendation(
             0,  # Highest priority
@@ -221,7 +240,9 @@ def test_wdl_head_health(network, results: TestResults):
             "Collapsed WDL head makes MCTS blind. Games are effectively random.",
         )
     else:
-        bar_len = int(health_score * 20)
+        bar_len: int = int(health_score * 20)
+        color: str
+        status: str
         if health_score >= 0.7:
             color = Colors.GREEN
             status = "HEALTHY"
@@ -232,7 +253,9 @@ def test_wdl_head_health(network, results: TestResults):
             color = Colors.RED
             status = "POOR"
 
-        bar = color + "#" * bar_len + Colors.DIM + "-" * (20 - bar_len) + Colors.ENDC
+        bar: str = (
+            color + "#" * bar_len + Colors.DIM + "-" * (20 - bar_len) + Colors.ENDC
+        )
         print(
             f"\n  Health: [{bar}] {health_score*100:.0f}% - {color}{status}{Colors.ENDC}"
         )
@@ -250,18 +273,20 @@ def test_wdl_head_health(network, results: TestResults):
     print(f"\n  Min: {min(values):+.4f}  Max: {max(values):+.4f}")
 
     # ASCII histogram
-    bins = 10
+    bins: int = 10
+    hist: np.ndarray
+    edges: np.ndarray
     hist, edges = np.histogram(values, bins=bins, range=(-1, 1))
-    max_count = max(hist) if max(hist) > 0 else 1
+    max_count: int = int(max(hist)) if max(hist) > 0 else 1
 
     print(f"\n  Distribution of values across test positions:")
     for i in range(bins):
-        bar_width = int(hist[i] / max_count * 30) if max_count > 0 else 0
-        label = f"{edges[i]:+.1f} to {edges[i+1]:+.1f}"
+        bar_width: int = int(hist[i] / max_count * 30) if max_count > 0 else 0
+        label: str = f"{edges[i]:+.1f} to {edges[i+1]:+.1f}"
         bar = "#" * bar_width
         print(f"    {label}: {bar} ({hist[i]})")
 
-    passed = health_score >= 0.5 and not is_collapsed
+    passed: bool = health_score >= 0.5 and not is_collapsed
     results.add("WDL Head Health", passed, health_score, 1.0)
 
     return health_score

@@ -1,5 +1,9 @@
 """Test: Repetition Awareness."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for repetition awareness
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === SEEK DRAW (when losing) ===
     {
         "name": "Seek Perpetual (Losing)",
@@ -83,23 +90,25 @@ TEST_POSITIONS = [
 ]
 
 
-def test_repetition(network, results: TestResults):
+def test_repetition(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network handles repetition correctly."""
     print(header("TEST: Repetition Awareness"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_5 = np.argsort(policy)[::-1][:5]
-        behavior = test["expected_behavior"]
-        situation = test["situation"]
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
+        behavior: str = test["expected_behavior"]
+        situation: str = test["situation"]
 
         print(f"\n  Value: {value:+.4f}")
         print(f"  Situation: {situation}")
@@ -108,7 +117,7 @@ def test_repetition(network, results: TestResults):
         print(f"  {'Rank':<6} {'Move':<8} {'Prob':>8}")
         print("  " + "-" * 25)
 
-        top_move = None
+        top_move: chess.Move | None = None
         for i, idx in enumerate(top_5):
             move = decode_move(idx, board)
             prob = policy[idx]
@@ -119,7 +128,7 @@ def test_repetition(network, results: TestResults):
 
         # Check bad moves if specified
         if "bad_moves" in test:
-            bad_set = set(test["bad_moves"])
+            bad_set: set[str] = set(test["bad_moves"])
             if top_move and top_move.uci() in bad_set:
                 print(f"\n  {fail('Plays drawing/stalemating move when winning!')}")
                 results.add_diagnostic("repetition", f"{test['name']}_bad_move", True)
@@ -131,8 +140,8 @@ def test_repetition(network, results: TestResults):
 
         # Check expected moves if specified
         if "expected_moves" in test:
-            expected_set = set(test["expected_moves"])
-            found_at = None
+            expected_set: set[str] = set(test["expected_moves"])
+            found_at: int | None = None
             for i, idx in enumerate(top_5):
                 move = decode_move(idx, board)
                 if move and move.uci() in expected_set:
@@ -172,7 +181,7 @@ def test_repetition(network, results: TestResults):
 
         results.add_diagnostic("repetition", f"{test['name']}_value", float(value))
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("repetition", "total_tested", total)
     results.add_diagnostic("repetition", "correct", passed)
     results.add("Repetition Awareness", score >= 0.4, score, 1.0)

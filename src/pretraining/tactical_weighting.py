@@ -94,7 +94,8 @@ def calculate_tactical_weight(
     if _is_endgame(board):
         weight *= endgame_weight
 
-    return min(weight, 5.0)  # Cap at 5x (increased from 3x)
+    # Cap at 5x (increased from 3x)
+    return min(weight, 5.0)
 
 
 def _has_hanging_pieces(board: chess.Board) -> bool:

@@ -9,8 +9,8 @@ import math
 import random
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, List, Dict, Any
-from dataclasses import dataclass, field
+from typing import Callable, Any
+from dataclasses import dataclass
 
 import chess
 
@@ -21,16 +21,18 @@ from src.chess_encoding.board_utils import get_raw_material_diff
 
 
 @dataclass
-class MatchResult:
+class MatchResult(object):
     """Result of a single match against one opponent."""
 
     opponent: str
     wins: int = 0
     losses: int = 0
     draws: int = 0
-    score: float = 0.0  # (wins + 0.5*draws) / total
+    # (wins + 0.5*draws) / total
+    score: float = 0.0
     avg_time: float = 0.0
-    from_iteration: Optional[int] = None  # For vs_best and vs_old
+    # For vs_best and vs_old
+    from_iteration: int | None = None
 
     @property
     def total_games(self) -> int:
@@ -38,14 +40,15 @@ class MatchResult:
 
 
 @dataclass
-class ArenaStats:
+class ArenaStats(object):
     """Complete arena evaluation results."""
 
-    vs_random: Optional[MatchResult] = None
-    vs_mcts: Optional[MatchResult] = None
-    vs_best: Optional[MatchResult] = None
-    vs_old: Optional[MatchResult] = None
-    vs_pretrained: Optional[MatchResult] = None  # vs initial pretrained model
+    vs_random: MatchResult | None = None
+    vs_mcts: MatchResult | None = None
+    vs_best: MatchResult | None = None
+    vs_old: MatchResult | None = None
+    # vs initial pretrained model
+    vs_pretrained: MatchResult | None = None
 
     elo: float = 1500.0
     best_elo: float = 1500.0
@@ -53,11 +56,12 @@ class ArenaStats:
     # Promotion decision
     is_new_best: bool = False
     veto: bool = False
-    veto_reason: Optional[str] = None
+    veto_reason: str | None = None
 
     # Thresholds used
     random_threshold: float = 0.95
-    mcts_threshold: float = 0.70  # Should beat pure MCTS 70%+
+    # Should beat pure MCTS 70%+
+    mcts_threshold: float = 0.70
     promotion_threshold: float = 0.55
     veto_threshold: float = 0.35
 
@@ -72,7 +76,7 @@ class Player(ABC):
         pass
 
     @abstractmethod
-    def select_move(self, board: chess.Board) -> Optional[chess.Move]:
+    def select_move(self, board: chess.Board) -> chess.Move | None:
         """
         Select a move for the given position.
 
@@ -102,7 +106,7 @@ class NetworkPlayer(Player):
         history_length: int = DEFAULT_HISTORY_LENGTH,
         temperature: float = 0.1,
         batch_size: int = 8,
-    ):
+    ) -> None:
         """
         Initialize network player.
 
@@ -114,10 +118,10 @@ class NetworkPlayer(Player):
             temperature: Move selection temperature (0 = deterministic).
             batch_size: Batch size for MCTS GPU inference.
         """
-        self._name = name
-        self._network = network
-        self._num_simulations = num_simulations
-        self._history_length = history_length
+        self._name: str = name
+        self._network: DualHeadNetwork = network
+        self._num_simulations: int = num_simulations
+        self._history_length: int = history_length
         self._mcts = MCTS(
             network,
             num_simulations=num_simulations,
@@ -130,26 +134,26 @@ class NetworkPlayer(Player):
         self._history = PositionHistory(history_length)
 
         # Stats storage for UI display
-        self.last_mcts_stats: Optional[List[Dict[str, Any]]] = None
-        self.last_tree_data: Optional[List[Dict]] = None
-        self.last_root_value: Optional[float] = None
+        self.last_mcts_stats: list[dict[str, Any]] | None = None
+        self.last_tree_data: list[dict[str, Any]] | None = None
+        self.last_root_value: float | None = None
         self.last_tree_depth: int = 0
         self.last_tree_branching: int = 0
-        self.last_mate_in: Optional[int] = None
+        self.last_mate_in: int | None = None
 
     @property
     def name(self) -> str:
         return self._name
 
-    def select_move(self, board: chess.Board) -> Optional[chess.Move]:
+    def select_move(self, board: chess.Board) -> chess.Move | None:
         """Select move using MCTS and capture stats."""
         # Update history with current position
         self._history.push(board)
 
         # Get history for MCTS (excluding current position which is passed separately)
-        history_boards = self._history.get_boards()[1:]
+        history_boards: list[chess.Board] = self._history.get_boards()[1:]
 
-        move = self._mcts.get_best_move(
+        move: chess.Move | None = self._mcts.get_best_move(
             board, add_noise=False, history_boards=history_boards
         )
 
@@ -165,11 +169,11 @@ class NetworkPlayer(Player):
 
         return move
 
-    def get_last_stats(self) -> Dict[str, Any]:
+    def get_last_stats(self) -> dict[str, Any]:
         """Get all stats from the last search."""
         total_visits = 0
         if self.last_mcts_stats:
-            total_visits = sum(s.get("visits", 0) for s in self.last_mcts_stats)
+            total_visits: int = sum(s.get("visits", 0) for s in self.last_mcts_stats)
 
         return {
             "mcts_stats": self.last_mcts_stats,
@@ -201,16 +205,16 @@ class RandomPlayer(Player):
     Useful as a baseline for testing.
     """
 
-    def __init__(self, name: str = "Random"):
-        self._name = name
+    def __init__(self, name: str = "Random") -> None:
+        self._name: str = name
 
     @property
     def name(self) -> str:
         return self._name
 
-    def select_move(self, board: chess.Board) -> Optional[chess.Move]:
+    def select_move(self, board: chess.Board) -> chess.Move | None:
         """Select a random legal move."""
-        legal_moves = list(board.legal_moves)
+        legal_moves: list[chess.Move] = list(board.legal_moves)
         if not legal_moves:
             return None
         return random.choice(legal_moves)
@@ -231,7 +235,7 @@ class PureMCTSPlayer(Player):
         c_puct: float = 1.4,
         name: str = "PureMCTS",
         verbose: bool = False,
-    ):
+    ) -> None:
         """
         Initialize pure MCTS player.
 
@@ -242,38 +246,38 @@ class PureMCTSPlayer(Player):
             name: Display name.
             verbose: If True, print search tree after each move.
         """
-        self._name = name
-        self._num_simulations = num_simulations
-        self._max_rollout_depth = max_rollout_depth
-        self._c_puct = c_puct
-        self._verbose = verbose
+        self._name: str = name
+        self._num_simulations: int = num_simulations
+        self._max_rollout_depth: int = max_rollout_depth
+        self._c_puct: float = c_puct
+        self._verbose: bool = verbose
 
         # Store last search results for verbose output
-        self._last_visit_counts: Dict[chess.Move, int] = {}
-        self._last_total_values: Dict[chess.Move, float] = {}
-        self._last_board: Optional[chess.Board] = None
+        self._last_visit_counts: dict[chess.Move, int] = {}
+        self._last_total_values: dict[chess.Move, float] = {}
+        self._last_board: chess.Board | None = None
 
     @property
     def name(self) -> str:
         return self._name
 
-    def select_move(self, board: chess.Board) -> Optional[chess.Move]:
+    def select_move(self, board: chess.Board) -> chess.Move | None:
         """Select move using pure MCTS with random rollouts."""
-        legal_moves = list(board.legal_moves)
+        legal_moves: list[chess.Move] = list(board.legal_moves)
         if not legal_moves:
             return None
         if len(legal_moves) == 1:
             return legal_moves[0]
 
         # Initialize visit counts and values for each move
-        visit_counts = {move: 0 for move in legal_moves}
-        total_values = {move: 0.0 for move in legal_moves}
+        visit_counts: dict[chess.Move, int] = dict.fromkeys(legal_moves, 0)
+        total_values: dict[chess.Move, float] = dict.fromkeys(legal_moves, 0.0)
 
         # Run simulations
         for _ in range(self._num_simulations):
             # Selection: UCB formula
-            total_visits = sum(visit_counts.values()) + 1
-            best_move = None
+            total_visits: int = sum(visit_counts.values()) + 1
+            best_move: chess.Move | None = None
             best_ucb = float("-inf")
 
             for move in legal_moves:
@@ -281,20 +285,23 @@ class PureMCTSPlayer(Player):
                     # Prioritize unvisited moves
                     ucb = float("inf")
                 else:
-                    q = total_values[move] / visit_counts[move]
-                    u = self._c_puct * math.sqrt(
+                    q: float = total_values[move] / visit_counts[move]
+                    u: float = self._c_puct * math.sqrt(
                         math.log(total_visits) / visit_counts[move]
                     )
-                    ucb = q + u
+                    ucb: float = q + u
 
                 if ucb > best_ucb:
-                    best_ucb = ucb
+                    best_ucb: float = ucb
                     best_move = move
 
+            if best_move is None:
+                best_move = random.choice(legal_moves)
+
             # Expansion + Rollout
-            test_board = board.copy()
+            test_board: chess.Board = board.copy()
             test_board.push(best_move)
-            value = self._rollout(test_board)
+            value: float = self._rollout(test_board)
 
             # Value is from opponent's perspective, negate it
             value = -value
@@ -313,10 +320,15 @@ class PureMCTSPlayer(Player):
             self.print_search_tree(board)
 
         # Select move with most visits (use Q-value as tiebreaker)
-        def move_score(m):
-            visits = visit_counts[m]
-            q_value = total_values[m] / max(visits, 1)
-            return (visits, q_value)  # Tuple: visits first, then Q-value
+        def move_score(m: chess.Move) -> tuple[int, float]:
+            """Return (visit_count, q_value) for sorting moves by strength.
+
+            :param m: Legal move to evaluate from MCTS statistics.
+            :return: Visits and mean Q-value, used as sort key (visits first, Q-value as tiebreaker).
+            """
+            visits: int = visit_counts[m]
+            q_value: float = total_values[m] / max(visits, 1)
+            return visits, q_value
 
         return max(legal_moves, key=move_score)
 
@@ -331,21 +343,21 @@ class PureMCTSPlayer(Player):
         lines.append("Pure MCTS Search (no neural network)")
         lines.append("=" * 60)
 
-        visit_counts = self._last_visit_counts
-        total_values = self._last_total_values
+        visit_counts: dict[chess.Move, int] = self._last_visit_counts
+        total_values: dict[chess.Move, float] = self._last_total_values
 
         if not visit_counts:
             lines.append("No search data available.")
             lines.append("=" * 60)
             return "\n".join(lines)
 
-        total_visits = sum(visit_counts.values())
+        total_visits: int = sum(visit_counts.values())
         lines.append(f"Total simulations: {total_visits}")
         lines.append(f"Rollout depth: {self._max_rollout_depth}")
         lines.append("")
 
         # Sort by visit count
-        sorted_moves = sorted(
+        sorted_moves: list[chess.Move] = sorted(
             visit_counts.keys(),
             key=lambda m: visit_counts[m],
             reverse=True,
@@ -358,13 +370,13 @@ class PureMCTSPlayer(Player):
         lines.append("-" * 60)
 
         for move in sorted_moves[:top_n]:
-            visits = visit_counts[move]
-            pct = (visits / max(total_visits, 1)) * 100
-            q_value = total_values[move] / max(visits, 1)
+            visits: int = visit_counts[move]
+            pct: float = (visits / max(total_visits, 1)) * 100
+            q_value: float = total_values[move] / max(visits, 1)
 
             # Convert Q-value to a more readable eval
             # Q is in [-1, 1], positive = good for current player
-            eval_str = f"{q_value:+.3f}"
+            eval_str: str = f"{q_value:+.3f}"
 
             lines.append(
                 f"{board.san(move):<8} {visits:>8} {pct:>6.1f}% "
@@ -384,11 +396,11 @@ class PureMCTSPlayer(Player):
         Returns:
             Value from perspective of side to move: 1.0 win, -1.0 loss, 0.0 draw.
         """
-        test_board = board.copy()
+        test_board: chess.Board = board.copy()
         depth = 0
 
         while not test_board.is_game_over() and depth < self._max_rollout_depth:
-            moves = list(test_board.legal_moves)
+            moves: list[chess.Move] = list(test_board.legal_moves)
             if not moves:
                 break
             test_board.push(random.choice(moves))
@@ -412,7 +424,7 @@ class PureMCTSPlayer(Player):
         Returns value in [-1, 1] from perspective of side to move.
         """
         # Normalize to [-1, 1] range (39 = max material difference)
-        diff = get_raw_material_diff(board) / 39.0
+        diff: float = get_raw_material_diff(board) / 39.0
 
         # Return from perspective of side to move
         if board.turn == chess.WHITE:
@@ -422,18 +434,20 @@ class PureMCTSPlayer(Player):
 
 
 @dataclass
-class GameResult:
+class GameResult(object):
     """Result of a single game."""
 
-    winner: Optional[chess.Color]  # WHITE, BLACK, or None for draw
-    termination: str  # "checkmate", "stalemate", "fifty_moves", etc.
+    # WHITE, BLACK, or None for draw
+    winner: chess.Color | None
+    # "checkmate", "stalemate", "fifty_moves", etc.
+    termination: str
     moves: int
     white_player: str
     black_player: str
     pgn: str = ""
 
 
-class Arena:
+class Arena(object):
     """
     Arena for playing matches between chess players.
 
@@ -446,7 +460,7 @@ class Arena:
         num_simulations: int = 100,
         max_moves: int = 200,
         history_length: int = DEFAULT_HISTORY_LENGTH,
-    ):
+    ) -> None:
         """
         Initialize arena.
 
@@ -456,10 +470,10 @@ class Arena:
             max_moves: Maximum moves per game before draw.
             history_length: Position history length.
         """
-        self.num_games = num_games
-        self.num_simulations = num_simulations
-        self.max_moves = max_moves
-        self.history_length = history_length
+        self.num_games: int = num_games
+        self.num_simulations: int = num_simulations
+        self.max_moves: int = max_moves
+        self.history_length: int = history_length
 
         # ELO tracking
         self._elo = 1500.0
@@ -473,8 +487,8 @@ class Arena:
         self,
         player1: Player,
         player2: Player,
-        callback: Optional[Callable[[dict], None]] = None,
-    ) -> dict:
+        callback: Callable[[dict], None] | None = None,
+    ) -> dict[str, Any]:
         """
         Play a match between two players.
 
@@ -486,7 +500,7 @@ class Arena:
         Returns:
             Match results dictionary.
         """
-        results = {
+        results: dict[str, Any] = {
             "player1": player1.name,
             "player2": player2.name,
             "player1_wins": 0,
@@ -507,9 +521,9 @@ class Arena:
                 white, black = player2, player1
 
             # Play game
-            game_start = time.time()
-            result = self.play_game(white, black, callback)
-            game_time = time.time() - game_start
+            game_start: float = time.time()
+            result: GameResult = self.play_game(white, black, callback)
+            game_time: float = time.time() - game_start
             total_time += game_time
 
             results["games"].append(result)
@@ -551,7 +565,7 @@ class Arena:
         self,
         white: Player,
         black: Player,
-        callback: Optional[Callable[[dict], None]] = None,
+        callback: Callable[[dict], None] | None = None,
     ) -> GameResult:
         """
         Play a single game.
@@ -569,14 +583,14 @@ class Arena:
         black.reset()
 
         move_count = 0
-        moves_san = []
+        moves_san: list[str] = []
 
         while not board.is_game_over() and move_count < self.max_moves:
             # Get current player
-            player = white if board.turn == chess.WHITE else black
+            player: Player = white if board.turn == chess.WHITE else black
 
             # Get move
-            move = player.select_move(board)
+            move: chess.Move | None = player.select_move(board)
 
             if move is None:
                 break
@@ -631,35 +645,38 @@ class Arena:
             pgn=self._moves_to_pgn(moves_san, white.name, black.name),
         )
 
-    def _update_elo(self, results: dict) -> None:
+    def _update_elo(self, results: dict[str, Any]) -> None:
         """Update ELO based on match results."""
-        total = results["player1_wins"] + results["player2_wins"] + results["draws"]
+        total: int = (
+            results["player1_wins"] + results["player2_wins"] + results["draws"]
+        )
         if total == 0:
             return
 
         # Calculate score (wins = 1, draws = 0.5)
-        score = (results["player1_wins"] + 0.5 * results["draws"]) / total
+        score: float = (results["player1_wins"] + 0.5 * results["draws"]) / total
 
         # Update ELO (K-factor = 32)
-        expected = 0.5  # Assume equal strength initially
+        # Assume equal strength initially
+        expected = 0.5
         self._elo += 32 * (score - expected) * total / self.num_games
         self._games_played += total
 
+    @staticmethod
     def _moves_to_pgn(
-        self,
         moves: list[str],
         white: str,
         black: str,
     ) -> str:
         """Convert move list to PGN string."""
-        pgn_lines = [
+        pgn_lines: list[str] = [
             f'[White "{white}"]',
             f'[Black "{black}"]',
             "",
         ]
 
         # Format moves
-        move_text = []
+        move_text: list[str] = []
         for i, san in enumerate(moves):
             if i % 2 == 0:
                 move_text.append(f"{i // 2 + 1}. {san}")
@@ -676,12 +693,12 @@ class Arena:
     def run_full_evaluation(
         self,
         current_network: DualHeadNetwork,
-        best_network: Optional[DualHeadNetwork] = None,
-        old_network: Optional[DualHeadNetwork] = None,
-        pretrained_network: Optional[DualHeadNetwork] = None,
-        best_iteration: Optional[int] = None,
-        old_iteration: Optional[int] = None,
-        callback: Optional[Callable[[dict], None]] = None,
+        best_network: DualHeadNetwork | None = None,
+        old_network: DualHeadNetwork | None = None,
+        pretrained_network: DualHeadNetwork | None = None,
+        best_iteration: int | None = None,
+        old_iteration: int | None = None,
+        callback: Callable[[dict], None] | None = None,
         promotion_threshold: float = 0.55,
         veto_threshold: float = 0.35,
     ) -> ArenaStats:
@@ -722,7 +739,9 @@ class Arena:
             )
 
         random_player = RandomPlayer(name="Random")
-        random_results = self.play_match(current_player, random_player, callback)
+        random_results: dict[str, Any] = self.play_match(
+            current_player, random_player, callback
+        )
 
         stats.vs_random = MatchResult(
             opponent="Random",
@@ -744,7 +763,9 @@ class Arena:
             num_simulations=self.num_simulations,
             name="PureMCTS",
         )
-        mcts_results = self.play_match(current_player, mcts_player, callback)
+        mcts_results: dict[str, Any] = self.play_match(
+            current_player, mcts_player, callback
+        )
 
         stats.vs_mcts = MatchResult(
             opponent="PureMCTS",
@@ -773,7 +794,9 @@ class Arena:
                 name=f"Best #{best_iteration}",
                 history_length=self.history_length,
             )
-            best_results = self.play_match(current_player, best_player, callback)
+            best_results: dict[str, Any] = self.play_match(
+                current_player, best_player, callback
+            )
 
             stats.vs_best = MatchResult(
                 opponent=f"Best #{best_iteration}",
@@ -811,7 +834,9 @@ class Arena:
                 name=f"Old #{old_iteration}",
                 history_length=self.history_length,
             )
-            old_results = self.play_match(current_player, old_player, callback)
+            old_results: dict[str, Any] = self.play_match(
+                current_player, old_player, callback
+            )
 
             stats.vs_old = MatchResult(
                 opponent=f"Old #{old_iteration}",
@@ -827,8 +852,12 @@ class Arena:
             # Check for veto (catastrophic forgetting)
             if stats.vs_old.score < veto_threshold:
                 stats.veto = True
-                stats.veto_reason = f"Lost to old model #{old_iteration} ({stats.vs_old.score*100:.0f}% < {veto_threshold*100:.0f}%)"
-                stats.is_new_best = False  # Block promotion
+                stats.veto_reason = (
+                    f"Lost to old model #{old_iteration} "
+                    f"({stats.vs_old.score*100:.0f}% < {veto_threshold*100:.0f}%)"
+                )
+                # Block promotion
+                stats.is_new_best = False
 
         # 5. vs Pretrained - Progress tracking against initial model
         if pretrained_network is not None:
@@ -847,7 +876,7 @@ class Arena:
                 name="Pretrained",
                 history_length=self.history_length,
             )
-            pretrained_results = self.play_match(
+            pretrained_results: dict[str, Any] = self.play_match(
                 current_player, pretrained_player, callback
             )
 
@@ -867,7 +896,10 @@ class Arena:
             # Veto if worse than pretrained (should not regress from starting point)
             if stats.vs_pretrained.score < veto_threshold:
                 stats.veto = True
-                stats.veto_reason = f"Lost to pretrained ({stats.vs_pretrained.score*100:.0f}% < {veto_threshold*100:.0f}%)"
+                stats.veto_reason = (
+                    f"Lost to pretrained "
+                    f"({stats.vs_pretrained.score*100:.0f}% < {veto_threshold*100:.0f}%)"
+                )
                 stats.is_new_best = False
 
         # Update ELO based on vs_best results (or vs_random if no best)
@@ -881,18 +913,20 @@ class Arena:
 
         # Update best ELO if this is new best
         if stats.is_new_best and not stats.veto:
-            self._best_elo = max(getattr(self, "_best_elo", 1500.0), self._elo)
+            self._best_elo: Any | float = max(
+                getattr(self, "_best_elo", 1500.0), self._elo
+            )
             stats.best_elo = self._best_elo
 
         return stats
 
     def _update_elo_from_match(self, result: MatchResult) -> None:
         """Update ELO based on match result."""
-        total = result.total_games
+        total: int = result.total_games
         if total == 0:
             return
 
-        score = result.score
+        score: float = result.score
         expected = 0.5
         self._elo += 32 * (score - expected) * total / self.num_games
         self._games_played += total
@@ -903,7 +937,7 @@ def compare_networks(
     network2_path: str,
     num_games: int = 20,
     num_simulations: int = 100,
-) -> dict:
+) -> dict[str, Any]:
     """
     Compare two networks by playing a match.
 
@@ -918,8 +952,8 @@ def compare_networks(
     """
     from .network import DualHeadNetwork
 
-    net1 = DualHeadNetwork.load(network1_path)
-    net2 = DualHeadNetwork.load(network2_path)
+    net1: DualHeadNetwork = DualHeadNetwork.load(network1_path)
+    net2: DualHeadNetwork = DualHeadNetwork.load(network2_path)
 
     player1 = NetworkPlayer(net1, num_simulations, name="Network1")
     player2 = NetworkPlayer(net2, num_simulations, name="Network2")

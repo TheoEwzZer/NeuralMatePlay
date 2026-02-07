@@ -4,17 +4,23 @@ Smart checkpoint management for training.
 Handles efficient storage with milestone preservation and automatic cleanup.
 """
 
-import os
 import re
 import pickle
 import threading
 from pathlib import Path
-from typing import Optional, List, Tuple, Any, Dict
+from typing import Literal, Any
 
 import torch
 
+from .network import DualHeadNetwork
+from .replay_buffer import ReplayBuffer
 
-class CheckpointManager:
+_NETWORK_SUFFIX = "_network.pt"
+_STATE_SUFFIX = "_state.pkl"
+_BUFFER_SUFFIX = "_buffer.pkl"
+
+
+class CheckpointManager(object):
     """
     Manages training checkpoints with smart retention policies.
 
@@ -28,7 +34,7 @@ class CheckpointManager:
         keep_last_n: int = 5,
         milestone_interval: int = 5,
         verbose: bool = True,
-    ):
+    ) -> None:
         """
         Initialize checkpoint manager.
 
@@ -39,13 +45,13 @@ class CheckpointManager:
             verbose: Print save/cleanup info.
         """
         self.checkpoint_dir = Path(checkpoint_dir)
-        self.keep_last_n = keep_last_n
-        self.milestone_interval = milestone_interval
-        self.verbose = verbose
+        self.keep_last_n: int = keep_last_n
+        self.milestone_interval: int = milestone_interval
+        self.verbose: bool = verbose
 
         # Thread safety
-        self._lock = threading.Lock()
-        self._writing_files: set = set()
+        self._lock: threading.Lock = threading.Lock()
+        self._writing_files: set[str] = set()
 
         # Create directory
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -67,8 +73,8 @@ class CheckpointManager:
         self,
         name: str,
         best_count: int,
-        network: Any,
-        state: Optional[Dict] = None,
+        network: DualHeadNetwork,
+        state: dict[str, Any] | None = None,
     ) -> str:
         """
         Save a 'best' checkpoint for pretraining.
@@ -76,7 +82,7 @@ class CheckpointManager:
         Args:
             name: Base name (e.g., "pretrained").
             best_count: Number of times we've improved.
-            network: Network to save (must have .save() or state_dict()).
+            network: Network to save.
             state: Optional training state dict.
 
         Returns:
@@ -84,26 +90,28 @@ class CheckpointManager:
         """
         with self._lock:
             # Always save current best (overwritten each time)
-            best_path = self.checkpoint_dir / f"{name}_best_network.pt"
+            best_path: Path = self.checkpoint_dir / f"{name}_best_network.pt"
             self._save_network(network, best_path)
 
             if state:
-                state_path = self.checkpoint_dir / f"{name}_best_state.pkl"
+                state_path: Path = self.checkpoint_dir / f"{name}_best_state.pkl"
                 self._save_pickle(state, state_path)
 
             self._log(f"Saved {best_path.name} (improvement #{best_count})")
 
             # Always save numbered checkpoint for history
-            numbered_path = self.checkpoint_dir / f"{name}_best_{best_count}_network.pt"
+            numbered_path: Path = (
+                self.checkpoint_dir / f"{name}_best_{best_count}_network.pt"
+            )
             self._save_network(network, numbered_path)
 
             if state:
-                numbered_state = (
+                numbered_state: Path = (
                     self.checkpoint_dir / f"{name}_best_{best_count}_state.pkl"
                 )
                 self._save_pickle(state, numbered_state)
 
-            is_milestone = self._is_milestone(best_count)
+            is_milestone: bool = self._is_milestone(best_count)
             if is_milestone:
                 self._log(f"Saved milestone: {numbered_path.name}")
             else:
@@ -117,8 +125,8 @@ class CheckpointManager:
     def save_latest_checkpoint(
         self,
         name: str,
-        network: Any,
-        state: Optional[Dict] = None,
+        network: DualHeadNetwork,
+        state: dict[str, Any] | None = None,
     ) -> str:
         """
         Save a 'latest' checkpoint (overwrites previous latest).
@@ -136,18 +144,20 @@ class CheckpointManager:
         """
         with self._lock:
             # Always overwrite latest checkpoint
-            latest_path = self.checkpoint_dir / f"{name}_latest_network.pt"
+            latest_path: Path = self.checkpoint_dir / f"{name}_latest_network.pt"
             self._save_network(network, latest_path)
 
             if state:
-                latest_state_path = self.checkpoint_dir / f"{name}_latest_state.pkl"
+                latest_state_path: Path = (
+                    self.checkpoint_dir / f"{name}_latest_state.pkl"
+                )
                 self._save_pickle(state, latest_state_path)
 
             self._log(f"Saved {latest_path.name} (latest checkpoint)")
 
             return str(latest_path)
 
-    def load_latest_checkpoint(self, name: str) -> Optional[Dict]:
+    def load_latest_checkpoint(self, name: str) -> dict[str, Any] | None:
         """
         Load the latest checkpoint.
 
@@ -157,13 +167,13 @@ class CheckpointManager:
         Returns:
             Dict with 'network_path', 'state', or None if not found.
         """
-        network_path = self.checkpoint_dir / f"{name}_latest_network.pt"
-        state_path = self.checkpoint_dir / f"{name}_latest_state.pkl"
+        network_path: Path = self.checkpoint_dir / f"{name}_latest_network.pt"
+        state_path: Path = self.checkpoint_dir / f"{name}_latest_state.pkl"
 
         if not network_path.exists():
             return None
 
-        result = {
+        result: dict[str, Any] = {
             "network_path": str(network_path),
             "state": None,
         }
@@ -177,11 +187,13 @@ class CheckpointManager:
     def _cleanup_best_checkpoints(self, name: str) -> None:
         """Remove old best checkpoints, keeping milestones + last 5."""
         # Find all numbered best checkpoints
-        pattern = re.compile(rf"{re.escape(name)}_best_(\d+)_network\.pt")
+        pattern: re.Pattern[str] = re.compile(
+            rf"{re.escape(name)}_best_(\d+)_network\.pt"
+        )
         best_counts = []
 
         for filepath in self.checkpoint_dir.glob(f"{name}_best_*_network.pt"):
-            match = pattern.match(filepath.name)
+            match: re.Match[str] | None = pattern.match(filepath.name)
             if match:
                 best_counts.append(int(match.group(1)))
 
@@ -205,8 +217,8 @@ class CheckpointManager:
         deleted_count = 0
 
         for count in sorted(to_delete):
-            for suffix in ["_network.pt", "_state.pkl"]:
-                filepath = self.checkpoint_dir / f"{name}_best_{count}{suffix}"
+            for suffix in [_NETWORK_SUFFIX, _STATE_SUFFIX]:
+                filepath: Path = self.checkpoint_dir / f"{name}_best_{count}{suffix}"
                 if filepath.exists():
                     try:
                         filepath.unlink()
@@ -225,9 +237,9 @@ class CheckpointManager:
     def save_training_checkpoint(
         self,
         iteration: int,
-        network: Any,
-        state: Dict,
-        buffer: Any = None,
+        network: DualHeadNetwork,
+        state: dict[str, Any],
+        buffer: ReplayBuffer | None = None,
     ) -> str:
         """
         Save a training checkpoint and cleanup old ones.
@@ -242,10 +254,10 @@ class CheckpointManager:
             Path to saved checkpoint.
         """
         with self._lock:
-            prefix = f"iteration_{iteration}"
+            prefix: str = f"iteration_{iteration}"
 
             # Mark files as being written
-            files_to_write = [
+            files_to_write: list[str] = [
                 f"{prefix}_network.pt",
                 f"{prefix}_state.pkl",
             ]
@@ -257,20 +269,22 @@ class CheckpointManager:
 
             try:
                 # Save network
-                network_path = self.checkpoint_dir / f"{prefix}_network.pt"
+                network_path: Path = self.checkpoint_dir / f"{prefix}_network.pt"
                 self._save_network(network, network_path)
 
                 # Save state
-                state_path = self.checkpoint_dir / f"{prefix}_state.pkl"
+                state_path: Path = self.checkpoint_dir / f"{prefix}_state.pkl"
                 self._save_pickle(state, state_path)
 
                 # Save buffer if provided
                 if buffer is not None:
-                    buffer_path = self.checkpoint_dir / f"{prefix}_buffer.pkl"
+                    buffer_path: Path = self.checkpoint_dir / f"{prefix}_buffer.pkl"
                     self._save_pickle(buffer, buffer_path)
 
-                is_milestone = self._is_milestone(iteration)
-                milestone_str = " (milestone)" if is_milestone else ""
+                is_milestone: bool = self._is_milestone(iteration)
+                milestone_str: Literal[" (milestone)"] | Literal[""] = (
+                    " (milestone)" if is_milestone else ""
+                )
                 self._log(f"Saved iteration {iteration}{milestone_str}")
 
             finally:
@@ -286,7 +300,7 @@ class CheckpointManager:
     def _cleanup_training_checkpoints(self) -> None:
         """Remove old training checkpoints according to retention policy."""
         # Find all iteration checkpoints
-        iterations = self._list_training_iterations()
+        iterations: list[int] = self._list_training_iterations()
 
         if not iterations:
             return
@@ -300,17 +314,17 @@ class CheckpointManager:
                 keep.add(it)
 
         # Keep last N
-        sorted_iterations = sorted(iterations)
+        sorted_iterations: list[int] = sorted(iterations)
         keep.update(sorted_iterations[-self.keep_last_n :])
 
         # Delete the rest
-        to_delete = set(iterations) - keep
+        to_delete: set[int] = set(iterations) - keep
         deleted_count = 0
 
         for it in sorted(to_delete):
-            prefix = f"iteration_{it}"
-            for suffix in ["_network.pt", "_state.pkl", "_buffer.pkl"]:
-                filepath = self.checkpoint_dir / f"{prefix}{suffix}"
+            prefix: str = f"iteration_{it}"
+            for suffix in [_NETWORK_SUFFIX, _STATE_SUFFIX, _BUFFER_SUFFIX]:
+                filepath: Path = self.checkpoint_dir / f"{prefix}{suffix}"
 
                 # Skip if file is being written
                 if filepath.name in self._writing_files:
@@ -327,13 +341,13 @@ class CheckpointManager:
             self._log(f"Cleaned up iterations: {sorted(to_delete)}")
             self._log(f"Keeping: milestones + last {self.keep_last_n} = {sorted(keep)}")
 
-    def _list_training_iterations(self) -> List[int]:
+    def _list_training_iterations(self) -> list[int]:
         """List all training iteration numbers."""
         iterations = set()
-        pattern = re.compile(r"iteration_(\d+)_network\.pt")
+        pattern: re.Pattern[str] = re.compile(r"iteration_(\d+)_network\.pt")
 
         for filepath in self.checkpoint_dir.glob("iteration_*_network.pt"):
-            match = pattern.match(filepath.name)
+            match: re.Match[str] | None = pattern.match(filepath.name)
             if match:
                 iterations.add(int(match.group(1)))
 
@@ -343,26 +357,26 @@ class CheckpointManager:
     # Loading & Utilities
     # =========================================================================
 
-    def get_latest_checkpoint(self) -> Optional[str]:
+    def get_latest_checkpoint(self) -> str | None:
         """
         Get the most recent training checkpoint.
 
         Returns:
             Prefix of latest checkpoint (e.g., "iteration_17") or None.
         """
-        iterations = self._list_training_iterations()
+        iterations: list[int] = self._list_training_iterations()
         if not iterations:
             return None
 
-        latest = max(iterations)
+        latest: int = max(iterations)
         return f"iteration_{latest}"
 
     def get_latest_iteration(self) -> int:
         """Get the latest iteration number, or 0 if none."""
-        iterations = self._list_training_iterations()
+        iterations: list[int] = self._list_training_iterations()
         return max(iterations) if iterations else 0
 
-    def list_checkpoints(self) -> List[Tuple[str, int]]:
+    def list_checkpoints(self) -> list[tuple[str, int]]:
         """
         List all checkpoints with their iteration/count.
 
@@ -377,19 +391,21 @@ class CheckpointManager:
 
         # Best checkpoints
         for filepath in self.checkpoint_dir.glob("*_best_*_network.pt"):
-            match = re.search(r"_best_(\d+)_network\.pt", filepath.name)
+            match: re.Match[str] | None = re.search(
+                r"_best_(\d+)_network\.pt", filepath.name
+            )
             if match:
                 count = int(match.group(1))
-                name = filepath.name.replace(f"_best_{count}_network.pt", "")
+                name: str = filepath.name.replace(f"_best_{count}_network.pt", "")
                 checkpoints.append((f"{name}_best_{count}", count))
 
         return sorted(checkpoints, key=lambda x: x[1])
 
     def load_training_checkpoint(
         self,
-        iteration: Optional[int] = None,
+        iteration: int | None = None,
         load_buffer: bool = True,
-    ) -> Optional[Dict]:
+    ) -> dict[str, Any] | None:
         """
         Load a training checkpoint.
 
@@ -405,10 +421,10 @@ class CheckpointManager:
             if iteration == 0:
                 return None
 
-        prefix = f"iteration_{iteration}"
-        network_path = self.checkpoint_dir / f"{prefix}_network.pt"
-        state_path = self.checkpoint_dir / f"{prefix}_state.pkl"
-        buffer_path = self.checkpoint_dir / f"{prefix}_buffer.pkl"
+        prefix: str = f"iteration_{iteration}"
+        network_path: Path = self.checkpoint_dir / f"{prefix}_network.pt"
+        state_path: Path = self.checkpoint_dir / f"{prefix}_state.pkl"
+        buffer_path: Path = self.checkpoint_dir / f"{prefix}_buffer.pkl"
 
         if not network_path.exists():
             self._log(f"Checkpoint not found: {prefix}")
@@ -432,7 +448,7 @@ class CheckpointManager:
         self._log(f"Loaded checkpoint: {prefix}")
         return result
 
-    def load_best_checkpoint(self, name: str) -> Optional[Dict]:
+    def load_best_checkpoint(self, name: str) -> dict[str, Any] | None:
         """
         Load the best pretraining checkpoint.
 
@@ -442,8 +458,8 @@ class CheckpointManager:
         Returns:
             Dict with 'network_path', 'state'.
         """
-        network_path = self.checkpoint_dir / f"{name}_best_network.pt"
-        state_path = self.checkpoint_dir / f"{name}_best_state.pkl"
+        network_path: Path = self.checkpoint_dir / f"{name}_best_network.pt"
+        state_path: Path = self.checkpoint_dir / f"{name}_best_state.pkl"
 
         if not network_path.exists():
             return None
@@ -458,7 +474,7 @@ class CheckpointManager:
 
         return result
 
-    def list_best_checkpoints(self, name: str) -> List[int]:
+    def list_best_checkpoints(self, name: str) -> list[int]:
         """
         List all numbered best checkpoint counts.
 
@@ -468,19 +484,21 @@ class CheckpointManager:
         Returns:
             List of best_count numbers, sorted ascending.
         """
-        pattern = re.compile(rf"{re.escape(name)}_best_(\d+)_network\.pt")
+        pattern: re.Pattern[str] = re.compile(
+            rf"{re.escape(name)}_best_(\d+)_network\.pt"
+        )
         counts = []
 
         for filepath in self.checkpoint_dir.glob(f"{name}_best_*_network.pt"):
-            match = pattern.match(filepath.name)
+            match: re.Match[str] | None = pattern.match(filepath.name)
             if match:
                 counts.append(int(match.group(1)))
 
         return sorted(counts)
 
     def load_best_numbered_checkpoint(
-        self, name: str, best_count: Optional[int] = None
-    ) -> Optional[Dict]:
+        self, name: str, best_count: int | None = None
+    ) -> dict[str, Any] | None:
         """
         Load a specific numbered best checkpoint.
 
@@ -493,13 +511,15 @@ class CheckpointManager:
         """
         if best_count is None:
             # Get latest
-            counts = self.list_best_checkpoints(name)
+            counts: list[int] = self.list_best_checkpoints(name)
             if not counts:
                 return None
             best_count = max(counts)
 
-        network_path = self.checkpoint_dir / f"{name}_best_{best_count}_network.pt"
-        state_path = self.checkpoint_dir / f"{name}_best_{best_count}_state.pkl"
+        network_path: Path = (
+            self.checkpoint_dir / f"{name}_best_{best_count}_network.pt"
+        )
+        state_path: Path = self.checkpoint_dir / f"{name}_best_{best_count}_state.pkl"
 
         if not network_path.exists():
             self._log(f"Checkpoint not found: {name}_best_{best_count}")
@@ -521,7 +541,8 @@ class CheckpointManager:
     # File I/O with integrity checks
     # =========================================================================
 
-    def _save_network(self, network: Any, path: Path) -> None:
+    @staticmethod
+    def _save_network(network: DualHeadNetwork, path: Path) -> None:
         """Save network to file."""
         # Support both .save() method and raw state_dict
         if hasattr(network, "save"):
@@ -529,10 +550,11 @@ class CheckpointManager:
         else:
             torch.save(network.state_dict(), path)
 
-    def _save_pickle(self, obj: Any, path: Path) -> None:
+    @staticmethod
+    def _save_pickle(obj: dict[str, Any] | ReplayBuffer, path: Path) -> None:
         """Save object with pickle."""
         # Write to temp file first, then rename (atomic)
-        temp_path = path.with_suffix(".tmp")
+        temp_path: Path = path.with_suffix(".tmp")
         try:
             with open(temp_path, "wb") as f:
                 pickle.dump(obj, f)
@@ -542,7 +564,7 @@ class CheckpointManager:
                 temp_path.unlink()
             raise e
 
-    def _load_pickle_safe(self, path: Path) -> Optional[Any]:
+    def _load_pickle_safe(self, path: Path) -> Any | None:
         """Load pickle with integrity check."""
         try:
             with open(path, "rb") as f:
@@ -561,8 +583,8 @@ class CheckpointManager:
         Returns:
             True if all files are valid.
         """
-        network_path = self.checkpoint_dir / f"{prefix}_network.pt"
-        state_path = self.checkpoint_dir / f"{prefix}_state.pkl"
+        network_path: Path = self.checkpoint_dir / f"{prefix}_network.pt"
+        state_path: Path = self.checkpoint_dir / f"{prefix}_state.pkl"
 
         # Check network
         if network_path.exists():
@@ -573,73 +595,7 @@ class CheckpointManager:
                 return False
 
         # Check state
-        if state_path.exists():
-            if self._load_pickle_safe(state_path) is None:
-                return False
+        if state_path.exists() and self._load_pickle_safe(state_path) is None:
+            return False
 
         return True
-
-    def find_valid_checkpoint(self) -> Optional[str]:
-        """
-        Find the most recent valid checkpoint.
-
-        Falls back to earlier checkpoints if latest is corrupted.
-
-        Returns:
-            Valid checkpoint prefix or None.
-        """
-        iterations = sorted(self._list_training_iterations(), reverse=True)
-
-        for it in iterations:
-            prefix = f"iteration_{it}"
-            if self.verify_checkpoint_integrity(prefix):
-                return prefix
-            else:
-                self._log(f"Skipping corrupted checkpoint: {prefix}")
-
-        return None
-
-    def get_disk_usage(self) -> Dict[str, int]:
-        """Get disk usage statistics."""
-        total = 0
-        by_type = {"network": 0, "state": 0, "buffer": 0}
-
-        for filepath in self.checkpoint_dir.iterdir():
-            if filepath.is_file():
-                size = filepath.stat().st_size
-                total += size
-
-                if "_network.pt" in filepath.name:
-                    by_type["network"] += size
-                elif "_state.pkl" in filepath.name:
-                    by_type["state"] += size
-                elif "_buffer.pkl" in filepath.name:
-                    by_type["buffer"] += size
-
-        return {
-            "total_bytes": total,
-            "total_mb": total / (1024 * 1024),
-            **{f"{k}_mb": v / (1024 * 1024) for k, v in by_type.items()},
-        }
-
-    def print_status(self) -> None:
-        """Print checkpoint status summary."""
-        checkpoints = self.list_checkpoints()
-        usage = self.get_disk_usage()
-
-        print(f"\n[Checkpoint Status: {self.checkpoint_dir}]")
-        print(f"  Total checkpoints: {len(checkpoints)}")
-        print(f"  Disk usage: {usage['total_mb']:.1f} MB")
-        print(f"    - Networks: {usage['network_mb']:.1f} MB")
-        print(f"    - States: {usage['state_mb']:.1f} MB")
-        print(f"    - Buffers: {usage['buffer_mb']:.1f} MB")
-
-        if checkpoints:
-            print(f"\n  Checkpoints:")
-            for prefix, num in checkpoints[-10:]:  # Last 10
-                is_ms = self._is_milestone(num)
-                ms_str = " (milestone)" if is_ms else ""
-                print(f"    - {prefix}{ms_str}")
-
-            if len(checkpoints) > 10:
-                print(f"    ... and {len(checkpoints) - 10} more")

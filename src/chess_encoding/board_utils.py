@@ -3,17 +3,18 @@
 import chess
 
 
-PIECE_VALUES = {
+PIECE_VALUES: dict[chess.PieceType, int] = {
     chess.PAWN: 1,
     chess.KNIGHT: 3,
     chess.BISHOP: 3,
     chess.ROOK: 5,
     chess.QUEEN: 9,
-    chess.KING: 0,  # King has no material value
+    # King has no material value
+    chess.KING: 0,
 }
 
 
-def get_piece_value(piece_type: int) -> int:
+def get_piece_value(piece_type: chess.PieceType) -> int:
     """Get the material value of a piece type."""
     return PIECE_VALUES.get(piece_type, 0)
 
@@ -27,8 +28,8 @@ def get_raw_material_diff(board: chess.Board) -> int:
     """
     material = 0
     for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
-        white_count = len(board.pieces(piece_type, chess.WHITE))
-        black_count = len(board.pieces(piece_type, chess.BLACK))
+        white_count: int = len(board.pieces(piece_type, chess.WHITE))
+        black_count: int = len(board.pieces(piece_type, chess.BLACK))
         material += (white_count - black_count) * PIECE_VALUES[piece_type]
     return material
 
@@ -49,25 +50,14 @@ def is_endgame(board: chess.Board) -> bool:
     - Both sides have no queens, or
     - Every side which has a queen has at most one minor piece
     """
-    white_queens = len(board.pieces(chess.QUEEN, chess.WHITE))
-    black_queens = len(board.pieces(chess.QUEEN, chess.BLACK))
+    white_queens: int = len(board.pieces(chess.QUEEN, chess.WHITE))
+    black_queens: int = len(board.pieces(chess.QUEEN, chess.BLACK))
 
     if white_queens == 0 and black_queens == 0:
         return True
 
-    white_minors = len(board.pieces(chess.KNIGHT, chess.WHITE)) + len(
-        board.pieces(chess.BISHOP, chess.WHITE)
-    )
-    black_minors = len(board.pieces(chess.KNIGHT, chess.BLACK)) + len(
-        board.pieces(chess.BISHOP, chess.BLACK)
-    )
-
-    white_rooks = len(board.pieces(chess.ROOK, chess.WHITE))
-    black_rooks = len(board.pieces(chess.ROOK, chess.BLACK))
-
-    # If both sides have very little material
-    white_material = get_material_count(board, chess.WHITE)
-    black_material = get_material_count(board, chess.BLACK)
+    white_material: int = get_material_count(board, chess.WHITE)
+    black_material: int = get_material_count(board, chess.BLACK)
 
     return white_material <= 13 and black_material <= 13
 
@@ -78,7 +68,7 @@ def is_quiet_position(board: chess.Board) -> bool:
         if board.is_capture(move):
             return False
         board.push(move)
-        in_check = board.is_check()
+        in_check: bool = board.is_check()
         board.pop()
         if in_check:
             return False
@@ -98,9 +88,10 @@ def get_game_phase(board: chess.Board) -> str:
     """
     Determine game phase: opening, middlegame, or endgame.
     """
-    piece_count = count_pieces(board)
+    piece_count: int = count_pieces(board)
 
-    if piece_count >= 28:  # Most pieces still on board
+    # Most pieces still on board
+    if piece_count >= 28:
         return "opening"
     elif is_endgame(board):
         return "endgame"

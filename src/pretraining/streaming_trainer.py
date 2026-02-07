@@ -10,13 +10,16 @@ import gc
 import os
 import random
 import time
-from typing import Optional, Tuple, List
+from collections.abc import Callable, Iterator
+from typing import Any
 
+from matplotlib.pylab import Generator
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.amp import autocast, GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 
 from .chunk_manager import ChunkManager
 
@@ -81,8 +84,8 @@ def adaptive_label_smoothing(
         weight=3.0 → smoothing=0.025
         weight=5.0 → smoothing=0.017
     """
-    decay_factor = 1.0 / (1.0 + 0.5 * (weights - 1.0))
-    adaptive = base_smoothing * decay_factor
+    decay_factor: torch.Tensor = 1.0 / (1.0 + 0.5 * (weights - 1.0))
+    adaptive: torch.Tensor = base_smoothing * decay_factor
     return torch.clamp(adaptive, min=min_smoothing, max=max_smoothing)
 
 
@@ -104,14 +107,18 @@ def distillation_loss(
     Returns:
         Scalar KL divergence loss
     """
-    student_log_probs = nn.functional.log_softmax(student_logits / temperature, dim=-1)
-    teacher_probs = nn.functional.softmax(teacher_logits / temperature, dim=-1)
+    student_log_probs: torch.Tensor = nn.functional.log_softmax(
+        student_logits / temperature, dim=-1
+    )
+    teacher_probs: torch.Tensor = nn.functional.softmax(
+        teacher_logits / temperature, dim=-1
+    )
     return nn.functional.kl_div(
         student_log_probs, teacher_probs, reduction="batchmean"
     ) * (temperature**2)
 
 
-class TacticalReplayBuffer:
+class TacticalReplayBuffer(object):
     """
     Buffer for storing tactical/critical positions to prevent catastrophic forgetting.
 
@@ -130,7 +137,7 @@ class TacticalReplayBuffer:
         capacity: int,
         weight_threshold: float,
         num_chunks: int,
-    ):
+    ) -> None:
         """
         Initialize replay buffer with fixed pre-allocation.
 
@@ -139,34 +146,35 @@ class TacticalReplayBuffer:
             weight_threshold: Minimum weight for a position to be stored
             num_chunks: Total number of chunks (for proportional allocation)
         """
-        self.capacity = capacity
-        self.threshold = weight_threshold
-        self.positions_per_chunk = max(1, capacity // max(1, num_chunks))
+        self.capacity: int = capacity
+        self.threshold: float = weight_threshold
+        self.positions_per_chunk: int = max(1, capacity // max(1, num_chunks))
 
         # Pre-allocate full capacity upfront (no growth = no warmup slowdown)
-        self._allocated = capacity
-        self.states = np.zeros((capacity, 72, 8, 8), dtype=np.float32)
-        self.policies = np.zeros(capacity, dtype=np.int32)
-        self.values = np.zeros(capacity, dtype=np.float32)
-        self.weights = np.zeros(capacity, dtype=np.float32)
+        self._allocated: int = capacity
+        self.states: np.ndarray = np.zeros((capacity, 72, 8, 8), dtype=np.float32)
+        self.policies: np.ndarray = np.zeros(capacity, dtype=np.int32)
+        self.values: np.ndarray = np.zeros(capacity, dtype=np.float32)
+        self.weights: np.ndarray = np.zeros(capacity, dtype=np.float32)
 
-        self._size = 0  # Current number of positions in buffer
+        # Current number of positions in buffer
+        self._size: int = 0
 
         # Reusable cache (avoid GPU memory fragmentation)
-        self._chunk_cache = None
-        self._chunk_cache_idx = 0
+        self._chunk_cache: tuple[torch.Tensor, ...] | None = None
+        self._chunk_cache_idx: int = 0
 
-        # GPU cache pré-alloué (créé au premier appel de pre_sample_for_chunk)
-        self._gpu_cache_states = None
-        self._gpu_cache_policies = None
-        self._gpu_cache_values = None
-        self._gpu_cache_weights = None
-        self._gpu_cache_size = 0
-        self._gpu_cache_device = None
-        self._chunk_cache_valid_size = 0
+        # Pre-allocated GPU cache (created on first call to pre_sample_for_chunk)
+        self._gpu_cache_states: torch.Tensor | None = None
+        self._gpu_cache_policies: torch.Tensor | None = None
+        self._gpu_cache_values: torch.Tensor | None = None
+        self._gpu_cache_weights: torch.Tensor | None = None
+        self._gpu_cache_size: int = 0
+        self._gpu_cache_device: torch.device | None = None
+        self._chunk_cache_valid_size: int = 0
 
         # Random number generator
-        self._rng = np.random.default_rng(42)
+        self._rng: Generator = np.random.default_rng(42)
 
     def add_batch(
         self,
@@ -191,23 +199,25 @@ class TacticalReplayBuffer:
             Number of positions added
         """
         # Filter by threshold
-        mask = weights >= self.threshold
+        mask: np.ndarray = weights >= self.threshold
         if not mask.any():
             return 0
 
         # Get indices of tactical positions
-        tactical_indices = np.nonzero(mask)[0]
+        tactical_indices: np.ndarray = np.nonzero(mask)[0]
 
         # Sort by weight (descending) and take top N
-        tactical_weights = weights[tactical_indices]
-        sorted_order = np.argsort(tactical_weights)[::-1]  # Descending
-        top_indices = tactical_indices[sorted_order[: self.positions_per_chunk]]
+        tactical_weights: np.ndarray = weights[tactical_indices]
+        sorted_order: np.ndarray = np.argsort(tactical_weights)[::-1]  # Descending
+        top_indices: np.ndarray = tactical_indices[
+            sorted_order[: self.positions_per_chunk]
+        ]
 
         # Vectorized batch insert
-        n_to_add = min(len(top_indices), self.capacity - self._size)
+        n_to_add: int = min(len(top_indices), self.capacity - self._size)
         if n_to_add > 0:
-            insert_indices = top_indices[:n_to_add]
-            end_idx = self._size + n_to_add
+            insert_indices: np.ndarray = top_indices[:n_to_add]
+            end_idx: int = self._size + n_to_add
             self.states[self._size : end_idx] = states[insert_indices]
             self.policies[self._size : end_idx] = policies[insert_indices]
             self.values[self._size : end_idx] = values[insert_indices]
@@ -216,9 +226,7 @@ class TacticalReplayBuffer:
 
         return n_to_add
 
-    def sample(
-        self, n: int, device: torch.device
-    ) -> Optional[Tuple[torch.Tensor, ...]]:
+    def sample(self, n: int, device: torch.device) -> tuple[torch.Tensor, ...] | None:
         """
         Sample n positions from the buffer.
 
@@ -233,46 +241,47 @@ class TacticalReplayBuffer:
             return None
 
         n = min(n, self._size)
-        indices = self._rng.choice(self._size, n, replace=False)
+        indices: np.ndarray = self._rng.choice(self._size, n, replace=False)
 
         # Direct numpy fancy indexing (fast, contiguous memory)
-        sampled_states = torch.from_numpy(self.states[indices].copy()).to(
+        sampled_states: torch.Tensor = torch.from_numpy(self.states[indices].copy()).to(
             device, non_blocking=True
         )
 
-        sampled_policies = (
+        sampled_policies: torch.Tensor = (
             torch.from_numpy(self.policies[indices].copy())
             .long()
             .to(device, non_blocking=True)
         )
 
-        sampled_values = torch.from_numpy(self.values[indices].copy()).to(
+        sampled_values: torch.Tensor = torch.from_numpy(self.values[indices].copy()).to(
             device, non_blocking=True
         )
 
-        sampled_weights = torch.from_numpy(self.weights[indices].copy()).to(
-            device, non_blocking=True
-        )
+        sampled_weights: torch.Tensor = torch.from_numpy(
+            self.weights[indices].copy()
+        ).to(device, non_blocking=True)
 
         return sampled_states, sampled_policies, sampled_values, sampled_weights
 
     def _ensure_gpu_cache(self, size: int, device: torch.device) -> None:
-        """Alloue ou réalloue le cache GPU si nécessaire."""
+        """Allocate or reallocate GPU cache if needed."""
         if (
             self._gpu_cache_states is not None
             and self._gpu_cache_size >= size
             and self._gpu_cache_device == device
         ):
-            return  # Cache déjà OK
+            # Cache already OK
+            return
 
-        # Libérer l'ancien cache
+        # Free the old cache
         if self._gpu_cache_states is not None:
             del self._gpu_cache_states, self._gpu_cache_policies
             del self._gpu_cache_values, self._gpu_cache_weights
             torch.cuda.empty_cache()
 
-        # Allouer avec 20% de marge
-        alloc_size = int(size * 1.2)
+        # Allocate with 20% headroom
+        alloc_size: int = int(size * 1.2)
         self._gpu_cache_states = torch.empty(
             (alloc_size, 72, 8, 8), dtype=torch.float32, device=device
         )
@@ -290,7 +299,7 @@ class TacticalReplayBuffer:
 
     def pre_sample_for_chunk(self, total_samples: int, device: torch.device) -> None:
         """
-        Pre-sample avec tensors GPU persistants (temps constant).
+        Pre-sample with persistent GPU tensors (constant time).
 
         Uses CONTIGUOUS sampling for cache efficiency: picks a random start
         position and reads a contiguous block. Much faster than scattered indices.
@@ -308,13 +317,19 @@ class TacticalReplayBuffer:
 
         total_samples = min(total_samples, self._size)
 
-        # S'assurer que le cache GPU est alloué
+        # Ensure GPU cache is allocated
         self._ensure_gpu_cache(total_samples, device)
+        assert self._gpu_cache_states is not None
+        assert self._gpu_cache_policies is not None
+        assert self._gpu_cache_values is not None
+        assert self._gpu_cache_weights is not None
 
-        # Random sampling: diversité maximale (essentiel pour replay buffer!)
-        indices = self._rng.choice(self._size, size=total_samples, replace=False)
+        # Random sampling: maximum diversity (essential for replay buffer!)
+        indices: np.ndarray = self._rng.choice(
+            self._size, size=total_samples, replace=False
+        )
 
-        # Copier dans le cache GPU pré-alloué (PAS de nouvelle allocation)
+        # Copy into pre-allocated GPU cache (NO new allocation)
         self._gpu_cache_states[:total_samples].copy_(
             torch.from_numpy(self.states[indices])
         )
@@ -328,7 +343,7 @@ class TacticalReplayBuffer:
             torch.from_numpy(self.weights[indices])
         )
 
-        # Créer les vues (pas de copie)
+        # Create views (no copy)
         self._chunk_cache = (
             self._gpu_cache_states[:total_samples],
             self._gpu_cache_policies[:total_samples],
@@ -337,7 +352,7 @@ class TacticalReplayBuffer:
         )
         self._chunk_cache_valid_size = total_samples
 
-    def get_batch_from_cache(self, n: int) -> Optional[Tuple[torch.Tensor, ...]]:
+    def get_batch_from_cache(self, n: int) -> tuple[torch.Tensor, ...] | None:
         """
         Get next batch from pre-sampled cache (O(1), pas de transfer).
 
@@ -350,13 +365,13 @@ class TacticalReplayBuffer:
         if self._chunk_cache is None:
             return None
 
-        cache_size = self._chunk_cache_valid_size
+        cache_size: int = self._chunk_cache_valid_size
 
         if self._chunk_cache_idx >= cache_size:
             return None
 
-        end_idx = min(self._chunk_cache_idx + n, cache_size)
-        batch = (
+        end_idx: int = min(self._chunk_cache_idx + n, cache_size)
+        batch: tuple[torch.Tensor, ...] = (
             self._chunk_cache[0][self._chunk_cache_idx : end_idx],
             self._chunk_cache[1][self._chunk_cache_idx : end_idx],
             self._chunk_cache[2][self._chunk_cache_idx : end_idx],
@@ -383,7 +398,7 @@ class TacticalReplayBuffer:
             return False
         try:
             data = np.load(path)
-            n = len(data["states"])
+            n: int = len(data["states"])
             n = min(n, self.capacity)
             self.states[:n] = data["states"][:n]
             self.policies[:n] = data["policies"][:n]
@@ -399,7 +414,7 @@ class TacticalReplayBuffer:
         return self._size
 
 
-class EWCRegularizer:
+class EWCRegularizer(object):
     """
     Elastic Weight Consolidation (EWC) regularizer to prevent catastrophic forgetting.
 
@@ -407,24 +422,25 @@ class EWCRegularizer:
     important weights. Then penalizes changes to these weights in subsequent epochs.
     """
 
-    def __init__(self, lambda_ewc: float = 0.4):
+    def __init__(self, lambda_ewc: float = 0.4) -> None:
         """
         Initialize EWC regularizer.
 
         Args:
             lambda_ewc: Regularization strength (higher = more protection)
         """
-        self.lambda_ewc = lambda_ewc
-        self.fisher: dict = {}
-        self.optimal_params: dict = {}
-        self._computed = False
+        self.lambda_ewc: float = lambda_ewc
+        self.fisher: dict[str, torch.Tensor] = {}
+        self.optimal_params: dict[str, torch.Tensor] = {}
+        self._computed: bool = False
 
     def compute_fisher(
         self,
         network: nn.Module,
-        dataloader_fn,
+        dataloader_fn: Callable[
+            [], Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
+        ],
         num_samples: int = 10000,
-        device: torch.device = None,
     ) -> None:
         """
         Compute Fisher Information Matrix diagonal after training epoch.
@@ -443,25 +459,25 @@ class EWCRegularizer:
                 self.fisher[name] = torch.zeros_like(param)
                 self.optimal_params[name] = param.clone().detach()
 
-        samples_processed = 0
+        samples_processed: int = 0
         for states, policy_indices, values, weights in dataloader_fn():
             if samples_processed >= num_samples:
                 break
 
-            batch_size = states.shape[0]
+            batch_size: int = states.shape[0]
 
             # Forward pass
             network.zero_grad()
             pred_policies, _, _ = network(states)
 
             # Compute log probability of actual moves (supervised signal)
-            log_probs = nn.functional.log_softmax(pred_policies, dim=-1)
-            selected_log_probs = log_probs.gather(
+            log_probs: torch.Tensor = nn.functional.log_softmax(pred_policies, dim=-1)
+            selected_log_probs: torch.Tensor = log_probs.gather(
                 1, policy_indices.unsqueeze(1)
             ).squeeze(1)
 
             # Weight by tactical importance
-            weighted_log_prob = (selected_log_probs * weights).sum()
+            weighted_log_prob: torch.Tensor = (selected_log_probs * weights).sum()
 
             # Backward to get gradients
             weighted_log_prob.backward()
@@ -524,7 +540,7 @@ class EWCRegularizer:
         if not os.path.exists(path):
             return False
         try:
-            data = torch.load(path, map_location="cpu")
+            data: dict[str, Any] = torch.load(path, map_location="cpu")
             self.fisher = data["fisher"]
             self.optimal_params = data["optimal_params"]
             self.lambda_ewc = data.get("lambda_ewc", self.lambda_ewc)
@@ -619,7 +635,7 @@ class SafeGradScaler(GradScaler):
         growth_interval: int = 2000,
         max_scale: float = 2**16,
         enabled: bool = True,
-    ):
+    ) -> None:
         super().__init__(
             device_type,
             init_scale=init_scale,
@@ -628,25 +644,25 @@ class SafeGradScaler(GradScaler):
             growth_interval=growth_interval,
             enabled=enabled,
         )
-        self._max_scale = max_scale
-        self._init_scale = init_scale
-        self._nan_count = 0
-        self._total_batches = 0
+        self._max_scale: float = max_scale
+        self._init_scale: float = init_scale
+        self._nan_count: int = 0
+        self._total_batches: int = 0
 
-    def update(self, new_scale: Optional[float] = None) -> None:
+    def update(self, new_scale: float | None = None) -> None:
         """Update scale with cap at max_scale."""
         super().update(new_scale)
 
         # Cap the scale at max_scale to prevent float16 overflow
         # The scale is stored internally and accessed via get_scale()
-        current_scale = self.get_scale()
+        current_scale: float = self.get_scale()
         if current_scale > self._max_scale:
             # Use the internal tensor if available, otherwise set via state_dict
             if hasattr(self, "_scale") and self._scale is not None:
                 self._scale.fill_(self._max_scale)
             else:
                 # Fallback: reload state with capped scale
-                state = self.state_dict()
+                state: dict[str, Any] = self.state_dict()
                 state["scale"] = torch.tensor(self._max_scale)
                 self.load_state_dict(state)
 
@@ -656,14 +672,14 @@ class SafeGradScaler(GradScaler):
         """Reset scale when NaN is detected to recover from bad state."""
         self._nan_count += 1
         # Reset to a safe lower scale (half of init_scale)
-        safe_scale = self._init_scale / 2
+        safe_scale: float = self._init_scale / 2
 
         # Access internal scale tensor properly
         if hasattr(self, "_scale") and self._scale is not None:
             self._scale.fill_(safe_scale)
         else:
             # Fallback: reload state with reset scale
-            state = self.state_dict()
+            state: dict[str, Any] = self.state_dict()
             state["scale"] = torch.tensor(safe_scale)
             self.load_state_dict(state)
 
@@ -686,7 +702,7 @@ class SafeGradScaler(GradScaler):
         return self._nan_count / self._total_batches
 
 
-class StreamingTrainer:
+class StreamingTrainer(object):
     """
     Trainer that loads and trains on chunks sequentially.
 
@@ -706,7 +722,7 @@ class StreamingTrainer:
         patience: int = 5,
         output_path: str = "models/pretrained.pt",
         verbose: bool = True,
-        resume_from: Optional[str] = None,
+        resume_from: str | None = None,
         value_loss_weight: float = 5.0,
         entropy_coefficient: float = 0.01,
         label_smoothing: float = 0.05,
@@ -726,7 +742,7 @@ class StreamingTrainer:
         tactical_replay_capacity: int = 100000,
         # Anti-forgetting: Knowledge Distillation
         teacher_enabled: bool = True,
-        teacher_path: Optional[str] = None,
+        teacher_path: str | None = None,
         teacher_alpha: float = 0.6,
         teacher_temperature: float = 2.0,
         # Anti-forgetting: EWC
@@ -735,7 +751,7 @@ class StreamingTrainer:
         ewc_start_epoch: int = 2,
         ewc_fisher_samples: int = 10000,
         # Testing
-        max_chunks: Optional[int] = None,
+        max_chunks: int | None = None,
     ):
         """
         Initialize streaming trainer.
@@ -769,33 +785,33 @@ class StreamingTrainer:
             ewc_start_epoch: First epoch to apply EWC (after computing Fisher).
             ewc_fisher_samples: Number of samples for Fisher estimation.
         """
-        self.network = network
-        self.value_loss_weight = value_loss_weight
-        self.entropy_coefficient = entropy_coefficient
-        self.label_smoothing = label_smoothing
-        self.prefetch_workers = prefetch_workers
-        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.network: DualHeadNetwork = network
+        self.value_loss_weight: float = value_loss_weight
+        self.entropy_coefficient: float = entropy_coefficient
+        self.label_smoothing: float = label_smoothing
+        self.prefetch_workers: int = prefetch_workers
+        self.gradient_accumulation_steps: int = gradient_accumulation_steps
         # Training dynamics parameters
-        self.weight_decay = weight_decay
-        self.gradient_clip_norm = gradient_clip_norm
-        self.lr_decay_factor = lr_decay_factor
-        self.lr_decay_patience = lr_decay_patience
-        self.min_learning_rate = min_learning_rate
-        self.checkpoint_keep_last = checkpoint_keep_last
+        self.weight_decay: float = weight_decay
+        self.gradient_clip_norm: float = gradient_clip_norm
+        self.lr_decay_factor: float = lr_decay_factor
+        self.lr_decay_patience: int = lr_decay_patience
+        self.min_learning_rate: float = min_learning_rate
+        self.checkpoint_keep_last: int = checkpoint_keep_last
 
         # Anti-forgetting: Tactical Replay Buffer
-        self.tactical_replay_enabled = tactical_replay_enabled
-        self.tactical_replay_ratio = tactical_replay_ratio
-        self.tactical_replay_capacity = tactical_replay_capacity
-        self.tactical_replay_threshold = tactical_replay_threshold
-        self.tactical_replay_buffer = None
+        self.tactical_replay_enabled: bool = tactical_replay_enabled
+        self.tactical_replay_ratio: float = tactical_replay_ratio
+        self.tactical_replay_capacity: int = tactical_replay_capacity
+        self.tactical_replay_threshold: float = tactical_replay_threshold
+        self.tactical_replay_buffer: TacticalReplayBuffer | None = None
         # Buffer will be initialized in train() after we know num_chunks
 
         # Anti-forgetting: Knowledge Distillation
-        self.teacher_enabled = teacher_enabled
-        self.teacher_alpha = teacher_alpha
-        self.teacher_temperature = teacher_temperature
-        self.teacher_network = None
+        self.teacher_enabled: bool = teacher_enabled
+        self.teacher_alpha: float = teacher_alpha
+        self.teacher_temperature: float = teacher_temperature
+        self.teacher_network: DualHeadNetwork | None = None
         if teacher_enabled and teacher_path and os.path.exists(teacher_path):
             try:
                 self.teacher_network = DualHeadNetwork.load(teacher_path)
@@ -806,9 +822,9 @@ class StreamingTrainer:
                 self.teacher_enabled = False
 
         # Anti-forgetting: EWC
-        self.ewc_enabled = ewc_enabled
-        self.ewc_start_epoch = ewc_start_epoch
-        self.ewc_fisher_samples = ewc_fisher_samples
+        self.ewc_enabled: bool = ewc_enabled
+        self.ewc_start_epoch: int = ewc_start_epoch
+        self.ewc_fisher_samples: int = ewc_fisher_samples
         self.ewc_regularizer = (
             EWCRegularizer(lambda_ewc=ewc_lambda) if ewc_enabled else None
         )
@@ -818,30 +834,33 @@ class StreamingTrainer:
         self.replay_buffer_path = os.path.join(
             os.path.dirname(output_path) or "models", "replay_buffer.npz"
         )
-        self.chunks_dir = chunks_dir
-        self.batch_size = batch_size
-        self.learning_rate = learning_rate
-        self.validation_split = validation_split
-        self.patience = patience
-        self.output_path = output_path
-        self.verbose = verbose
-        self.max_chunks = max_chunks
+        self.chunks_dir: str = chunks_dir
+        self.batch_size: int = batch_size
+        self.learning_rate: float = learning_rate
+        self.validation_split: float = validation_split
+        self.patience: int = patience
+        self.output_path: str = output_path
+        self.verbose: bool = verbose
+        self.max_chunks: int | None = max_chunks
 
         # Get device and AMP settings
-        self.device = get_device()
-        self.use_amp = supports_mixed_precision()
+        self.device: torch.device = get_device()
+        self.use_amp: bool = supports_mixed_precision()
 
         # Use SafeGradScaler with capped scale to prevent float16 overflow
         # With gradient accumulation, gradients accumulate in float16 before unscaling
         # So we need a lower max_scale to prevent overflow during accumulation
         # Formula: max_scale = 2^15 / gradient_accumulation_steps
-        safe_max_scale = 2**15 // max(1, gradient_accumulation_steps)
+        safe_max_scale: int = 2**15 // max(1, gradient_accumulation_steps)
         self.scaler = (
             SafeGradScaler(
                 "cuda",
-                init_scale=2**8,  # Start lower at 256 (safer with grad accum)
-                growth_interval=2000,  # Grow every 2000 successful batches
-                max_scale=safe_max_scale,  # Dynamic cap based on grad accum
+                # Start lower at 256 (safer with grad accum)
+                init_scale=2**8,
+                # Grow every 2000 successful batches
+                growth_interval=2000,
+                # Dynamic cap based on grad accum
+                max_scale=safe_max_scale,
                 enabled=True,
             )
             if self.use_amp
@@ -856,15 +875,15 @@ class StreamingTrainer:
         )
 
         # Get chunk paths
-        self.chunk_paths = list(ChunkManager.iter_chunk_paths(chunks_dir))
+        self.chunk_paths: list[str] = list(ChunkManager.iter_chunk_paths(chunks_dir))
         if not self.chunk_paths:
             raise RuntimeError(f"No chunks found in {chunks_dir}")
 
         # Split chunks into train/val
-        n_val = max(1, int(len(self.chunk_paths) * validation_split))
+        n_val: int = max(1, int(len(self.chunk_paths) * validation_split))
         random.shuffle(self.chunk_paths)
-        self.val_chunks = self.chunk_paths[:n_val]
-        self.train_chunks = self.chunk_paths[n_val:]
+        self.val_chunks: list[str] = self.chunk_paths[:n_val]
+        self.train_chunks: list[str] = self.chunk_paths[n_val:]
 
         # Limit chunks for quick testing
         if self.max_chunks is not None:
@@ -875,30 +894,30 @@ class StreamingTrainer:
             print(f"Chunks: {len(self.train_chunks)} train, {len(self.val_chunks)} val")
 
         # Checkpoint manager
-        checkpoint_dir = os.path.dirname(output_path) or "models"
-        checkpoint_name = os.path.splitext(os.path.basename(output_path))[0]
+        checkpoint_dir: str = os.path.dirname(output_path) or "models"
+        checkpoint_name: str = os.path.splitext(os.path.basename(output_path))[0]
         self.checkpoint_manager = CheckpointManager(
             checkpoint_dir,
             keep_last_n=self.checkpoint_keep_last,
             verbose=False,
         )
-        self.checkpoint_name = checkpoint_name
+        self.checkpoint_name: str = checkpoint_name
 
         # Random number generator
         self._rng = np.random.default_rng(42)
 
         # Training state
-        self.best_val_loss = float("inf")
-        self.best_count = 0
-        self.epochs_without_improvement = 0
-        self.start_epoch = 0
-        self._scheduler_state_to_restore = None
+        self.best_val_loss: float = float("inf")
+        self.best_count: int = 0
+        self.epochs_without_improvement: int = 0
+        self.start_epoch: int = 0
+        self._scheduler_state_to_restore: dict[str, Any] | None = None
 
         # Intra-epoch resume state
-        self._resume_chunk_idx = None
-        self._resume_train_chunks_order = None
-        self._resume_rng_state = None
-        self._resume_epoch_metrics = None
+        self._resume_chunk_idx: int | None = None
+        self._resume_train_chunks_order: list[str] | None = None
+        self._resume_rng_state: dict[str, Any] | None = None
+        self._resume_epoch_metrics: dict[str, float | int] | None = None
 
         # Handle resume
         if resume_from is not None:
@@ -909,11 +928,11 @@ class StreamingTrainer:
         # Parse resume_from
         if resume_from.lower() == "latest":
             # Try to load latest checkpoint first (intra-epoch)
-            latest_checkpoint = self.checkpoint_manager.load_latest_checkpoint(
-                self.checkpoint_name
+            latest_checkpoint: dict[str, Any] | None = (
+                self.checkpoint_manager.load_latest_checkpoint(self.checkpoint_name)
             )
             if latest_checkpoint is not None:
-                state = latest_checkpoint.get("state")
+                state: dict[str, Any] | None = latest_checkpoint.get("state")
                 if state and "chunk_idx" in state:
                     # Intra-epoch checkpoint found
                     print("Found latest checkpoint with intra-epoch state")
@@ -931,7 +950,7 @@ class StreamingTrainer:
 
                     # Recreate scaler
                     if self.use_amp:
-                        safe_max_scale = 2**15 // max(
+                        safe_max_scale: int = 2**15 // max(
                             1, self.gradient_accumulation_steps
                         )
                         self.scaler = SafeGradScaler(
@@ -984,7 +1003,7 @@ class StreamingTrainer:
                     return
 
             # Fallback to best numbered checkpoint
-            best_count = None
+            best_count: int | None = None
         else:
             try:
                 best_count = int(resume_from)
@@ -994,8 +1013,10 @@ class StreamingTrainer:
                 return
 
         # Load best numbered checkpoint
-        checkpoint = self.checkpoint_manager.load_best_numbered_checkpoint(
-            self.checkpoint_name, best_count
+        checkpoint: dict[str, Any] | None = (
+            self.checkpoint_manager.load_best_numbered_checkpoint(
+                self.checkpoint_name, best_count
+            )
         )
 
         if checkpoint is None:
@@ -1016,17 +1037,19 @@ class StreamingTrainer:
         # Recreate scaler (don't load old state - causes "No inf checks" error)
         # Use same safe parameters as __init__ - account for gradient accumulation
         if self.use_amp:
-            safe_max_scale = 2**15 // max(1, self.gradient_accumulation_steps)
+            safe_max_scale: int = 2**15 // max(1, self.gradient_accumulation_steps)
             self.scaler = SafeGradScaler(
                 "cuda",
-                init_scale=2**8,  # Lower start (safer with grad accum)
+                # Lower start (safer with grad accum)
+                init_scale=2**8,
                 growth_interval=2000,
-                max_scale=safe_max_scale,  # Dynamic cap based on grad accum
+                # Dynamic cap based on grad accum
+                max_scale=safe_max_scale,
                 enabled=True,
             )
 
         # Load training state
-        state = checkpoint.get("state")
+        state: dict[str, Any] | None = checkpoint.get("state")
         if state:
             if "optimizer_state" in state:
                 try:
@@ -1076,21 +1099,23 @@ class StreamingTrainer:
 
         # Initialize Tactical Replay Buffer now that we know num_chunks
         if self.tactical_replay_enabled and self.tactical_replay_buffer is None:
-            num_train_chunks = len(self.train_chunks)
+            num_train_chunks: int = len(self.train_chunks)
             self.tactical_replay_buffer = TacticalReplayBuffer(
                 capacity=self.tactical_replay_capacity,
                 weight_threshold=self.tactical_replay_threshold,
                 num_chunks=num_train_chunks,
             )
-            positions_per_chunk = self.tactical_replay_buffer.positions_per_chunk
+            positions_per_chunk: int = self.tactical_replay_buffer.positions_per_chunk
             print(
                 f"Replay Buffer: {self.tactical_replay_capacity:,} capacity, {positions_per_chunk} positions/chunk"
             )
 
             # Load replay buffer from disk if available
             if self.tactical_replay_buffer.load(self.replay_buffer_path):
+                buf_len: int = len(self.tactical_replay_buffer)
                 print(
-                    f"Loaded replay buffer from: {self.replay_buffer_path} ({len(self.tactical_replay_buffer):,} positions)"
+                    f"Loaded replay buffer from: {self.replay_buffer_path}"
+                    f" ({buf_len:,} positions)"
                 )
 
         # Move teacher network to device if enabled
@@ -1130,7 +1155,7 @@ class StreamingTrainer:
             and self._scheduler_state_to_restore
         ):
             self.scheduler.load_state_dict(self._scheduler_state_to_restore)
-            old_lr = self.optimizer.param_groups[0]["lr"]
+            old_lr: float = self.optimizer.param_groups[0]["lr"]
             # Force the new learning rate from config (override checkpoint)
             if old_lr != self.learning_rate:
                 for param_group in self.optimizer.param_groups:
@@ -1159,8 +1184,8 @@ class StreamingTrainer:
             )
         else:
             print("  - Knowledge Distillation: DISABLED")
-        if self.ewc_enabled:
-            ewc_status = (
+        if self.ewc_enabled and self.ewc_regularizer is not None:
+            ewc_status: str = (
                 "ACTIVE"
                 if self.ewc_regularizer.is_computed
                 else f"starts epoch {self.ewc_start_epoch}"
@@ -1173,7 +1198,7 @@ class StreamingTrainer:
             print(f"\nResuming from epoch {self.start_epoch + 1}/{epochs}")
 
         for epoch in range(self.start_epoch, epochs):
-            epoch_start = time.time()
+            epoch_start: float = time.time()
 
             # Clear memory between epochs
             gc.collect()
@@ -1185,8 +1210,8 @@ class StreamingTrainer:
                 epoch, epochs
             )
 
-            epoch_time = time.time() - epoch_start
-            current_lr = self.optimizer.param_groups[0]["lr"]
+            epoch_time: float = time.time() - epoch_start
+            current_lr: float = self.optimizer.param_groups[0]["lr"]
 
             val_loss, val_policy_loss, val_value_loss = self._validate(epoch, epochs)
 
@@ -1214,9 +1239,9 @@ class StreamingTrainer:
 
             # Print anti-forgetting stats
             if self.tactical_replay_enabled and self.tactical_replay_buffer:
-                print(
-                    f"  Replay buffer: {len(self.tactical_replay_buffer)}/{self.tactical_replay_buffer.capacity} positions"
-                )
+                rb_len: int = len(self.tactical_replay_buffer)
+                rb_cap: int = self.tactical_replay_buffer.capacity
+                print(f"  Replay buffer: {rb_len}/{rb_cap} positions")
 
             # Compute EWC Fisher after first epoch (or ewc_start_epoch - 1)
             if (
@@ -1227,30 +1252,36 @@ class StreamingTrainer:
             ):
                 print("  Computing EWC Fisher Information Matrix...")
 
-                def fisher_dataloader():
+                def fisher_dataloader() -> (
+                    Iterator[
+                        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+                    ]
+                ):
                     """Generator for Fisher computation using tactical positions."""
-                    for chunk_path in self.train_chunks[:10]:  # Use first 10 chunks
+                    # Use first 10 chunks
+                    for chunk_path in self.train_chunks[:10]:
                         chunk = ChunkManager.load_chunk(chunk_path)
-                        states = (
+                        states: torch.Tensor = (
                             torch.from_numpy(chunk["states"]).float().to(self.device)
                         )
-                        policy_indices = (
+                        policy_indices: torch.Tensor = (
                             torch.from_numpy(chunk["policy_indices"])
                             .long()
                             .to(self.device)
                         )
-                        values = (
+                        values: torch.Tensor = (
                             torch.from_numpy(chunk["values"]).float().to(self.device)
                         )
-                        weights = (
+                        weights: torch.Tensor = (
                             torch.from_numpy(chunk["weights"]).float().to(self.device)
                         )
                         # Only use tactical positions (high weight)
-                        mask = weights >= 1.5
+                        mask: torch.Tensor = weights >= 1.5
                         if mask.any():
-                            for i in range(0, mask.sum().item(), self.batch_size):
-                                end = min(i + self.batch_size, mask.sum().item())
-                                indices = torch.where(mask)[0][i:end]
+                            n_tactical: int = int(mask.sum().item())
+                            for i in range(0, n_tactical, self.batch_size):
+                                end: int = min(i + self.batch_size, n_tactical)
+                                indices: torch.Tensor = torch.where(mask)[0][i:end]
                                 yield (
                                     states[indices],
                                     policy_indices[indices],
@@ -1262,7 +1293,6 @@ class StreamingTrainer:
                     self.network,
                     fisher_dataloader,
                     num_samples=self.ewc_fisher_samples,
-                    device=self.device,
                 )
                 self.ewc_regularizer.save(self.ewc_path)
                 print(f"  EWC state saved to: {self.ewc_path}")
@@ -1310,59 +1340,72 @@ class StreamingTrainer:
         print(f"Total improvements: {self.best_count}")
 
         # Load and return best model
-        best_path = f"{os.path.dirname(self.output_path) or 'models'}/{self.checkpoint_name}_best_network.pt"
+        best_path: str = (
+            f"{os.path.dirname(self.output_path) or 'models'}/{self.checkpoint_name}_best_network.pt"
+        )
         if os.path.exists(best_path):
             return DualHeadNetwork.load(best_path)
         return self.network
 
-    def _train_epoch(self, epoch: int, total_epochs: int) -> Tuple[float, float, float]:
+    def _train_epoch(self, epoch: int, total_epochs: int) -> tuple[float, float, float]:
         """Train for one epoch."""
         self.network.train()
 
         # Check if we need to resume from a specific chunk
-        start_chunk_idx = 0
+        start_chunk_idx: int = 0
         if self._resume_chunk_idx is not None and epoch == self.start_epoch:
-            # Resume from saved chunk
-            start_chunk_idx = self._resume_chunk_idx + 1  # Resume from next chunk
+            start_chunk_idx = self._resume_chunk_idx + 1
             if self._resume_train_chunks_order is not None:
                 # Use saved chunk order
-                train_chunks = self._resume_train_chunks_order
+                train_chunks: list[str] = self._resume_train_chunks_order
+            else:
+                train_chunks = self.train_chunks.copy()
             print(
                 f"Resuming epoch {epoch + 1} from chunk {start_chunk_idx + 1}/{len(train_chunks)}"
             )
-            total_policy_loss = self._resume_epoch_metrics.get("total_policy_loss", 0.0)
-            total_value_loss = self._resume_epoch_metrics.get("total_value_loss", 0.0)
-            total_batches = self._resume_epoch_metrics.get("total_batches", 0)
+            assert self._resume_epoch_metrics is not None
+            total_policy_loss = float(
+                self._resume_epoch_metrics.get("total_policy_loss", 0.0)
+            )
+            total_value_loss = float(
+                self._resume_epoch_metrics.get("total_value_loss", 0.0)
+            )
+            total_batches = int(self._resume_epoch_metrics.get("total_batches", 0))
             # Clear resume state after using it
             self._resume_chunk_idx = None
             self._resume_train_chunks_order = None
             self._resume_rng_state = None
             self._resume_epoch_metrics = None
         else:
-            total_policy_loss = 0.0
-            total_value_loss = 0.0
-            total_batches = 0
+            total_policy_loss: float = 0.0
+            total_value_loss: float = 0.0
+            total_batches: int = 0
 
         # Shuffle chunk order with fixed seed based on epoch for reproducibility
         train_chunks = self.train_chunks.copy()
         # Use Python's random for chunk shuffle (deterministic per epoch)
-        rng_epoch = random.Random(42 + epoch)  # Fixed seed per epoch
+        # Fixed seed per epoch
+        rng_epoch: random.Random = random.Random(42 + epoch)
         rng_epoch.shuffle(train_chunks)
 
         # Set numpy RNG with epoch-based seed for consistency
         # Note: We save RNG state in checkpoints but use epoch-based seed for reproducibility
         # The within-chunk shuffle may be slightly different on resume, but that's acceptable
-        self._rng = np.random.default_rng(42 + epoch)
+        self._rng: Generator = np.random.default_rng(42 + epoch)
 
-        epoch_start_time = time.time()
+        epoch_start_time: float = time.time()
 
         # Use prefetching to load next chunk while GPU processes current chunk
         # Also use executor for async checkpoint saving
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.prefetch_workers + 1  # +1 for checkpoint saving
+            # +1 for checkpoint saving
+            max_workers=self.prefetch_workers
+            + 1
         ) as executor:
-            prefetch_future = None
-            checkpoint_future = None
+            prefetch_future: concurrent.futures.Future[dict[str, np.ndarray]] | None = (
+                None
+            )
+            checkpoint_future: concurrent.futures.Future[None] | None = None
 
             for chunk_idx, chunk_path in enumerate(train_chunks):
                 # Skip chunks if resuming
@@ -1373,11 +1416,11 @@ class StreamingTrainer:
                     if prefetch_future is not None:
                         chunk = prefetch_future.result()
                     else:
-                        chunk = ChunkManager.load_chunk(chunk_path)
-                    states = chunk["states"]
-                    policy_indices = chunk["policy_indices"]
-                    values = chunk["values"]
-                    weights = chunk["weights"]
+                        chunk: np.ndarray = ChunkManager.load_chunk(chunk_path)
+                    states: np.ndarray = chunk["states"]
+                    policy_indices: np.ndarray = chunk["policy_indices"]
+                    values: np.ndarray = chunk["values"]
+                    weights: np.ndarray = chunk["weights"]
                 except MemoryError:
                     # Memory fragmentation - force cleanup and retry
                     gc.collect()
@@ -1414,8 +1457,8 @@ class StreamingTrainer:
                     )
 
                 # Create mini-batches with gradient accumulation
-                n_batches = len(states) // self.batch_size
-                accum_steps = self.gradient_accumulation_steps
+                n_batches: int = len(states) // self.batch_size
+                accum_steps: int = self.gradient_accumulation_steps
 
                 # Pre-sample replay buffer for entire chunk (1 call vs 31 calls)
                 # Only at epoch 2+ (epoch > 0) - epoch 1 just fills the buffer
@@ -1425,10 +1468,10 @@ class StreamingTrainer:
                     and len(self.tactical_replay_buffer) > 0
                     and epoch > 0
                 ):
-                    replay_size_per_batch = int(
+                    replay_size_per_batch: int = int(
                         self.batch_size * self.tactical_replay_ratio
                     )
-                    total_replay_samples = replay_size_per_batch * n_batches
+                    total_replay_samples: int = replay_size_per_batch * n_batches
                     self.tactical_replay_buffer.pre_sample_for_chunk(
                         total_replay_samples, self.device
                     )
@@ -1454,7 +1497,7 @@ class StreamingTrainer:
                     )
 
                     # Reconstruct one-hot policies using scatter (faster & safer)
-                    batch_size_actual = end - start
+                    batch_size_actual: int = end - start
                     batch_policy_indices = (
                         torch.from_numpy(policy_indices[start:end])
                         .long()
@@ -1479,10 +1522,10 @@ class StreamingTrainer:
                         self.tactical_replay_enabled
                         and self.tactical_replay_buffer is not None
                         and len(self.tactical_replay_buffer) > 0
-                        and epoch
-                        > 0  # Don't replay during epoch 1 - nothing to "remember" yet
+                        # Don't replay during epoch 1 - nothing to "remember" yet
+                        and epoch > 0
                     ):
-                        replay_size = int(
+                        replay_size: int = int(
                             batch_size_actual * self.tactical_replay_ratio
                         )
                         if replay_size > 0:
@@ -1521,8 +1564,8 @@ class StreamingTrainer:
                                 batch_size_actual = len(batch_states)
 
                     # Check if this is the last batch in accumulation cycle or chunk
-                    is_accumulation_step = (batch_idx + 1) % accum_steps == 0
-                    is_last_batch = batch_idx == n_batches - 1
+                    is_accumulation_step: bool = (batch_idx + 1) % accum_steps == 0
+                    is_last_batch: bool = batch_idx == n_batches - 1
 
                     # Skip batches with NaN/Inf inputs (corrupted data)
                     if (
@@ -1609,8 +1652,8 @@ class StreamingTrainer:
                                 and self.teacher_network is not None
                             ):
                                 with torch.no_grad():
-                                    teacher_policies, _, teacher_wdl = (
-                                        self.teacher_network(batch_states)
+                                    teacher_policies, _, _ = self.teacher_network(
+                                        batch_states
                                     )
                                     teacher_policies_clamped = torch.clamp(
                                         teacher_policies, min=-50, max=50
@@ -1658,8 +1701,8 @@ class StreamingTrainer:
                             self.scaler.unscale_(self.optimizer)
 
                             # Check for NaN/Inf gradients before optimizer step
-                            has_bad_grad = False
-                            bad_param_name = None
+                            has_bad_grad: bool = False
+                            bad_param_name: str | None = None
                             for name, param in self.network.named_parameters():
                                 if param.grad is not None:
                                     if (
@@ -1746,7 +1789,7 @@ class StreamingTrainer:
                         distill_loss = torch.tensor(0.0, device=self.device)
                         if self.teacher_enabled and self.teacher_network is not None:
                             with torch.no_grad():
-                                teacher_policies, _, teacher_wdl = self.teacher_network(
+                                teacher_policies, _, _ = self.teacher_network(
                                     batch_states
                                 )
                                 teacher_policies_clamped = torch.clamp(
@@ -1795,8 +1838,8 @@ class StreamingTrainer:
                         # Only step optimizer at accumulation boundaries or end of chunk
                         if is_accumulation_step or is_last_batch:
                             # Check for NaN/Inf gradients before optimizer step
-                            has_bad_grad = False
-                            bad_param_name = None
+                            has_bad_grad: bool = False
+                            bad_param_name: str | None = None
                             for name, param in self.network.named_parameters():
                                 if param.grad is not None:
                                     if (
@@ -1822,8 +1865,8 @@ class StreamingTrainer:
                                 self.optimizer.zero_grad()
 
                     # Skip NaN losses (use unscaled loss for logging)
-                    p_loss = policy_loss.item()
-                    v_loss = value_loss.item()
+                    p_loss: float = policy_loss.item()
+                    v_loss: float = value_loss.item()
                     if not (np.isnan(p_loss) or np.isnan(v_loss)):
                         total_policy_loss += p_loss
                         total_value_loss += v_loss
@@ -1831,7 +1874,7 @@ class StreamingTrainer:
 
                     # Monitor value head health (detect collapse early)
                     if total_batches % 500 == 0:
-                        value_std = pred_values.std().item()
+                        value_std: float = pred_values.std().item()
                         if value_std < 0.1:
                             print(
                                 f"\n  WARNING: Value head may be collapsing (std={value_std:.4f})"
@@ -1839,22 +1882,24 @@ class StreamingTrainer:
 
                 # Progress update with average time per chunk
                 # Use chunks processed since resume, not total chunk index
-                elapsed = time.time() - epoch_start_time
-                chunks_processed = chunk_idx - start_chunk_idx + 1
-                avg_time_per_chunk = elapsed / chunks_processed
-                eta_seconds = avg_time_per_chunk * (len(train_chunks) - chunk_idx - 1)
-                eta_h = int(eta_seconds // 3600)
-                eta_min = int((eta_seconds % 3600) // 60)
-                eta_sec = int(eta_seconds % 60)
-                eta_str = (
+                elapsed: float = time.time() - epoch_start_time
+                chunks_processed: int = chunk_idx - start_chunk_idx + 1
+                avg_time_per_chunk: float = elapsed / chunks_processed
+                eta_seconds: float = avg_time_per_chunk * (
+                    len(train_chunks) - chunk_idx - 1
+                )
+                eta_h: int = int(eta_seconds // 3600)
+                eta_min: int = int((eta_seconds % 3600) // 60)
+                eta_sec: int = int(eta_seconds % 60)
+                eta_str: str = (
                     f"{eta_h}h{eta_min:02d}m{eta_sec:02d}s"
                     if eta_h > 0
                     else f"{eta_min}m{eta_sec:02d}s"
                 )
-                pct = (chunk_idx + 1) * 100 // len(train_chunks)
+                pct: int = (chunk_idx + 1) * 100 // len(train_chunks)
 
                 # Build progress line with optional buffer info
-                progress_line = (
+                progress_line: str = (
                     f"\rEpoch {epoch+1}/{total_epochs} train {pct}% (chunk {chunk_idx+1}/{len(train_chunks)}) "
                     f"[{avg_time_per_chunk:.1f}s/chunk, ETA {eta_str}]"
                 )
@@ -1866,25 +1911,27 @@ class StreamingTrainer:
                     and len(self.tactical_replay_buffer)
                     < self.tactical_replay_buffer.capacity
                 ):
-                    buf_size = len(self.tactical_replay_buffer)
-                    buf_cap = self.tactical_replay_buffer.capacity
-                    buf_pct = buf_size * 100 // buf_cap
+                    buf_size: int = len(self.tactical_replay_buffer)
+                    buf_cap: int = self.tactical_replay_buffer.capacity
+                    buf_pct: int = buf_size * 100 // buf_cap
                     progress_line += f" Buffer: {buf_size:,}/{buf_cap:,} ({buf_pct}%)"
 
                 print(progress_line + "   ", end="", flush=True)
 
                 # Save checkpoint every 10 chunks (and at least 60 seconds apart)
-                should_save_checkpoint = (chunk_idx + 1) % 10 == 0 or chunk_idx == len(
-                    train_chunks
-                ) - 1
+                should_save_checkpoint: bool = (
+                    chunk_idx + 1
+                ) % 10 == 0 or chunk_idx == len(train_chunks) - 1
 
                 if should_save_checkpoint:
                     # Wait for previous checkpoint save to complete if still running
                     if checkpoint_future is not None:
                         try:
-                            checkpoint_future.result(timeout=5)  # Wait max 5 seconds
+                            # Wait max 5 seconds
+                            checkpoint_future.result(timeout=5)
                         except concurrent.futures.TimeoutError:
-                            pass  # Continue even if previous save is slow
+                            # Continue even if previous save is slow
+                            pass
 
                     # Save checkpoint asynchronously
                     checkpoint_future = executor.submit(
@@ -1896,12 +1943,13 @@ class StreamingTrainer:
                         total_value_loss,
                         total_batches,
                     )
-                    last_checkpoint_time = time.time()
 
                 # Cleanup chunk data to prevent memory fragmentation
                 del chunk, states, policy_indices, values, indices
-                if chunk_idx % 5 == 0:  # Frequent lightweight cleanup
-                    gc.collect(0)  # Generation 0 only (10x faster than full gc)
+                # Frequent lightweight cleanup
+                if chunk_idx % 5 == 0:
+                    # Generation 0 only (10x faster than full gc)
+                    gc.collect(0)
 
             # Wait for final checkpoint save to complete
             if checkpoint_future is not None:
@@ -1910,25 +1958,27 @@ class StreamingTrainer:
                 except concurrent.futures.TimeoutError:
                     pass
 
-        avg_policy = total_policy_loss / max(1, total_batches)
-        avg_value = total_value_loss / max(1, total_batches)
+        avg_policy: float = total_policy_loss / max(1, total_batches)
+        avg_value: float = total_value_loss / max(1, total_batches)
         return avg_policy + avg_value, avg_policy, avg_value
 
-    def _validate(self, epoch: int, total_epochs: int) -> Tuple[float, float, float]:
+    def _validate(self, epoch: int, total_epochs: int) -> tuple[float, float, float]:
         """Run validation on validation chunks with prefetching."""
         self.network.eval()
 
-        total_policy_loss = 0.0
-        total_value_loss = 0.0
-        total_batches = 0
-        val_start_time = time.time()
+        total_policy_loss: float = 0.0
+        total_value_loss: float = 0.0
+        total_batches: int = 0
+        val_start_time: float = time.time()
 
         with torch.inference_mode():
             # Use prefetching to load next chunk while GPU processes current chunk
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.prefetch_workers
             ) as executor:
-                prefetch_future = None
+                prefetch_future: (
+                    concurrent.futures.Future[dict[str, np.ndarray]] | None
+                ) = None
 
                 for chunk_idx, chunk_path in enumerate(self.val_chunks):
                     # Get current chunk (from prefetch or load directly)
@@ -1957,10 +2007,10 @@ class StreamingTrainer:
                     else:
                         prefetch_future = None
 
-                    n_batches = len(states) // self.batch_size
+                    n_batches: int = len(states) // self.batch_size
                     for batch_idx in range(n_batches):
-                        start = batch_idx * self.batch_size
-                        end = start + self.batch_size
+                        start: int = batch_idx * self.batch_size
+                        end: int = start + self.batch_size
 
                         batch_states = (
                             torch.from_numpy(states[start:end])
@@ -1973,13 +2023,13 @@ class StreamingTrainer:
                             .to(self.device, non_blocking=True)
                         )
 
-                        batch_size_actual = end - start
+                        batch_size_actual: int = end - start
                         batch_policy_indices = (
                             torch.from_numpy(policy_indices[start:end])
                             .long()
                             .to(self.device, non_blocking=True)
                         )
-                        batch_policies = torch.zeros(
+                        batch_policies: torch.Tensor = torch.zeros(
                             batch_size_actual, MOVE_ENCODING_SIZE, device=self.device
                         )
                         batch_policies.scatter_(
@@ -2002,8 +2052,8 @@ class StreamingTrainer:
                         )
 
                         # Skip NaN losses in validation
-                        p_loss = policy_loss.item()
-                        v_loss = value_loss.item()
+                        p_loss: float = policy_loss.item()
+                        v_loss: float = value_loss.item()
                         if not (np.isnan(p_loss) or np.isnan(v_loss)):
                             total_policy_loss += p_loss
                             total_value_loss += v_loss
@@ -2012,20 +2062,20 @@ class StreamingTrainer:
                             print("\n  WARNING: NaN in validation batch, skipping")
 
                     # Progress update with average time per chunk
-                    elapsed = time.time() - val_start_time
-                    avg_time_per_chunk = elapsed / (chunk_idx + 1)
-                    eta_seconds = avg_time_per_chunk * (
+                    elapsed: float = time.time() - val_start_time
+                    avg_time_per_chunk: float = elapsed / (chunk_idx + 1)
+                    eta_seconds: float = avg_time_per_chunk * (
                         len(self.val_chunks) - chunk_idx - 1
                     )
-                    eta_h = int(eta_seconds // 3600)
-                    eta_min = int((eta_seconds % 3600) // 60)
-                    eta_sec = int(eta_seconds % 60)
-                    eta_str = (
+                    eta_h: int = int(eta_seconds // 3600)
+                    eta_min: int = int((eta_seconds % 3600) // 60)
+                    eta_sec: int = int(eta_seconds % 60)
+                    eta_str: str = (
                         f"{eta_h}h{eta_min:02d}m{eta_sec:02d}s"
                         if eta_h > 0
                         else f"{eta_min}m{eta_sec:02d}s"
                     )
-                    pct = (chunk_idx + 1) * 100 // len(self.val_chunks)
+                    pct: int = (chunk_idx + 1) * 100 // len(self.val_chunks)
                     print(
                         f"\rEpoch {epoch+1}/{total_epochs} val {pct}% (chunk {chunk_idx+1}/{len(self.val_chunks)}) "
                         f"[{avg_time_per_chunk:.1f}s/chunk, ETA {eta_str}]   ",
@@ -2036,29 +2086,30 @@ class StreamingTrainer:
                     # Cleanup chunk data
                     del chunk, states, policy_indices, values
 
-        avg_policy = total_policy_loss / max(1, total_batches)
-        avg_value = total_value_loss / max(1, total_batches)
+        avg_policy: float = total_policy_loss / max(1, total_batches)
+        avg_value: float = total_value_loss / max(1, total_batches)
         return avg_policy + avg_value, avg_policy, avg_value
 
     def _save_latest_checkpoint_async(
         self,
         epoch: int,
         chunk_idx: int,
-        train_chunks_order: List[str],
+        train_chunks_order: list[str],
         total_policy_loss: float,
         total_value_loss: float,
         total_batches: int,
     ) -> None:
         """Save latest checkpoint asynchronously with intra-epoch state."""
         try:
-            state = {
+            state: dict[str, Any] = {
                 "epoch": epoch,
                 "chunk_idx": chunk_idx,
                 "train_chunks_order": train_chunks_order,
                 "total_policy_loss": total_policy_loss,
                 "total_value_loss": total_value_loss,
                 "total_batches": total_batches,
-                "rng_state": self._rng.bit_generator.state,  # Save for reference, but epoch seed is primary
+                # Save for reference, but epoch seed is primary
+                "rng_state": self._rng.bit_generator.state,
                 "best_val_loss": self.best_val_loss,
                 "best_count": self.best_count,
                 "epochs_without_improvement": self.epochs_without_improvement,
@@ -2087,7 +2138,7 @@ class StreamingTrainer:
         val_value: float = 0.0,
     ) -> None:
         """Save best model checkpoint."""
-        state = {
+        state: dict[str, Any] = {
             "epoch": epoch,
             "best_val_loss": self.best_val_loss,
             "best_count": self.best_count,

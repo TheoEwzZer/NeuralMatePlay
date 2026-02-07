@@ -15,18 +15,24 @@ import os
 import sys
 import threading
 import queue
-from typing import Optional
+from typing import Any, Literal, Optional
+
+import chess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alphazero import DualHeadNetwork, AlphaZeroTrainer
-from config import Config, TrainingConfig, generate_default_config
+
+try:
+    from config import Config, generate_default_config  # type: ignore[import-not-found]
+except ImportError:
+    from src.config import Config, generate_default_config
 
 
-class TrainingGUI:
+class TrainingGUI(object):
     """Non-blocking GUI for monitoring training progress with chess board."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.data_queue: queue.Queue = queue.Queue()
         self.running = True
         self.thread: Optional[threading.Thread] = None
@@ -39,13 +45,13 @@ class TrainingGUI:
         self.current_game = 0
         self.move_number = 0
 
-    def start(self, total_iterations: int):
+    def start(self, total_iterations: int) -> None:
         """Start GUI in a separate thread."""
-        self.total_iterations = total_iterations
+        self.total_iterations: int = total_iterations
         self.thread = threading.Thread(target=self._run_gui, daemon=True)
         self.thread.start()
 
-    def _run_gui(self):
+    def _run_gui(self) -> None:
         """Run the GUI main loop."""
         try:
             import tkinter as tk
@@ -57,14 +63,16 @@ class TrainingGUI:
 
         # Import UI components
         try:
-            from ui.styles import COLORS, FONTS, apply_theme, create_panel
+            from ui.styles import COLORS, FONTS, apply_theme
             from ui.board_widget import ChessBoardWidget
 
             use_ui_module = True
         except ImportError:
             use_ui_module = False
+            ChessBoardWidget = None
+            apply_theme = None
             # Fallback colors
-            COLORS = {
+            COLORS: dict[str, str] = {
                 "bg_primary": "#1a1a2e",
                 "bg_secondary": "#16213e",
                 "text_primary": "#ffffff",
@@ -87,7 +95,7 @@ class TrainingGUI:
         self.root.configure(bg=COLORS["bg_primary"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        if use_ui_module:
+        if use_ui_module and apply_theme:
             apply_theme(self.root)
 
         # Main container
@@ -107,7 +115,7 @@ class TrainingGUI:
         )
         board_title.pack(pady=(0, 10))
 
-        if use_ui_module:
+        if use_ui_module and ChessBoardWidget:
             self.board_widget = ChessBoardWidget(left_frame, size=520)
             self.board_widget.pack()
             self.board_widget.set_interactive(False)
@@ -308,13 +316,13 @@ class TrainingGUI:
 
         # Store chess module for later use
         self._chess = chess
-        self._use_ui_module = use_ui_module
+        self._use_ui_module: bool = use_ui_module
 
         # Schedule queue processing
         self.root.after(50, self._process_queue)
         self.root.mainloop()
 
-    def _draw_fallback_board(self):
+    def _draw_fallback_board(self) -> None:
         """Draw a simple fallback board when UI module not available."""
         if not hasattr(self, "canvas"):
             return
@@ -324,7 +332,9 @@ class TrainingGUI:
         dark = "#739552"
         for r in range(8):
             for c in range(8):
-                color = light if (r + c) % 2 == 0 else dark
+                color: Literal["#ebecd0"] | Literal["#739552"] = (
+                    light if (r + c) % 2 == 0 else dark
+                )
                 self.canvas.create_rectangle(
                     c * size,
                     r * size,
@@ -334,7 +344,7 @@ class TrainingGUI:
                     outline="",
                 )
 
-    def _process_queue(self):
+    def _process_queue(self) -> None:
         """Process incoming data from training thread."""
         if not self.running or self.root is None:
             return
@@ -349,7 +359,7 @@ class TrainingGUI:
         if self.running and self.root:
             self.root.after(50, self._process_queue)
 
-    def _update_display(self, data: dict):
+    def _update_display(self, data: dict[str, Any]) -> None:
         """Update GUI with new data."""
         phase = data.get("phase", "")
 
@@ -389,11 +399,13 @@ class TrainingGUI:
                     self.board_widget.set_board(board)
 
                     # Set last move highlight
-                    last_move = data.get("last_move")
+                    last_move: Any | None = data.get("last_move")
                     if last_move:
                         (from_row, from_col), (to_row, to_col) = last_move
-                        from_sq = self._chess.square(from_col, 7 - from_row)
-                        to_sq = self._chess.square(to_col, 7 - to_row)
+                        from_sq: chess.Square = self._chess.square(
+                            from_col, 7 - from_row
+                        )
+                        to_sq: chess.Square = self._chess.square(to_col, 7 - to_row)
                         move = self._chess.Move(from_sq, to_sq)
                         self.board_widget.set_last_move(move)
                 except Exception:
@@ -445,19 +457,19 @@ class TrainingGUI:
             self.status_label.config(text="Status: Training complete!")
             self.progress_bar["value"] = 100
 
-    def _on_close(self):
+    def _on_close(self) -> None:
         """Handle window close - don't stop training."""
         self.running = False
         if self.root:
             self.root.destroy()
             self.root = None
 
-    def update(self, data: dict):
+    def update(self, data: dict[str, Any]) -> None:
         """Send data to GUI (called from training thread)."""
         if self.running:
             self.data_queue.put(data)
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the GUI."""
         self.running = False
         if self.root:
@@ -593,7 +605,7 @@ Examples:
         help="Show GUI window to monitor training (closing window won't stop training)",
     )
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Generate default config
     if args.generate_config:
@@ -702,13 +714,12 @@ Examples:
     # Training state for callback
     iteration_stats = {"prev_loss": None, "last_phase": None}
 
-    # Training callback
-    def callback(data: dict) -> None:
+    def callback(data: dict[str, Any]) -> None:
+        """Handle training events: update GUI and print progress to console."""
         # Send to GUI if active
         if gui is not None:
             gui.update(data)
         phase = data.get("phase", "")
-        last_phase = iteration_stats["last_phase"]
         iteration_stats["last_phase"] = phase
 
         if phase == "self_play":
@@ -734,11 +745,11 @@ Examples:
                     hours, remainder = divmod(int(eta_seconds), 3600)
                     minutes, seconds = divmod(remainder, 60)
                     if hours > 0:
-                        eta_str = f" | ETA: {hours}h{minutes:02d}m"
+                        eta_str: str = f" | ETA: {hours}h{minutes:02d}m"
                     else:
                         eta_str = f" | ETA: {minutes}m{seconds:02d}s"
 
-            line = (
+            line: str = (
                 f"  Self-play: {games}/{total} | {examples} ex | "
                 f"{avg_moves:.0f} moves | {avg_time:.1f}s | W:{w} B:{b} D:{d} | "
                 f"#:{mates} S:{stales} M:{max_mv}{eta_str}"
@@ -768,7 +779,7 @@ Examples:
             kl_weight = data.get("kl_weight", 0.1)
             if epochs > 0:
                 if kl_loss > 0:
-                    kl_str = f", kl: {kl_loss:.4f} w={kl_weight:.2f}"
+                    kl_str: str = f", kl: {kl_loss:.4f} w={kl_weight:.2f}"
                 else:
                     kl_str = ""
                 line = (
@@ -825,7 +836,8 @@ Examples:
                     f"W:{w_rate:.0f}% B:{b_rate:.0f}% D:{d_rate:.0f}%"
                 )
             else:
-                print()  # Just newline if no training happened
+                # Just newline if no training happened
+                print()
 
         elif phase == "arena_start":
             # Newline after training epochs before arena

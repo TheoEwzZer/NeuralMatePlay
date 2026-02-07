@@ -61,7 +61,7 @@ class PlayerInfo(tk.Frame):
         self._color = color
         self._name = name
         self._is_active = False
-        self._captured: List[chess.PieceType] = []
+        self._captured: list[chess.PieceType] = []
         self._material_diff = 0
 
         self._create_widgets(bg)
@@ -256,7 +256,7 @@ class PlayerInfo(tk.Frame):
 
     def set_captured(
         self,
-        captured_pieces: List[chess.PieceType],
+        captured_pieces: list[chess.PieceType],
         material_diff: int,
     ) -> None:
         """

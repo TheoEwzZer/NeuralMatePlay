@@ -7,9 +7,11 @@ watching AI vs AI games, and managing training.
 Professional chess.com-inspired design with AI debugging features.
 """
 
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Any, Optional, List
+from typing import Any, Literal, TYPE_CHECKING
 import threading
 import queue
 import os
@@ -35,14 +37,12 @@ from .styles import (
     FONTS,
     apply_theme,
     create_styled_button,
-    create_styled_label,
     create_panel,
     create_tooltip,
     create_confirmation_dialog,
     ThinkingIndicator,
 )
 from .board_widget import ChessBoardWidget
-from .training_panel import TrainingPanel
 from .components import (
     EvalBar,
     EvalGraph,
@@ -53,10 +53,15 @@ from .components import (
     PhaseIndicator,
     SearchTreePanel,
 )
-from src.chess_encoding.board_utils import get_material_count
+
+if TYPE_CHECKING:
+    from alphazero.network import DualHeadNetwork
+    from alphazero.mcts import MCTS
+    from alphazero.arena import PureMCTSPlayer
+    from alphazero.trainer import AlphaZeroTrainer
 
 
-class ChessGameApp:
+class ChessGameApp(object):
     """
     Main application window for playing chess against AI.
 
@@ -74,11 +79,16 @@ class ChessGameApp:
     DEFAULT_HISTORY_LENGTH = 3
 
     # Dynamic time management constants
-    MIN_SIMULATIONS = 100  # Minimum simulations floor (even in time pressure)
-    HISTORY_WINDOW = 10  # Number of moves for time-per-sim calculation
-    DECAY_FACTOR = 0.85  # Exponential decay for older moves
-    EMERGENCY_THRESHOLD = 15  # Seconds - triggers emergency mode
-    INSTANT_MOVE_THRESHOLD = 3  # Seconds - play instantly from tree, no search
+    # Minimum simulations floor (even in time pressure)
+    MIN_SIMULATIONS = 100
+    # Number of moves for time-per-sim calculation
+    HISTORY_WINDOW = 10
+    # Exponential decay for older moves
+    DECAY_FACTOR = 0.85
+    # Seconds - play instantly from tree, no search
+    EMERGENCY_THRESHOLD = 15
+    # Seconds - play instantly from tree, no search
+    INSTANT_MOVE_THRESHOLD = 3
 
     def __init__(
         self,
@@ -88,7 +98,7 @@ class ChessGameApp:
         history_length: int = DEFAULT_HISTORY_LENGTH,
         verbose: bool = False,
         time_control: int | None = None,
-    ):
+    ) -> None:
         """
         Initialize the chess game application.
 
@@ -103,25 +113,27 @@ class ChessGameApp:
         self.root = tk.Tk()
         self.root.title("NeuralMate Chess - AlphaZero")
         self.root.resizable(True, True)
-        self.root.geometry("1700x950")  # Wider for new layout
+        self.root.geometry("1700x950")
         self.root.minsize(1400, 850)
 
         apply_theme(self.root)
 
         # Network and AI
-        self.network = None
-        self.mcts = None
-        self.pure_mcts_player = None
-        self.network_path = network_path
-        self.num_simulations = num_simulations
-        self.mcts_batch_size = mcts_batch_size
-        self.history_length = history_length
-        self.verbose = verbose
-        self.use_pure_mcts = network_path and network_path.lower() == "mcts"
+        self.network: DualHeadNetwork | None = None
+        self.mcts: MCTS | None = None
+        self.pure_mcts_player: PureMCTSPlayer | None = None
+        self.network_path: str | None = network_path
+        self.num_simulations: int = num_simulations
+        self.mcts_batch_size: int = mcts_batch_size
+        self.history_length: int = history_length
+        self.verbose: bool = verbose
+        self.use_pure_mcts: None | bool | Literal[""] = (
+            network_path and network_path.lower() == "mcts"
+        )
 
         # Load c_puct from config.json
-        self.c_puct = 1.5  # default
-        config_path = os.path.join(
+        self.c_puct: float = 1.5  # default
+        config_path: str = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "config",
             "config.json",
@@ -129,60 +141,68 @@ class ChessGameApp:
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r") as f:
-                    config = json.load(f)
+                    config: dict[str, Any] = json.load(f)
                     self.c_puct = config.get("training", {}).get("c_puct", 1.5)
             except Exception:
-                pass  # Use default on error
+                # Use default on error
+                pass
 
         # Game state
-        self.game_mode = "human_vs_ai"
-        self.human_color = chess.WHITE
-        self.ai_thinking = False
+        self.game_mode: str = "human_vs_ai"
+        self.human_color: bool = chess.WHITE
+        self.ai_thinking: bool = False
         self.ai_thread: threading.Thread | None = None
-        self.ai_cancelled = False
+        self.ai_cancelled: bool = False
 
         # Move history for back/forward navigation
-        self.undone_moves: list = []
+        self.undone_moves: list[tuple[chess.Move, chess.Move | None]] = []
 
         # Full game history for MCTS (all positions from start, not limited to 3)
         # This is needed because MCTS takes _initial_history[:3] (first 3 positions)
-        self.game_positions: list = []  # [pos_initial, pos_after_move1, ...]
+        # [pos_initial, pos_after_move1, ...]
+        self.game_positions: list[chess.Board] = []
 
         # Evaluation history for graph
-        self.eval_history: List[float] = []
-        self.wdl_history: List[Optional[np.ndarray]] = []  # WDL for each eval
+        self.eval_history: list[float] = []
+        # WDL for each eval
+        self.wdl_history: list[np.ndarray | None] = []
 
         # Move timing
         self.turn_start_time: float = time.time()
         self.last_move_time: float = 0.0
 
         # Time control
-        self.time_control: int | None = (
-            time_control * 60 if time_control else None
-        )  # Convert minutes to seconds
+        # Convert minutes to seconds
+        self.time_control: int | None = time_control * 60 if time_control else None
         self.white_time: float = 0.0
         self.black_time: float = 0.0
-        self.base_simulations: int = num_simulations  # Store original for scaling
+        # Store original for scaling
+        self.base_simulations: int = num_simulations
         self.timer_update_id: str | None = None
-        self.game_started: bool = False  # Timer only runs after first move
+        # Timer only runs after first move
+        self.game_started: bool = False
 
         # Dynamic time management stats
-        self.ai_move_times: List[float] = []  # Time taken for each AI move
-        self.ai_sims_used: List[int] = []  # Simulations used for each AI move
-        self.last_wdl: tuple | None = None  # Last WDL evaluation (win, draw, loss)
+        # Time taken for each AI move
+        self.ai_move_times: list[float] = []
+        # Simulations used for each AI move
+        self.ai_sims_used: list[int] = []
+        # Last WDL evaluation
+        self.last_wdl: tuple[float, float, float] | None = None
 
         # Update queue for thread-safe UI updates
-        self.update_queue = queue.Queue()
+        self.update_queue: queue.Queue[tuple[str, dict[str, Any] | str]] = queue.Queue()
 
         # Training state
-        self.trainer = None
+        self.trainer: AlphaZeroTrainer | None = None
         self.training_thread: threading.Thread | None = None
-        self.training_cancelled = False
+        self.training_cancelled: bool = False
 
         # Editor mode state
-        self.app_mode = "play"  # "play" or "editor"
+        # "play" or "editor"
+        self.app_mode: str = "play"
         self.editor_selected_piece: chess.Piece | None = None
-        self.editor_palette_buttons: dict = {}
+        self.editor_palette_buttons: dict[str, tk.Button] = {}
 
         self._create_ui()
         self._bind_keyboard_shortcuts()
@@ -235,7 +255,7 @@ class ChessGameApp:
         left_btns = tk.Frame(top_frame, bg=COLORS["bg_primary"])
         left_btns.pack(side="left")
 
-        self.new_game_btn = create_styled_button(
+        self.new_game_btn: tk.Button = create_styled_button(
             left_btns,
             "New Game",
             command=self._new_game,
@@ -243,7 +263,7 @@ class ChessGameApp:
         )
         self.new_game_btn.pack(side="left", padx=(0, 10))
 
-        self.back_btn = create_styled_button(
+        self.back_btn: tk.Button = create_styled_button(
             left_btns,
             "◀",
             command=self._back_one_move,
@@ -251,7 +271,7 @@ class ChessGameApp:
         )
         self.back_btn.pack(side="left", padx=(0, 3))
 
-        self.forward_btn = create_styled_button(
+        self.forward_btn: tk.Button = create_styled_button(
             left_btns,
             "▶",
             command=self._forward_one_move,
@@ -259,7 +279,7 @@ class ChessGameApp:
         )
         self.forward_btn.pack(side="left", padx=(0, 10))
 
-        self.flip_btn = create_styled_button(
+        self.flip_btn: tk.Button = create_styled_button(
             left_btns,
             "Flip",
             command=self._flip_board,
@@ -267,7 +287,7 @@ class ChessGameApp:
         )
         self.flip_btn.pack(side="left", padx=(0, 10))
 
-        self.load_btn = create_styled_button(
+        self.load_btn: tk.Button = create_styled_button(
             left_btns,
             "Load Network",
             command=self._load_network_dialog,
@@ -301,7 +321,7 @@ class ChessGameApp:
             activebackground=COLORS["bg_primary"],
             activeforeground=COLORS["accent"],
             font=FONTS["body_bold"],
-            indicatoron=0,
+            indicatoron=False,
             padx=10,
             pady=3,
         )
@@ -319,7 +339,7 @@ class ChessGameApp:
             activebackground=COLORS["bg_primary"],
             activeforeground=COLORS["accent"],
             font=FONTS["body_bold"],
-            indicatoron=0,
+            indicatoron=False,
             padx=10,
             pady=3,
         )
@@ -401,7 +421,7 @@ class ChessGameApp:
 
     def _create_mode_panel(self, parent: tk.Widget) -> None:
         """Create the game mode selection panel."""
-        mode_panel = create_panel(parent, title="Game Mode")
+        mode_panel: tk.Frame = create_panel(parent, title="Game Mode")
         mode_panel.pack(fill="x", pady=(10, 0))
 
         mode_content = tk.Frame(mode_panel, bg=COLORS["bg_secondary"])
@@ -464,7 +484,7 @@ class ChessGameApp:
 
     def _create_ai_settings_panel(self, parent: tk.Widget) -> None:
         """Create the AI settings panel with simulations slider."""
-        ai_panel = create_panel(parent, title="AI Settings")
+        ai_panel: tk.Frame = create_panel(parent, title="AI Settings")
         ai_panel.pack(fill="x", pady=(10, 0))
 
         ai_content = tk.Frame(ai_panel, bg=COLORS["bg_secondary"])
@@ -507,7 +527,7 @@ class ChessGameApp:
         preset_frame = tk.Frame(ai_content, bg=COLORS["bg_secondary"])
         preset_frame.pack(fill="x", pady=(5, 0))
 
-        presets = [1, 100, 400, 800, 1600]
+        presets: list[int] = [1, 100, 400, 800, 1600]
         for preset in presets:
             btn = tk.Button(
                 preset_frame,
@@ -524,7 +544,7 @@ class ChessGameApp:
 
     def _on_simulations_change(self, value: str) -> None:
         """Handle simulations slider change."""
-        new_sims = int(float(value))
+        new_sims: int = int(float(value))
         self.num_simulations = new_sims
         self.sim_value_label.configure(text=str(new_sims))
 
@@ -542,7 +562,7 @@ class ChessGameApp:
         from .styles import PIECE_UNICODE
 
         # Piece palette
-        palette_panel = create_panel(parent, title="Pieces")
+        palette_panel: tk.Frame = create_panel(parent, title="Pieces")
         palette_panel.pack(fill="x", pady=(0, 10))
 
         palette_content = tk.Frame(palette_panel, bg=COLORS["bg_secondary"])
@@ -641,7 +661,7 @@ class ChessGameApp:
         self.eraser_btn.pack(fill="x")
 
         # Position controls panel
-        controls_panel = create_panel(parent, title="Position")
+        controls_panel: tk.Frame = create_panel(parent, title="Position")
         controls_panel.pack(fill="x", pady=(0, 10))
 
         controls_content = tk.Frame(controls_panel, bg=COLORS["bg_secondary"])
@@ -757,7 +777,7 @@ class ChessGameApp:
         ).pack(fill="x", pady=(3, 0))
 
         # Action buttons
-        actions_panel = create_panel(parent, title="Actions")
+        actions_panel: tk.Frame = create_panel(parent, title="Actions")
         actions_panel.pack(fill="x", pady=(0, 10))
 
         actions_content = tk.Frame(actions_panel, bg=COLORS["bg_secondary"])
@@ -905,8 +925,9 @@ class ChessGameApp:
     def _load_network(self) -> None:
         """Load the neural network or pure MCTS player."""
 
-        def get_history_length(network):
-            planes = network.num_input_planes
+        def get_history_length(network: DualHeadNetwork) -> int:
+            """Derive history_length from the network's input plane count."""
+            planes: int = network.num_input_planes
             # 72 planes = (history_length + 1) * 12 + 24 (metadata + semantic + tactical)
             return (planes - 24) // 12 - 1
 
@@ -990,7 +1011,7 @@ class ChessGameApp:
 
     def _load_network_dialog(self) -> None:
         """Show dialog to load a network file."""
-        filepath = filedialog.askopenfilename(
+        filepath: str = filedialog.askopenfilename(
             title="Load Network",
             filetypes=[("Network files", "*.pt"), ("All files", "*.*")],
         )
@@ -1024,9 +1045,7 @@ class ChessGameApp:
         )
         self.board_widget.set_player_color(self.human_color)
 
-        if self.human_color == chess.BLACK and not self.board_widget.flipped:
-            self.board_widget.flip()
-        elif self.human_color == chess.WHITE and self.board_widget.flipped:
+        if (self.human_color == chess.BLACK) != self.board_widget.flipped:
             self.board_widget.flip()
 
         self._update_player_names_for_human_ai()
@@ -1046,7 +1065,7 @@ class ChessGameApp:
 
     def _new_game_with_confirm(self) -> None:
         """Start a new game with confirmation."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
         if len(board.move_stack) > 0 and not board.is_game_over():
             create_confirmation_dialog(
                 self.root,
@@ -1128,12 +1147,13 @@ class ChessGameApp:
         Called after undo/redo to ensure history is consistent.
         Reconstructs all positions from the move stack.
         """
-        board = self.board_widget.get_board()
-        move_stack = list(board.move_stack)
+        board: chess.Board = self.board_widget.get_board()
+        move_stack: list[chess.Move] = list(board.move_stack)
 
         # Create a fresh board and replay to get all positions
-        temp_board = chess.Board()
-        self.game_positions = [temp_board.copy()]  # Starting position
+        temp_board: chess.Board = chess.Board()
+        # Starting position
+        self.game_positions = [temp_board.copy()]
 
         for move in move_stack:
             temp_board.push(move)
@@ -1144,7 +1164,7 @@ class ChessGameApp:
         if self.ai_thinking or self.board_widget.is_animating:
             return
 
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
         if not board.move_stack:
             return
 
@@ -1153,19 +1173,21 @@ class ChessGameApp:
             self.mcts.clear_cache()
 
         self.ai_cancelled = True
-        anim_duration = 100
+        anim_duration: int = 100
 
         if self.game_mode == "human_vs_ai":
             if board.turn == self.human_color:
                 if len(board.move_stack) >= 2:
-                    ai_move = board.peek()
+                    ai_move: chess.Move = board.peek()
                     self.undone_moves.append((board.move_stack[-2], ai_move))
 
-                    def after_ai_undo():
+                    def after_ai_undo() -> None:
+                        """Pop the AI move, then animate the human move undo."""
                         board.pop()
-                        human_move = board.peek()
+                        human_move: chess.Move = board.peek()
 
-                        def after_human_undo():
+                        def after_human_undo() -> None:
+                            """Pop the human move and refresh the board."""
                             board.pop()
                             self.board_widget.set_board(board)
                             self.board_widget.set_last_move(
@@ -1190,10 +1212,11 @@ class ChessGameApp:
                     )
             else:
                 if len(board.move_stack) >= 1:
-                    human_move = board.peek()
+                    human_move: chess.Move = board.peek()
                     self.undone_moves.append((human_move, None))
 
-                    def after_undo():
+                    def after_undo() -> None:
+                        """Pop the human move and refresh the board."""
                         board.pop()
                         self.board_widget.set_board(board)
                         self.board_widget.set_last_move(
@@ -1210,10 +1233,11 @@ class ChessGameApp:
                         reverse=True,
                     )
         else:
-            last_move = board.peek()
+            last_move: chess.Move = board.peek()
             self.undone_moves.append((last_move, None))
 
-            def after_undo():
+            def after_undo() -> None:
+                """Pop the last move and refresh the board."""
                 board.pop()
                 self.board_widget.set_board(board)
                 self.board_widget.set_last_move(
@@ -1242,25 +1266,30 @@ class ChessGameApp:
         if self.mcts is not None:
             self.mcts.clear_cache()
 
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
+        human_move: chess.Move
+        ai_move: chess.Move | None
         human_move, ai_move = self.undone_moves.pop()
 
         if human_move not in board.legal_moves:
             self.undone_moves.clear()
             return
 
-        anim_duration = 100
+        anim_duration: int = 100
 
-        def after_human_move():
+        def after_human_move() -> None:
+            """Replay the human move, then replay the AI move if present."""
             board.push(human_move)
             self.board_widget.set_board(board)
 
             if ai_move and ai_move in board.legal_moves:
+                confirmed_ai_move: chess.Move = ai_move
 
-                def after_ai_move():
-                    board.push(ai_move)
+                def after_ai_move() -> None:
+                    """Replay the AI move and trigger next AI turn if needed."""
+                    board.push(confirmed_ai_move)
                     self.board_widget.set_board(board)
-                    self.board_widget.set_last_move(ai_move)
+                    self.board_widget.set_last_move(confirmed_ai_move)
                     self._update_game_info()
                     self._update_eval_for_position()
                     self._rebuild_game_positions()
@@ -1274,7 +1303,9 @@ class ChessGameApp:
                         self._trigger_ai_move()
 
                 self.board_widget.animate_move(
-                    ai_move, duration_ms=anim_duration, on_complete=after_ai_move
+                    confirmed_ai_move,
+                    duration_ms=anim_duration,
+                    on_complete=after_ai_move,
                 )
             else:
                 self.board_widget.set_last_move(human_move)
@@ -1290,15 +1321,6 @@ class ChessGameApp:
         """Flip the board orientation."""
         self.board_widget.flip()
 
-    def _update_move_time_display(self, player: str, elapsed: float) -> None:
-        """Update the last move time display."""
-        if elapsed < 60:
-            time_str = f"{elapsed:.1f}s"
-        else:
-            minutes = int(elapsed // 60)
-            seconds = elapsed % 60
-            time_str = f"{minutes}m {seconds:.1f}s"
-
     # ==================== Time Control Methods ====================
 
     def _init_time_control(self) -> None:
@@ -1307,7 +1329,8 @@ class ChessGameApp:
             return
         self.white_time = float(self.time_control)
         self.black_time = float(self.time_control)
-        self.game_started = False  # Timer doesn't run until first move
+        # Timer doesn't run until first move
+        self.game_started = False
 
         # Reset dynamic time management stats
         self.ai_move_times.clear()
@@ -1329,17 +1352,17 @@ class ChessGameApp:
         if self.time_control is None:
             return
 
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
         if board.is_game_over():
             return
 
         # Calculate elapsed time since turn started
-        elapsed = time.time() - self.turn_start_time
-        current_turn = board.turn
+        elapsed: float = time.time() - self.turn_start_time
+        current_turn: bool = board.turn
 
         # Compute display time (remaining - elapsed)
         if current_turn == chess.WHITE:
-            display_time = max(0, self.white_time - elapsed)
+            display_time: float = max(0, self.white_time - elapsed)
         else:
             display_time = max(0, self.black_time - elapsed)
 
@@ -1354,7 +1377,7 @@ class ChessGameApp:
         self.timer_update_id = self.root.after(100, self._update_timer)
 
     def _update_player_timer_display(
-        self, color: chess.Color, time_remaining: float = None
+        self, color: chess.Color, time_remaining: float | None = None
     ) -> None:
         """Update the timer display in PlayerInfo widget."""
         if time_remaining is None:
@@ -1363,11 +1386,12 @@ class ChessGameApp:
             )
 
         # Format as MM:SS
-        minutes = int(time_remaining // 60)
-        seconds = int(time_remaining % 60)
-        time_str = f"{minutes:02d}:{seconds:02d}"
+        minutes: int = int(time_remaining // 60)
+        seconds: int = int(time_remaining % 60)
+        time_str: str = f"{minutes:02d}:{seconds:02d}"
 
         # Color based on urgency
+        timer_color: str
         if time_remaining < 30:
             timer_color = COLORS.get("timer_urgent", "#ef4444")
         elif time_remaining < 60:
@@ -1376,7 +1400,7 @@ class ChessGameApp:
             timer_color = COLORS["text_primary"]
 
         # Update the correct PlayerInfo widget
-        player_info = (
+        player_info: PlayerInfo = (
             self.white_player_info if color == chess.WHITE else self.black_player_info
         )
         player_info.set_timer(time_str, timer_color)
@@ -1385,7 +1409,7 @@ class ChessGameApp:
         """Deduct time used for the completed turn."""
         if self.time_control is None:
             return
-        elapsed = time.time() - self.turn_start_time
+        elapsed: float = time.time() - self.turn_start_time
         if color == chess.WHITE:
             self.white_time = max(0, self.white_time - elapsed)
         else:
@@ -1404,8 +1428,8 @@ class ChessGameApp:
         self.thinking_indicator.stop()
         self.thinking_indicator.pack_forget()
 
-        loser = "White" if color == chess.WHITE else "Black"
-        winner = "Black" if color == chess.WHITE else "White"
+        loser: str = "White" if color == chess.WHITE else "Black"
+        winner: str = "Black" if color == chess.WHITE else "White"
 
         self.status_label.configure(
             text=f"{loser} ran out of time! {winner} wins", fg=COLORS["accent"]
@@ -1414,9 +1438,10 @@ class ChessGameApp:
             "Game Over", f"{loser} ran out of time!\n{winner} wins on time."
         )
 
-    def _estimate_moves_remaining(self, board: chess.Board) -> int:
+    @staticmethod
+    def _estimate_moves_remaining(board: chess.Board) -> int:
         """Estimate remaining moves based on game phase."""
-        pieces = len(board.piece_map())
+        pieces: int = len(board.piece_map())
 
         # Opening (> 28 pieces): ~28 moves remaining
         if pieces > 28:
@@ -1429,25 +1454,27 @@ class ChessGameApp:
         # Endgame (< 16 pieces): can be long
         else:
             # Pawn presence = longer endgame
-            pawns = len(board.pieces(chess.PAWN, chess.WHITE)) + len(
+            pawns: int = len(board.pieces(chess.PAWN, chess.WHITE)) + len(
                 board.pieces(chess.PAWN, chess.BLACK)
             )
             if pawns > 4:
-                return max(20, pieces * 2)  # Pawn endgames are long
-            return max(10, pieces)  # Light piece endgames
+                # Pawn endgames are long
+                return max(20, pieces * 2)
+            # Light piece endgames
+            return max(10, pieces)
 
     def _get_smoothed_time_per_sim(self) -> float:
         """Get exponentially smoothed time per simulation from history."""
         if not self.ai_move_times or not self.ai_sims_used:
             return 0.001  # Fallback
 
-        n = min(len(self.ai_move_times), self.HISTORY_WINDOW)
-        total_weighted_time = 0.0
-        total_weighted_sims = 0.0
-        weight = 1.0
+        n: int = min(len(self.ai_move_times), self.HISTORY_WINDOW)
+        total_weighted_time: float = 0.0
+        total_weighted_sims: float = 0.0
+        weight: float = 1.0
 
         for i in range(n):
-            idx = -(i + 1)
+            idx: int = -(i + 1)
             total_weighted_time += self.ai_move_times[idx] * weight
             total_weighted_sims += self.ai_sims_used[idx] * weight
             weight *= self.DECAY_FACTOR
@@ -1459,10 +1486,13 @@ class ChessGameApp:
         if self.last_wdl is None:
             return 1.0
 
+        win: float
+        draw: float
+        loss: float
         win, draw, loss = self.last_wdl
 
         # Shannon entropy (max ~1.58 for uniform distribution)
-        entropy = 0.0
+        entropy: float = 0.0
         for p in [win, draw, loss]:
             if p > 0.001:
                 entropy -= p * math.log2(p)
@@ -1471,9 +1501,11 @@ class ChessGameApp:
         # Low entropy = clear position = slightly less time
         # High entropy = uncertain = slightly more time
         if entropy < 0.3:
-            return 0.9  # Very clear (winning/losing)
+            # Very clear (winning/losing)
+            return 0.9
         elif entropy > 1.4:
-            return 1.1  # Very uncertain
+            # Very uncertain
+            return 1.1
 
         return 1.0
 
@@ -1483,8 +1515,8 @@ class ChessGameApp:
             return base_sims
 
         try:
-            branching = self.mcts.get_max_branching_factor(board)
-            depth = self.mcts.get_tree_depth(board)
+            branching: int = self.mcts.get_max_branching_factor(board)
+            depth: int = self.mcts.get_tree_depth(board)
 
             # Simple position (few branches, deep search) - gentle reduction
             if branching < 5 and depth > 15:
@@ -1494,7 +1526,8 @@ class ChessGameApp:
             if branching > 25:
                 return int(base_sims * 1.1)
         except Exception:
-            pass  # MCTS methods may fail if tree is empty
+            # MCTS methods may fail if tree is empty
+            pass
 
         return base_sims
 
@@ -1517,42 +1550,46 @@ class ChessGameApp:
             return self.base_simulations
 
         # Get AI's remaining time
-        ai_color = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
-        ai_time = self.black_time if ai_color == chess.BLACK else self.white_time
-        board = self.board_widget.get_board()
+        ai_color: bool = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
+        ai_time: float = self.black_time if ai_color == chess.BLACK else self.white_time
+        board: chess.Board = self.board_widget.get_board()
 
         if ai_time <= 0:
-            return 30  # Absolute minimum
+            # Absolute minimum
+            return 30
 
         # Get smoothed time per simulation
-        time_per_sim = self._get_smoothed_time_per_sim()
+        time_per_sim: float = self._get_smoothed_time_per_sim()
 
         # EMERGENCY MODE: < 15 seconds
         if ai_time < self.EMERGENCY_THRESHOLD:
-            emergency_sims = max(30, int(ai_time / time_per_sim * 0.8))
+            emergency_sims: int = max(30, int(ai_time / time_per_sim * 0.8))
             return min(emergency_sims, self.MIN_SIMULATIONS)
 
         # Estimate remaining moves (phase-aware)
-        moves_left = self._estimate_moves_remaining(board)
+        moves_left: int = self._estimate_moves_remaining(board)
 
         # Time budget per move
-        time_budget = ai_time / moves_left
+        time_budget: float = ai_time / moves_left
 
         # Max simulations we can afford
+        max_sims: int
         if time_per_sim > 0:
             max_sims = int(time_budget / time_per_sim)
         else:
             max_sims = self.base_simulations
 
         # Apply WDL entropy factor
-        wdl_factor = self._get_wdl_factor()
-        target_sims = int(max_sims * wdl_factor)
+        wdl_factor: float = self._get_wdl_factor()
+        target_sims: int = int(max_sims * wdl_factor)
 
         # Adjust for position complexity (uses MCTS data)
         target_sims = self._adjust_for_complexity(target_sims, board)
 
         # Clamp to reasonable bounds (max 2x base when time allows)
-        final_sims = max(self.MIN_SIMULATIONS, min(self.base_simulations, target_sims))
+        final_sims: int = max(
+            self.MIN_SIMULATIONS, min(self.base_simulations, target_sims)
+        )
 
         return final_sims
 
@@ -1561,7 +1598,7 @@ class ChessGameApp:
         if self.time_control is None:
             return
 
-        new_sims = self._get_adapted_simulations()
+        new_sims: int = self._get_adapted_simulations()
         print(f"New simulations: {new_sims}")
 
         if self.mcts is not None:
@@ -1574,7 +1611,8 @@ class ChessGameApp:
         # Start game timer on first move (don't commit time for first move)
         if self.time_control is not None and not self.game_started:
             self.game_started = True
-            self.turn_start_time = time.time()  # Start timing from now
+            # Start timing from now
+            self.turn_start_time = time.time()
             self._start_timer_loop()
         else:
             # Commit time for human's turn (time control)
@@ -1582,13 +1620,12 @@ class ChessGameApp:
 
         # Record human thinking time
         self.last_move_time = time.time() - self.turn_start_time
-        self._update_move_time_display("You", self.last_move_time)
 
         self.undone_moves.clear()
         self._update_game_info()
 
         # Update game history
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
         self.game_positions.append(board.copy())
 
         # Tree reuse: preserve subtree for next AI search
@@ -1618,11 +1655,15 @@ class ChessGameApp:
 
         # Check for instant move (< 3 seconds) - play from tree without search
         if self.time_control is not None:
-            ai_color = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
-            ai_time = self.black_time if ai_color == chess.BLACK else self.white_time
+            ai_color: bool = (
+                chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
+            )
+            ai_time: float = (
+                self.black_time if ai_color == chess.BLACK else self.white_time
+            )
 
             if ai_time < self.INSTANT_MOVE_THRESHOLD:
-                instant_move = self._get_instant_move()
+                instant_move: chess.Move | None = self._get_instant_move()
                 if instant_move is not None:
                     # Play immediately without search
                     self._apply_instant_move(instant_move)
@@ -1639,14 +1680,16 @@ class ChessGameApp:
 
     def _get_instant_move(self) -> chess.Move | None:
         """Get best move from current MCTS tree without searching."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
 
         # Try to get move with most visits from existing tree
         if self.mcts is not None:
             try:
-                visit_counts = self.mcts.get_visit_counts(board)
+                visit_counts: dict[chess.Move, int] = self.mcts.get_visit_counts(board)
                 if visit_counts:
-                    best_move = max(visit_counts, key=visit_counts.get)
+                    best_move: chess.Move = max(
+                        visit_counts, key=visit_counts.__getitem__
+                    )
                     print(
                         f"Instant move from tree: {best_move} ({visit_counts[best_move]} visits)"
                     )
@@ -1655,11 +1698,11 @@ class ChessGameApp:
                 pass
 
         # Fallback: random legal move
-        legal_moves = list(board.legal_moves)
+        legal_moves: list[chess.Move] = list(board.legal_moves)
         if legal_moves:
             import random
 
-            move = random.choice(legal_moves)
+            move: chess.Move = random.choice(legal_moves)
             print(f"Instant move (random fallback): {move}")
             return move
 
@@ -1667,15 +1710,16 @@ class ChessGameApp:
 
     def _apply_instant_move(self, move: chess.Move) -> None:
         """Apply an instant move without full AI processing."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
 
         # Commit AI time
-        ai_color = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
+        ai_color: bool = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
         self._commit_time_for_turn(ai_color)
 
         # Apply the move
         board.push(move)
-        self.board_widget.push_move(move)
+        self.board_widget.set_board(board)
+        self.board_widget.set_last_move(move)
 
         # Update game history
         self.game_positions.append(board.copy())
@@ -1691,25 +1735,27 @@ class ChessGameApp:
     def _compute_ai_move(self) -> None:
         """Compute AI move in background thread."""
         try:
-            board = self.board_widget.get_board()
+            board: chess.Board = self.board_widget.get_board()
 
             if board.is_game_over():
                 return
 
-            root_value = 0.0
-            mcts_stats = None
-            tree_data = None
-            tree_depth = 0
-            tree_branching = 0
-            mate_in = None
+            root_value: float = 0.0
+            mcts_stats: list[dict[str, Any]] | None = None
+            tree_data: list[dict[str, Any]] | None = None
+            tree_depth: int = 0
+            tree_branching: int = 0
+            mate_in: int | None = None
+
+            move: chess.Move | None = None
 
             if self.use_pure_mcts and self.pure_mcts_player is not None:
                 move = self.pure_mcts_player.select_move(board)
-            else:
+            elif self.mcts is not None:
                 # Pass full game history to MCTS (excluding current position)
                 # IMPORTANT: MCTS does _initial_history[:history_length], taking first positions
                 # So we pass all positions from game start in order [pos_initial, pos_after_move1, ...]
-                history_boards = (
+                history_boards: list[chess.Board] | None = (
                     self.game_positions[:-1] if len(self.game_positions) > 1 else None
                 )
                 move = self.mcts.get_best_move(
@@ -1754,18 +1800,20 @@ class ChessGameApp:
         """Process queued updates from threads."""
         try:
             while True:
+                update_type: str
+                data: dict[str, Any] | str
                 update_type, data = self.update_queue.get_nowait()
 
-                if update_type == "ai_move":
+                if update_type == "ai_move" and isinstance(data, dict):
                     self._apply_ai_move(data)
-                elif update_type == "training":
+                elif update_type == "training" and isinstance(data, dict):
                     if self.training_panel:
                         self.training_panel.update_progress(data)
-                    if isinstance(data, dict) and data.get("phase") == "move":
-                        fen = data.get("fen")
+                    if data.get("phase") == "move":
+                        fen: str | None = data.get("fen")
                         if fen:
                             self._show_training_position(fen)
-                elif update_type == "error":
+                elif update_type == "error" and isinstance(data, str):
                     messagebox.showerror("Error", data)
 
         except queue.Empty:
@@ -1776,21 +1824,22 @@ class ChessGameApp:
     def _show_training_position(self, fen: str) -> None:
         """Show a position from training on the board."""
         try:
-            board = chess.Board(fen)
+            board: chess.Board = chess.Board(fen)
             self.board_widget.set_board(board)
         except Exception:
             pass
 
-    def _apply_ai_move(self, data: dict) -> None:
+    def _apply_ai_move(self, data: dict[str, Any]) -> None:
         """Apply AI move to the board with animation."""
         self.ai_thinking = False
 
-        ai_color = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
+        ai_color: bool = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
 
         # Start game timer on first move (AI plays first when human is Black)
         if self.time_control is not None and not self.game_started:
             self.game_started = True
-            self.turn_start_time = time.time()  # Start timing from now
+            # Start timing from now
+            self.turn_start_time = time.time()
             self._start_timer_loop()
         else:
             # Commit time for AI's turn (time control)
@@ -1798,24 +1847,23 @@ class ChessGameApp:
 
         # Record AI thinking time
         self.last_move_time = time.time() - self.turn_start_time
-        self._update_move_time_display("AI", self.last_move_time)
 
         self.thinking_indicator.stop()
         self.thinking_indicator.pack_forget()
 
-        move = data["move"]
-        mcts_stats = data.get("mcts_stats")
-        root_value = data.get("root_value", 0.0)
-        tree_data = data.get("tree_data")
-        tree_depth = data.get("tree_depth", 0)
-        tree_branching = data.get("tree_branching", 0)
-        mate_in = data.get("mate_in")
+        move: chess.Move = data["move"]
+        mcts_stats: list[dict[str, Any]] | None = data.get("mcts_stats")
+        root_value: float = data.get("root_value", 0.0)
+        tree_data: list[dict[str, Any]] | None = data.get("tree_data")
+        tree_depth: int = data.get("tree_depth", 0)
+        tree_branching: int = data.get("tree_branching", 0)
+        mate_in: int | None = data.get("mate_in")
 
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
 
         # Update MCTS panel with search statistics
         if mcts_stats:
-            total_visits = sum(s["visits"] for s in mcts_stats)
+            total_visits: int = sum(s["visits"] for s in mcts_stats)
             self.mcts_panel.update_stats(board, mcts_stats, total_visits)
 
             # Record stats for dynamic time management
@@ -1825,7 +1873,7 @@ class ChessGameApp:
 
                 # Extract WDL from best move (first in list, sorted by visits)
                 if mcts_stats and "wdl" in mcts_stats[0]:
-                    wdl = mcts_stats[0]["wdl"]
+                    wdl: np.ndarray = mcts_stats[0]["wdl"]
                     # wdl is numpy array [win, draw, loss]
                     self.last_wdl = (float(wdl[0]), float(wdl[1]), float(wdl[2]))
 
@@ -1836,27 +1884,26 @@ class ChessGameApp:
             )
 
         # Update Value label
-        value_color = (
-            COLORS["q_value_positive"]
-            if root_value > 0.05
-            else (
-                COLORS["q_value_negative"]
-                if root_value < -0.05
-                else COLORS["text_primary"]
-            )
-        )
+        value_color: str
+        if root_value > 0.05:
+            value_color = COLORS["q_value_positive"]
+        elif root_value < -0.05:
+            value_color = COLORS["q_value_negative"]
+        else:
+            value_color = COLORS["text_primary"]
         self.value_label.configure(text=f"{root_value:+.2f}", fg=value_color)
 
         if move in board.legal_moves:
 
             # Extract WDL from best move for eval graph
-            best_wdl = None
+            best_wdl: np.ndarray | None = None
             if mcts_stats and "wdl" in mcts_stats[0]:
                 best_wdl = mcts_stats[0]["wdl"]
                 if not isinstance(best_wdl, np.ndarray):
                     best_wdl = np.array(best_wdl, dtype=np.float32)
 
-            def on_animation_complete():
+            def on_animation_complete() -> None:
+                """Apply the AI move to the board and schedule the next turn."""
                 board.push(move)
                 self.board_widget.set_board(board)
                 self.board_widget.set_last_move(move)
@@ -1872,7 +1919,7 @@ class ChessGameApp:
                 # Update evaluation after AI move (with WDL for win rate display)
                 self._update_eval_after_move(ai_value=root_value, wdl=best_wdl)
 
-                updated_board = self.board_widget.get_board()
+                updated_board: chess.Board = self.board_widget.get_board()
                 if updated_board.is_game_over():
                     self._show_game_over()
                 elif self.game_mode == "ai_vs_ai":
@@ -1890,7 +1937,7 @@ class ChessGameApp:
             self._update_game_info()
 
     def _update_eval_after_move(
-        self, ai_value: float = None, wdl: Optional[np.ndarray] = None
+        self, ai_value: float | None = None, wdl: np.ndarray | None = None
     ) -> None:
         """Update evaluation displays after a move."""
         # Only update eval graph after AI moves (when ai_value is provided)
@@ -1899,7 +1946,7 @@ class ChessGameApp:
 
         # Use AI's evaluation directly (matches Value Prediction display)
         # Positive = AI thinks it's winning, Negative = AI thinks it's losing
-        display_eval = ai_value
+        display_eval: float = ai_value
 
         # Update eval bar (scale from [-1,1] to [-10,10])
         self.eval_bar.set_evaluation(display_eval * 10)
@@ -1911,8 +1958,8 @@ class ChessGameApp:
 
     def _update_eval_for_position(self) -> None:
         """Update evaluation for current position (after back/forward)."""
-        board = self.board_widget.get_board()
-        move_index = len(board.move_stack)
+        board: chess.Board = self.board_widget.get_board()
+        move_index: int = len(board.move_stack)
 
         # Update eval bar and graph to current position
         if move_index < len(self.eval_history):
@@ -1932,7 +1979,7 @@ class ChessGameApp:
 
     def _update_game_info(self) -> None:
         """Update all game information displays."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
 
         # Update player info widgets
         self.white_player_info.update_from_board(board)
@@ -1949,7 +1996,7 @@ class ChessGameApp:
 
         # Status
         if board.is_checkmate():
-            winner = "Black" if board.turn == chess.WHITE else "White"
+            winner: str = "Black" if board.turn == chess.WHITE else "White"
             self.status_label.configure(
                 text=f"Checkmate! {winner} wins",
                 fg=COLORS["accent"],
@@ -1968,17 +2015,18 @@ class ChessGameApp:
         elif self.game_mode == "human_vs_ai" and board.turn == self.human_color:
             self.status_label.configure(text="Your turn", fg=COLORS["success"])
         elif self.game_mode == "human_vs_human":
-            turn = "White" if board.turn == chess.WHITE else "Black"
+            turn: str = "White" if board.turn == chess.WHITE else "Black"
             self.status_label.configure(text=f"{turn} to play", fg=COLORS["success"])
         else:
             self.status_label.configure(text="Playing", fg=COLORS["text_secondary"])
 
     def _show_game_over(self) -> None:
         """Show game over dialog."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
 
+        message: str
         if board.is_checkmate():
-            winner = "Black" if board.turn == chess.WHITE else "White"
+            winner: str = "Black" if board.turn == chess.WHITE else "White"
             message = f"Checkmate! {winner} wins!"
         elif board.is_stalemate():
             message = "Game over - Stalemate!"
@@ -2001,13 +2049,14 @@ class ChessGameApp:
             return
 
         self.training_cancelled = False
-        self.training_iterations = self.training_panel.get_iterations()
-        self.training_output_file = self.training_panel.get_output_file()
+        self.training_iterations: int = self.training_panel.get_iterations()
+        self.training_output_file: str = self.training_panel.get_output_file()
 
         try:
-            from alphazero import AlphaZeroTrainer, TrainingConfig
+            from alphazero import AlphaZeroTrainer
+            from config import TrainingConfig  # type: ignore[import-not-found]
 
-            config = TrainingConfig(
+            config: TrainingConfig = TrainingConfig(
                 games_per_iteration=10,
                 num_simulations=50,
                 epochs_per_iteration=5,
@@ -2034,9 +2083,12 @@ class ChessGameApp:
 
     def _run_training(self) -> None:
         """Run training loop in background thread."""
+        assert self.trainer is not None
+        assert self.network is not None
         try:
 
-            def callback(data):
+            def callback(data: dict[str, Any]) -> None:
+                """Forward training progress to the UI update queue."""
                 if not self.training_cancelled:
                     self.update_queue.put(("training", data))
 
@@ -2104,7 +2156,7 @@ class ChessGameApp:
 
     def _on_app_mode_change(self) -> None:
         """Handle switch between Play and Editor mode."""
-        mode = self.app_mode_var.get()
+        mode: str = self.app_mode_var.get()
         self.app_mode = mode
 
         if mode == "editor":
@@ -2148,7 +2200,7 @@ class ChessGameApp:
 
     def _select_editor_piece(self, color: chess.Color, piece_type: int) -> None:
         """Select a piece from the palette to place on the board."""
-        piece = chess.Piece(piece_type, color)
+        piece: chess.Piece = chess.Piece(piece_type, color)
         self.editor_selected_piece = piece
         self.board_widget.selected_piece_to_place = piece
 
@@ -2169,7 +2221,7 @@ class ChessGameApp:
         self._clear_palette_highlight()
 
         # Map piece type to symbol
-        piece_symbols = {
+        piece_symbols: dict[int, str] = {
             chess.KING: "K",
             chess.QUEEN: "Q",
             chess.ROOK: "R",
@@ -2177,8 +2229,9 @@ class ChessGameApp:
             chess.KNIGHT: "N",
             chess.PAWN: "P",
         }
-        symbol = piece_symbols.get(piece_type, "")
+        symbol: str = piece_symbols.get(piece_type, "")
 
+        key: str
         if color == chess.WHITE:
             key = f"w{symbol}"
         else:
@@ -2199,7 +2252,7 @@ class ChessGameApp:
 
     def _sync_editor_controls_from_board(self) -> None:
         """Sync editor controls (turn, castling) from current board state."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
 
         # Sync turn
         self.editor_turn_var.set("white" if board.turn == chess.WHITE else "black")
@@ -2215,7 +2268,7 @@ class ChessGameApp:
 
     def _update_editor_fen(self) -> None:
         """Update the FEN display in editor panel."""
-        board = self.board_widget.get_board().copy()
+        board: chess.Board = self.board_widget.get_board().copy()
 
         # Apply turn from editor control
         board.turn = (
@@ -2223,7 +2276,7 @@ class ChessGameApp:
         )
 
         # Apply castling rights from editor controls
-        castling = ""
+        castling: str = ""
         if self.castle_wk_var.get():
             castling += "K"
         if self.castle_wq_var.get():
@@ -2238,13 +2291,13 @@ class ChessGameApp:
 
     def _load_editor_fen(self) -> None:
         """Load a position from the FEN entry field."""
-        fen = self.editor_fen_var.get().strip()
+        fen: str = self.editor_fen_var.get().strip()
         if not fen:
             messagebox.showwarning("Invalid FEN", "Please enter a FEN string.")
             return
 
         try:
-            board = chess.Board(fen)
+            board: chess.Board = chess.Board(fen)
             self.board_widget.set_board(board)
             self.board_widget._draw_board()
 
@@ -2256,7 +2309,7 @@ class ChessGameApp:
 
     def _editor_clear_board(self) -> None:
         """Clear all pieces from the board."""
-        board = self.board_widget.get_board()
+        board: chess.Board = self.board_widget.get_board()
         board.clear()
         self.board_widget.set_board(board)
         self.board_widget._draw_board()
@@ -2264,14 +2317,14 @@ class ChessGameApp:
 
     def _editor_reset_position(self) -> None:
         """Reset to the starting position."""
-        board = chess.Board()
+        board: chess.Board = chess.Board()
         self.board_widget.set_board(board)
         self.board_widget._draw_board()
         self._sync_editor_controls_from_board()
 
     def _start_game_from_editor(self) -> None:
         """Start a game from the current editor position."""
-        board = self.board_widget.get_board().copy()
+        board: chess.Board = self.board_widget.get_board().copy()
 
         # Apply turn from editor
         board.turn = (
@@ -2279,7 +2332,7 @@ class ChessGameApp:
         )
 
         # Apply castling rights
-        castling = ""
+        castling: str = ""
         if self.castle_wk_var.get():
             castling += "K"
         if self.castle_wq_var.get():
@@ -2332,13 +2385,14 @@ class ChessGameApp:
             self.turn_start_time = time.time()
             self._trigger_ai_move()
 
-    def _validate_editor_position(self, board: chess.Board) -> bool:
+    @staticmethod
+    def _validate_editor_position(board: chess.Board) -> bool:
         """Validate the editor position before starting a game."""
-        errors = []
+        errors: list[str] = []
 
         # Check for both kings
-        white_kings = len(board.pieces(chess.KING, chess.WHITE))
-        black_kings = len(board.pieces(chess.KING, chess.BLACK))
+        white_kings: int = len(board.pieces(chess.KING, chess.WHITE))
+        black_kings: int = len(board.pieces(chess.KING, chess.BLACK))
 
         if white_kings == 0:
             errors.append("White king is missing")
@@ -2352,9 +2406,9 @@ class ChessGameApp:
 
         # Check for pawns on first/last rank
         for square in chess.SQUARES:
-            piece = board.piece_at(square)
+            piece: chess.Piece | None = board.piece_at(square)
             if piece and piece.piece_type == chess.PAWN:
-                rank = chess.square_rank(square)
+                rank: int = chess.square_rank(square)
                 if rank == 0 or rank == 7:
                     errors.append(
                         f"Pawn on invalid rank at {chess.square_name(square)}"
@@ -2363,10 +2417,10 @@ class ChessGameApp:
         # Check if opponent king is in check (illegal position)
         if white_kings == 1 and black_kings == 1:
             # Temporarily flip turn to check if opponent is in check
-            test_board = board.copy()
+            test_board: chess.Board = board.copy()
             test_board.turn = not board.turn
             if test_board.is_check():
-                opponent = "White" if board.turn == chess.BLACK else "Black"
+                opponent: str = "White" if board.turn == chess.BLACK else "Black"
                 errors.append(f"{opponent} king would be in check (illegal)")
 
         if errors:
@@ -2382,20 +2436,22 @@ class ChessGameApp:
     def run(self) -> None:
         """Run the application main loop."""
         self.root.update_idletasks()
-        width = self.root.winfo_width()
-        height = self.root.winfo_height()
-        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        width: int = self.root.winfo_width()
+        height: int = self.root.winfo_height()
+        x: int = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y: int = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f"+{x}+{y}")
 
         self.root.mainloop()
 
 
-def main():
+def main() -> None:
     """Main entry point for the chess game."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="NeuralMate Chess - AlphaZero")
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description="NeuralMate Chess - AlphaZero"
+    )
     parser.add_argument("--network", "-n", type=str, help="Path to network file")
     parser.add_argument(
         "--simulations", "-s", type=int, default=200, help="MCTS simulations per move"
@@ -2411,9 +2467,9 @@ def main():
         help="Time control in minutes per player (e.g., --time 5 for 5 min each)",
     )
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
-    app = ChessGameApp(
+    app: ChessGameApp = ChessGameApp(
         network_path=args.network,
         num_simulations=args.simulations,
         verbose=args.verbose,

@@ -1,5 +1,9 @@
 """Test: Exchange Evaluation."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -13,9 +17,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for piece exchange evaluation
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === ROOK VS MINOR PIECES ===
     {
         "name": "Rook vs Bishop+Knight",
@@ -84,21 +91,23 @@ TEST_POSITIONS = [
 ]
 
 
-def test_exchange_eval(network, results: TestResults):
+def test_exchange_eval(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network evaluates piece exchanges correctly."""
     print(header("TEST: Exchange Evaluation"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        expected = test["expected_eval"]
+        expected: str = test["expected_eval"]
         print(f"\n  Value: {value:+.4f} (expected: {expected})")
 
         if expected == "positive":
@@ -133,7 +142,7 @@ def test_exchange_eval(network, results: TestResults):
 
         results.add_diagnostic("exchange_eval", f"{test['name']}_value", float(value))
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("exchange_eval", "total_tested", total)
     results.add_diagnostic("exchange_eval", "correct", passed)
     results.add("Exchange Evaluation", score >= 0.4, score, 1.0)

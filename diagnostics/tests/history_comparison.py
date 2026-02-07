@@ -1,5 +1,9 @@
 """Test: History Comparison - Real vs Duplicated History in MCTS."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import time
 import numpy as np
 import chess
@@ -18,9 +22,12 @@ from ..core import (
     get_history_length,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test scenarios: sequences of moves to create real history
-TEST_SCENARIOS = [
+TEST_SCENARIOS: list[dict[str, Any]] = [
     {
         "name": "Italian Game Opening",
         "moves": ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4"],
@@ -55,11 +62,11 @@ def _encode_with_real_history(
 ) -> np.ndarray:
     """Encode position with real history boards."""
     # Build boards list: [current, T-1, T-2, ...]
-    boards = [current_board] + history_boards[:history_length]
+    boards: list[chess.Board] = [current_board] + history_boards[:history_length]
 
     # Pad if needed
     if len(boards) < history_length + 1:
-        pad_board = boards[-1] if boards else current_board
+        pad_board: chess.Board = boards[-1] if boards else current_board
         boards = boards + [pad_board] * (history_length + 1 - len(boards))
 
     return encode_board_with_history(boards, from_perspective=True)
@@ -70,16 +77,16 @@ def _encode_with_duplicated_history(
     history_length: int,
 ) -> np.ndarray:
     """Encode position with duplicated current position as history."""
-    boards = [current_board] * (history_length + 1)
+    boards: list[chess.Board] = [current_board] * (history_length + 1)
     return encode_board_with_history(boards, from_perspective=True)
 
 
 def _play_moves(board: chess.Board, moves: list[str]) -> list[chess.Board]:
     """Play a sequence of moves and return history of positions."""
-    history = []
+    history: list[chess.Board] = []
     for move_uci in moves:
         history.append(board.copy())  # Save position before move
-        move = chess.Move.from_uci(move_uci)
+        move: chess.Move = chess.Move.from_uci(move_uci)
         if move in board.legal_moves:
             board.push(move)
         else:
@@ -88,33 +95,41 @@ def _play_moves(board: chess.Board, moves: list[str]) -> list[chess.Board]:
 
 
 def _compare_encodings(
-    network,
+    network: DualHeadNetwork,
     current_board: chess.Board,
     history_boards: list[chess.Board],
     history_length: int,
-) -> dict:
+) -> dict[str, Any]:
     """Compare network outputs between real and duplicated history."""
     # Encode with real history
-    state_real = _encode_with_real_history(
+    state_real: np.ndarray = _encode_with_real_history(
         current_board, history_boards, history_length
     )
+    policy_real: np.ndarray
+    value_real: float
+    wdl_real: np.ndarray
     policy_real, value_real, wdl_real = network.predict_single_with_wdl(state_real)
     if current_board.turn == chess.BLACK:
         policy_real = flip_policy(policy_real)
 
     # Encode with duplicated history
-    state_dup = _encode_with_duplicated_history(current_board, history_length)
+    state_dup: np.ndarray = _encode_with_duplicated_history(
+        current_board, history_length
+    )
+    policy_dup: np.ndarray
+    value_dup: float
+    wdl_dup: np.ndarray
     policy_dup, value_dup, wdl_dup = network.predict_single_with_wdl(state_dup)
     if current_board.turn == chess.BLACK:
         policy_dup = flip_policy(policy_dup)
 
     # Calculate differences
-    policy_diff = np.abs(policy_real - policy_dup)
-    value_diff = abs(value_real - value_dup)
+    policy_diff: np.ndarray = np.abs(policy_real - policy_dup)
+    value_diff: float = abs(value_real - value_dup)
 
     # Find top moves for each
-    top_real = np.argsort(policy_real)[::-1][:5]
-    top_dup = np.argsort(policy_dup)[::-1][:5]
+    top_real: np.ndarray = np.argsort(policy_real)[::-1][:5]
+    top_dup: np.ndarray = np.argsort(policy_dup)[::-1][:5]
 
     return {
         "policy_real": policy_real,
@@ -133,14 +148,14 @@ def _compare_encodings(
 
 
 def _compare_mcts(
-    network,
+    network: DualHeadNetwork,
     current_board: chess.Board,
     history_boards: list[chess.Board],
     history_length: int,
     num_simulations: int = 100,
-) -> dict:
+) -> dict[str, Any]:
     """Compare MCTS outputs between real and duplicated history."""
-    mcts = MCTS(
+    mcts: MCTS = MCTS(
         network=network,
         c_puct=1.0,
         num_simulations=num_simulations,
@@ -149,18 +164,20 @@ def _compare_mcts(
     mcts.temperature = 0.1
 
     # MCTS with real history
-    start = time.time()
-    policy_real = mcts.search(
+    start: float = time.time()
+    policy_real: np.ndarray = mcts.search(
         current_board, add_noise=False, history_boards=history_boards
     )
-    time_real = time.time() - start
+    time_real: float = time.time() - start
 
     mcts.clear_cache()
 
     # MCTS with no history (will use duplication internally via padding)
     start = time.time()
-    policy_dup = mcts.search(current_board, add_noise=False, history_boards=None)
-    time_dup = time.time() - start
+    policy_dup: np.ndarray = mcts.search(
+        current_board, add_noise=False, history_boards=None
+    )
+    time_dup: float = time.time() - start
 
     # Flip policies back to absolute coordinates for Black
     if current_board.turn == chess.BLACK:
@@ -168,11 +185,11 @@ def _compare_mcts(
         policy_dup = flip_policy(policy_dup)
 
     # Calculate differences
-    policy_diff = np.abs(policy_real - policy_dup)
+    policy_diff: np.ndarray = np.abs(policy_real - policy_dup)
 
     # Find top moves for each
-    top_real = np.argsort(policy_real)[::-1][:5]
-    top_dup = np.argsort(policy_dup)[::-1][:5]
+    top_real: np.ndarray = np.argsort(policy_real)[::-1][:5]
+    top_dup: np.ndarray = np.argsort(policy_dup)[::-1][:5]
 
     return {
         "policy_real": policy_real,
@@ -188,13 +205,16 @@ def _compare_mcts(
 
 
 def _test_single_scenario(
-    network, scenario: dict, history_length: int, results: TestResults
+    network: DualHeadNetwork,
+    scenario: dict[str, Any],
+    history_length: int,
+    results: TestResults,
 ) -> float:
     """Test a single scenario with real vs duplicated history."""
-    board = chess.Board()
+    board: chess.Board = chess.Board()
 
     # Play moves to create history
-    history_boards = _play_moves(board, scenario["moves"])
+    history_boards: list[chess.Board] = _play_moves(board, scenario["moves"])
 
     print(f"\n  Position after {len(scenario['moves'])} moves:")
     print(f"  FEN: {board.fen()}")
@@ -202,7 +222,9 @@ def _test_single_scenario(
 
     # Compare raw network outputs
     print(f"\n  {Colors.BOLD}--- Raw Network Comparison ---{Colors.ENDC}")
-    net_cmp = _compare_encodings(network, board, history_boards, history_length)
+    net_cmp: dict[str, Any] = _compare_encodings(
+        network, board, history_boards, history_length
+    )
 
     print(f"  Value (real history):      {net_cmp['value_real']:+.4f}")
     print(f"  Value (duplicated):        {net_cmp['value_dup']:+.4f}")
@@ -242,7 +264,9 @@ def _test_single_scenario(
 
     # Compare MCTS outputs
     print(f"\n  {Colors.BOLD}--- MCTS Comparison (100 sims) ---{Colors.ENDC}")
-    mcts_cmp = _compare_mcts(network, board, history_boards, history_length)
+    mcts_cmp: dict[str, Any] = _compare_mcts(
+        network, board, history_boards, history_length
+    )
 
     print(f"  Time (real history):       {mcts_cmp['time_real']*1000:.0f}ms")
     print(f"  Time (duplicated):         {mcts_cmp['time_dup']*1000:.0f}ms")
@@ -299,10 +323,10 @@ def _test_single_scenario(
 
     # Score: penalize if there are significant differences AND different top moves
     # Small differences are expected and OK
-    score = 1.0
+    score: float = 1.0
 
     # Check if implementation works (history should produce different results than duplication)
-    has_difference = (
+    has_difference: bool = (
         net_cmp["policy_max_diff"] > 0.001
         or net_cmp["value_diff"] > 0.001
         or mcts_cmp["policy_max_diff"] > 0.001
@@ -319,23 +343,23 @@ def _test_single_scenario(
     return score
 
 
-def test_history_comparison(network, results: TestResults):
+def test_history_comparison(network: DualHeadNetwork, results: TestResults) -> float:
     """Test that real history vs duplicated history produces expected behavior."""
     print(header("TEST: History Comparison (Real vs Duplicated)"))
 
-    history_length = get_history_length(network)
+    history_length: int = get_history_length(network)
     print(f"  History length: {history_length}")
 
-    total_score = 0.0
+    total_score: float = 0.0
 
     for scenario in TEST_SCENARIOS:
         print(subheader(f"{scenario['name']}: {scenario['description']}"))
-        score = _test_single_scenario(network, scenario, history_length, results)
+        score: float = _test_single_scenario(network, scenario, history_length, results)
         total_score += score
 
     # Summary
     print(subheader("Summary"))
-    avg_score = total_score / len(TEST_SCENARIOS)
+    avg_score: float = total_score / len(TEST_SCENARIOS)
     print(f"  Scenarios tested: {len(TEST_SCENARIOS)}")
     print(f"  Average score: {avg_score*100:.1f}%")
 
@@ -350,7 +374,7 @@ def test_history_comparison(network, results: TestResults):
             "History may not be properly utilized",
         )
 
-    overall_passed = avg_score >= 0.5
+    overall_passed: bool = avg_score >= 0.5
     results.add("History Comparison", overall_passed, avg_score, 1.0)
 
     return avg_score

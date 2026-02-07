@@ -61,7 +61,7 @@ class MCTSPanel(tk.Frame):
         # Maintain fixed height
         self.pack_propagate(False)
 
-        self._moves: List[MCTSMoveStats] = []
+        self._moves: list[MCTSMoveStats] = []
         self._total_visits = 0
         self._sort_by = "visits"  # "visits", "q_value", "prior"
 
@@ -173,7 +173,7 @@ class MCTSPanel(tk.Frame):
     def update_stats(
         self,
         board: chess.Board,
-        stats: List[Dict[str, Any]],
+        stats: list[dict[str, Any]],
         total_visits: int = 0,
     ) -> None:
         """

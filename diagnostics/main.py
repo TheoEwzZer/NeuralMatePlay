@@ -3,13 +3,20 @@
 Main entry point for the Neural Network Diagnostic Suite.
 """
 
+from __future__ import annotations
+
 import sys
 import os
 import time
 import argparse
+from typing import TYPE_CHECKING
+from collections.abc import Callable
+
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
 # Add src to path for imports
-_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_root_dir: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_root_dir, "src"))
 sys.path.insert(0, _root_dir)
 
@@ -25,9 +32,9 @@ from .tests import ALL_TESTS
 from .comparison import run_comparison, compare_two_models
 
 
-def run_all_tests(network, iteration: int) -> TestResults:
+def run_all_tests(network: DualHeadNetwork, iteration: int) -> TestResults:
     """Run all diagnostic tests."""
-    results = TestResults()
+    results: TestResults = TestResults()
 
     print(
         f"\n{Colors.BOLD}Running comprehensive diagnostics for iteration {iteration}{Colors.ENDC}"
@@ -37,14 +44,16 @@ def run_all_tests(network, iteration: int) -> TestResults:
     analyze_network_architecture(network, results)
 
     # Run all tests
-    for test_func, test_name, _ in ALL_TESTS:
+    test_func: Callable[..., float]
+    for test_func, _, _ in ALL_TESTS:
         test_func(network, results)
 
     return results
 
 
-def main():
-    parser = argparse.ArgumentParser(
+def main() -> None:
+    """Main function to parse arguments and run diagnostics."""
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="Comprehensive network diagnostic with detailed LLM-friendly output."
     )
     parser.add_argument(
@@ -77,16 +86,13 @@ def main():
         help="Test a single specific model file (e.g., --model path/to/model.pt)",
     )
     parser.add_argument(
-        "--quick", "-q", action="store_true", help="Quick comparison (fewer tests)"
-    )
-    parser.add_argument(
         "--type",
         "-t",
         choices=["train", "pretrain"],
         default="train",
         help="Checkpoint type: 'train' for iteration_X, 'pretrain' for pretrained_best_X (default: train)",
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Handle colors
     if not sys.stdout.isatty():
@@ -97,6 +103,8 @@ def main():
 
     # Two-model comparison mode
     if args.models:
+        model1: str
+        model2: str
         model1, model2 = args.models
         if not os.path.exists(model1):
             print(f"{Colors.RED}[ERROR] Model not found: {model1}{Colors.ENDC}")
@@ -104,7 +112,7 @@ def main():
         if not os.path.exists(model2):
             print(f"{Colors.RED}[ERROR] Model not found: {model2}{Colors.ENDC}")
             return
-        compare_two_models(model1, model2, quick=args.quick)
+        compare_two_models(model1, model2)
         return
 
     # Single model mode
@@ -113,12 +121,12 @@ def main():
             print(f"{Colors.RED}[ERROR] Model not found: {args.model}{Colors.ENDC}")
             return
         print(f"  Model: {args.model}")
-        network = load_network_from_path(args.model)
+        network: DualHeadNetwork | None = load_network_from_path(args.model)
         if network is None:
             return
         # Extract iteration from filename if possible, otherwise use 0
-        basename = os.path.basename(args.model)
-        iteration = 0
+        basename: str = os.path.basename(args.model)
+        iteration: int = 0
         if "iteration_" in basename:
             try:
                 iteration = int(basename.split("iteration_")[1].split("_")[0])
@@ -129,7 +137,7 @@ def main():
                 iteration = int(basename.split("pretrained_best_")[1].split("_")[0])
             except (ValueError, IndexError):
                 pass
-        results = run_all_tests(network, iteration)
+        results: TestResults = run_all_tests(network, iteration)
         results.print_summary()
         return
 
@@ -144,6 +152,7 @@ def main():
     try:
         if args.iteration:
             # Build path based on checkpoint type
+            path: str
             if args.type == "pretrain":
                 path = os.path.join(
                     args.checkpoint_dir, f"pretrained_best_{args.iteration}_network.pt"
@@ -157,7 +166,9 @@ def main():
                 return
             iteration = args.iteration
         else:
-            result = load_latest_network(args.checkpoint_dir, args.type)
+            result: tuple[DualHeadNetwork, int] | None = load_latest_network(
+                args.checkpoint_dir, args.type
+            )
             if result is None:
                 return
             network, iteration = result
@@ -167,9 +178,9 @@ def main():
                 f"\n{Colors.RED}[ERROR] Checkpoint has incompatible architecture{Colors.ENDC}"
             )
             print(
-                f"  The checkpoint was trained with a different network configuration."
+                "  The checkpoint was trained with a different network configuration."
             )
-            print(f"  This can happen when the value head architecture was changed.")
+            print("  This can happen when the value head architecture was changed.")
             print(f"\n  Details: {str(e)[:200]}...")
             return
         raise

@@ -7,6 +7,10 @@ while allowing for nuanced evaluations. A sophisticated network should:
 - Understand that material isn't everything (compensation exists)
 """
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -21,15 +25,18 @@ from ..core import (
     encode_for_network,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
 
-def test_wdl_head(network, results: TestResults):
+
+def test_wdl_head(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the WDL head correctly evaluates material imbalances with nuance."""
     print(header("TEST: WDL Head Material Evaluation"))
 
     # Test positions with BOTH White to move (WTM) and Black to move (BTM)
     # Value is always from CURRENT PLAYER's perspective
     # "tolerance" indicates how much nuance is acceptable (higher = more flexible)
-    test_positions = [
+    test_positions: list[dict[str, Any]] = [
         # === Starting positions (should be neutral) ===
         {
             "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
@@ -113,34 +120,40 @@ def test_wdl_head(network, results: TestResults):
     )
     print("  " + "-" * 65)
 
-    passed = 0.0  # Progressive score
-    correct = 0  # Full correct count
-    total_error = 0
-    wrong_sign = 0
-    values = []
+    passed: float = 0.0  # Progressive score
+    correct: int = 0  # Full correct count
+    total_error: float = 0
+    wrong_sign: int = 0
+    values: list[float] = []
 
     # Track WTM vs BTM separately for bias detection
-    wtm_correct = 0
-    wtm_total = 0
-    wtm_wrong_sign = 0
-    btm_correct = 0
-    btm_total = 0
-    btm_wrong_sign = 0
+    wtm_correct: int = 0
+    wtm_total: int = 0
+    wtm_wrong_sign: int = 0
+    btm_correct: int = 0
+    btm_total: int = 0
+    btm_wrong_sign: int = 0
 
     for test in test_positions:
-        fen = test["fen"]
-        desc = test["desc"]
-        material = test["material"]
-        tolerance = test["tolerance"]
+        fen: str = test["fen"]
+        desc: str = test["desc"]
+        material: int = test["material"]
+        tolerance: str = test["tolerance"]
 
-        is_wtm = "(WTM)" in desc
-        is_btm = "(BTM)" in desc
-        board = chess.Board(fen)
-        state = encode_for_network(board, network)
+        is_wtm: bool = "(WTM)" in desc
+        is_btm: bool = "(BTM)" in desc
+        board: chess.Board = chess.Board(fen)
+        state: np.ndarray = encode_for_network(board, network)
+        _: np.ndarray
+        value: float
         _, value = network.predict_single(state)
         values.append(value)
 
         # Determine score based on tolerance level
+        position_score: float
+        status: str
+        is_correct: bool
+        has_wrong_sign: bool
         position_score, status, is_correct, has_wrong_sign = _evaluate_position(
             value, material, tolerance
         )
@@ -167,10 +180,11 @@ def test_wdl_head(network, results: TestResults):
             if has_wrong_sign:
                 btm_wrong_sign += 1
 
-        error = abs(value - material / 10)
+        error: float = abs(value - material / 10)
         total_error += error
 
         # Color the status
+        status_colored: str
         if position_score >= 0.85:
             status_colored = ok(status)
         elif position_score >= 0.5:
@@ -179,7 +193,8 @@ def test_wdl_head(network, results: TestResults):
             status_colored = fail(status)
 
         print(
-            f"  {desc:<20} {material:>+10} {value:>+10.4f} {status_colored:>12} {position_score*100:>7.0f}%"
+            f"  {desc:<20} {material:>+10} {value:>+10.4f}"
+            f" {status_colored:>12} {position_score*100:>7.0f}%"
         )
 
         results.add_diagnostic("material_eval", f"{desc}_value", float(value))
@@ -189,9 +204,9 @@ def test_wdl_head(network, results: TestResults):
     print("  " + "-" * 65)
 
     # Statistical analysis
-    avg_error = total_error / len(test_positions)
-    value_std = np.std(values)
-    value_range = max(values) - min(values)
+    avg_error: float = total_error / len(test_positions)
+    value_std: float = float(np.std(values))
+    value_range: float = max(values) - min(values)
 
     print(subheader("WDL Head Statistics"))
     print(f"  Correct evaluations:   {correct}/{len(test_positions)}")
@@ -202,27 +217,32 @@ def test_wdl_head(network, results: TestResults):
 
     # WTM vs BTM breakdown
     print(subheader("Perspective Bias Analysis"))
+    wtm_pct: float
+    btm_pct: float
     if wtm_total > 0:
         wtm_pct = wtm_correct * 100 / wtm_total
         print(
-            f"  White to Move (WTM):   {wtm_correct}/{wtm_total} ({wtm_pct:.0f}%) correct, {wtm_wrong_sign} wrong sign"
+            f"  White to Move (WTM):   {wtm_correct}/{wtm_total}"
+            f" ({wtm_pct:.0f}%) correct, {wtm_wrong_sign} wrong sign"
         )
     if btm_total > 0:
         btm_pct = btm_correct * 100 / btm_total
         print(
-            f"  Black to Move (BTM):   {btm_correct}/{btm_total} ({btm_pct:.0f}%) correct, {btm_wrong_sign} wrong sign"
+            f"  Black to Move (BTM):   {btm_correct}/{btm_total}"
+            f" ({btm_pct:.0f}%) correct, {btm_wrong_sign} wrong sign"
         )
 
     # Detect perspective bias
     if wtm_total > 0 and btm_total > 0:
-        wtm_accuracy = wtm_correct / wtm_total
-        btm_accuracy = btm_correct / btm_total
-        bias = wtm_accuracy - btm_accuracy
+        wtm_accuracy: float = wtm_correct / wtm_total
+        btm_accuracy: float = btm_correct / btm_total
+        bias: float = wtm_accuracy - btm_accuracy
 
         if abs(bias) > 0.3:
             if bias > 0:
                 print(
-                    f"\n  {Colors.RED}[!] PERSPECTIVE BIAS DETECTED: WTM {bias*100:+.0f}% better than BTM{Colors.ENDC}"
+                    f"\n  {Colors.RED}[!] PERSPECTIVE BIAS DETECTED:"
+                    f" WTM {bias*100:+.0f}% better than BTM{Colors.ENDC}"
                 )
                 results.add_issue(
                     "HIGH",
@@ -232,7 +252,8 @@ def test_wdl_head(network, results: TestResults):
                 )
             else:
                 print(
-                    f"\n  {Colors.RED}[!] PERSPECTIVE BIAS DETECTED: BTM {-bias*100:+.0f}% better than WTM{Colors.ENDC}"
+                    f"\n  {Colors.RED}[!] PERSPECTIVE BIAS DETECTED:"
+                    f" BTM {-bias*100:+.0f}% better than WTM{Colors.ENDC}"
                 )
                 results.add_issue(
                     "HIGH",
@@ -277,8 +298,8 @@ def test_wdl_head(network, results: TestResults):
             "Cannot distinguish between winning and losing positions",
         )
 
-    score = passed / len(test_positions)  # Progressive score
-    test_passed = score >= 0.6  # More lenient threshold
+    score: float = passed / len(test_positions)  # Progressive score
+    test_passed: bool = score >= 0.6  # More lenient threshold
 
     print(subheader("Scoring Philosophy"))
     print(f"  {Colors.CYAN}This test accepts nuanced evaluations:{Colors.ENDC}")
@@ -299,14 +320,16 @@ def test_wdl_head(network, results: TestResults):
     return score
 
 
-def _evaluate_position(value, material, tolerance):
+def _evaluate_position(
+    value: float, material: int, tolerance: str
+) -> tuple[float, str, bool, bool]:
     """
     Evaluate a single position with tolerance for nuance.
 
     Returns: (score, status_string, is_correct, has_wrong_sign)
     """
-    is_correct = False
-    has_wrong_sign = False
+    is_correct: bool = False
+    has_wrong_sign: bool = False
 
     if tolerance == "strict":
         # Equal position - should be close to 0

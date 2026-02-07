@@ -8,6 +8,7 @@ Useful for testing, benchmarking, or starting fresh training.
 import argparse
 import os
 import sys
+from typing import Literal
 
 # Ensure proper imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +18,7 @@ from src.alphazero.spatial_encoding import get_num_planes
 from src.config import Config
 
 
-def main():
+def main() -> Literal[1] | Literal[0]:
     parser = argparse.ArgumentParser(
         description="Initialize a new neural network with random weights",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -66,14 +67,14 @@ Examples:
         help="Overwrite existing file without asking",
     )
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Load config if specified
     if args.config and os.path.exists(args.config):
         print(f"Loading config from {args.config}...")
-        config = Config.load(args.config)
-        num_filters = config.network.num_filters
-        num_blocks = config.network.num_residual_blocks
+        config: Config = Config.load(args.config)
+        num_filters: int = config.network.num_filters
+        num_blocks: int = config.network.num_residual_blocks
     else:
         # Use defaults
         num_filters = 128
@@ -86,11 +87,11 @@ Examples:
         num_blocks = args.blocks
 
     # Fixed 72 input planes (48 history + 12 metadata + 8 semantic + 4 tactical)
-    num_input_planes = get_num_planes()
+    num_input_planes: int = get_num_planes()
 
     # Check if output file exists
     if os.path.exists(args.output) and not args.force:
-        response = input(f"File {args.output} already exists. Overwrite? [y/N] ")
+        response: str = input(f"File {args.output} already exists. Overwrite? [y/N] ")
         if response.lower() not in ("y", "yes"):
             print("Aborted.")
             return 1
@@ -118,8 +119,10 @@ Examples:
     )
 
     # Count parameters
-    total_params = sum(p.numel() for p in network.parameters())
-    trainable_params = sum(p.numel() for p in network.parameters() if p.requires_grad)
+    total_params: int = sum(p.numel() for p in network.parameters())
+    trainable_params: int = sum(
+        p.numel() for p in network.parameters() if p.requires_grad
+    )
 
     print(f"  Total parameters:      {total_params:,}")
     print(f"  Trainable parameters:  {trainable_params:,}")
@@ -137,7 +140,7 @@ Examples:
 
     # Verify file was created
     if os.path.exists(args.output):
-        file_size = os.path.getsize(args.output) / 1024 / 1024
+        file_size: float = os.path.getsize(args.output) / 1024 / 1024
         print(f"  File size: {file_size:.1f} MB")
         print()
         print("Done! Network initialized with random weights.")

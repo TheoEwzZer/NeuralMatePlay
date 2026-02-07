@@ -1,5 +1,9 @@
 """Test: Prophylaxis (Preventive Moves)."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions for prophylactic thinking
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === PREVENT OPPONENT'S PLAN ===
     {
         "name": "Prevent Ng5",
@@ -88,30 +95,32 @@ TEST_POSITIONS = [
 ]
 
 
-def test_prophylaxis(network, results: TestResults):
+def test_prophylaxis(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network plays prophylactic moves."""
     print(header("TEST: Prophylaxis"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        top_5 = np.argsort(policy)[::-1][:5]
-        expected_set = set(test["expected_moves"])
-        prophylaxis_type = test["prophylaxis_type"]
+        top_5: np.ndarray = np.argsort(policy)[::-1][:5]
+        expected_set: set[str] = set(test["expected_moves"])
+        prophylaxis_type: str = test["prophylaxis_type"]
 
         print(f"\n  Type: {prophylaxis_type}")
         print(f"  Value: {value:+.4f}")
         print(f"  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Prophylactic?':<15}")
         print("  " + "-" * 45)
 
-        found_at = None
+        found_at: int | None = None
         for i, idx in enumerate(top_5):
             move = decode_move(idx, board)
             prob = policy[idx]
@@ -142,7 +151,7 @@ def test_prophylaxis(network, results: TestResults):
         results.add_diagnostic("prophylaxis", f"{test['name']}_rank", found_at)
         results.add_diagnostic("prophylaxis", f"{test['name']}_type", prophylaxis_type)
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("prophylaxis", "total_tested", total)
     results.add_diagnostic("prophylaxis", "correct", passed)
     results.add("Prophylaxis", score >= 0.3, score, 1.0)

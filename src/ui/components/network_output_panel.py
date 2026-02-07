@@ -42,7 +42,7 @@ class NetworkOutputPanel(tk.Frame):
         self.pack_propagate(False)
 
         self._value = 0.0
-        self._policy_moves: List[Tuple[str, float]] = []
+        self._policy_moves: list[Tuple[str, float]] = []
         self._show_overlay = False
 
         self._create_widgets(bg)
@@ -113,7 +113,7 @@ class NetworkOutputPanel(tk.Frame):
         self._policy_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         # Create policy labels (5 moves)
-        self._policy_labels: List[Tuple[tk.Label, tk.Canvas]] = []
+        self._policy_labels: list[Tuple[tk.Label, tk.Canvas]] = []
         for _ in range(5):
             row = tk.Frame(self._policy_frame, bg=bg)
             row.pack(fill=tk.X, pady=1)
@@ -332,7 +332,7 @@ class NetworkOutputPanel(tk.Frame):
             pct_label.configure(text="")
             bar_canvas.delete("all")
 
-    def get_policy_overlay_data(self) -> List[Tuple[str, float]]:
+    def get_policy_overlay_data(self) -> list[tuple[str, float]]:
         """
         Get policy data for board overlay visualization.
 

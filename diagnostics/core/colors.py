@@ -15,7 +15,7 @@ class Colors:
     DIM = "\033[2m"
 
     @classmethod
-    def disable(cls):
+    def disable(cls) -> None:
         """Disable colors for non-TTY outputs."""
         cls.HEADER = ""
         cls.BLUE = ""
@@ -28,30 +28,30 @@ class Colors:
         cls.DIM = ""
 
 
-def ok(msg):
+def ok(msg: str) -> str:
     return f"{Colors.GREEN}[OK]{Colors.ENDC} {msg}"
 
 
-def fail(msg):
+def fail(msg: str) -> str:
     return f"{Colors.RED}[FAIL]{Colors.ENDC} {msg}"
 
 
-def warn(msg):
+def warn(msg: str) -> str:
     return f"{Colors.YELLOW}[WARN]{Colors.ENDC} {msg}"
 
 
-def info(msg):
+def info(msg: str) -> str:
     return f"{Colors.BLUE}[INFO]{Colors.ENDC} {msg}"
 
 
-def header(title):
-    line = "=" * 70
+def header(title: str) -> str:
+    line: str = "=" * 70
     return f"\n{Colors.BOLD}{Colors.CYAN}{line}\n{title}\n{line}{Colors.ENDC}"
 
 
-def subheader(title):
+def subheader(title: str) -> str:
     return f"\n{Colors.BOLD}{title}{Colors.ENDC}\n" + "-" * 50
 
 
-def dim(msg):
+def dim(msg: str) -> str:
     return f"{Colors.DIM}{msg}{Colors.ENDC}"

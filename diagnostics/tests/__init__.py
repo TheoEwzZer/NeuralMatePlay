@@ -2,9 +2,14 @@
 
 import sys
 import os
+from collections.abc import Callable
+
+from ..core.results import TestResults
 
 # Ensure proper imports
-_root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_root_dir: str = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 if _root_dir not in sys.path:
     sys.path.insert(0, _root_dir)
 if os.path.join(_root_dir, "src") not in sys.path:
@@ -40,7 +45,7 @@ from .history_comparison import test_history_comparison
 # All tests in order with importance weights
 # Weights reflect importance for WINNING games (not just understanding positions)
 # Higher weight = more critical for actual game outcomes
-ALL_TESTS = [
+ALL_TESTS: list[tuple[Callable[..., float], str, float]] = [
     # === CRITICAL TACTICAL TESTS (x2-x3) ===
     # These directly determine wins/losses
     (test_free_capture, "Free Capture", 2.0),  # Must not miss free material

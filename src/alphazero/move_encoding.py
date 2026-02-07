@@ -12,11 +12,11 @@ Move types (73 per square):
 
 import chess
 import numpy as np
-from typing import Optional
+from typing import Any, Literal, Optional
 
 
 # Directions for queen-like moves (dx, dy)
-QUEEN_DIRECTIONS = [
+QUEEN_DIRECTIONS: list[tuple[int, int]] = [
     (0, 1),  # North
     (1, 1),  # NE
     (1, 0),  # East
@@ -28,7 +28,7 @@ QUEEN_DIRECTIONS = [
 ]
 
 # Knight move offsets (dx, dy)
-KNIGHT_MOVES = [
+KNIGHT_MOVES: list[tuple[int, int]] = [
     (1, 2),
     (2, 1),
     (2, -1),
@@ -40,22 +40,23 @@ KNIGHT_MOVES = [
 ]
 
 # Underpromotion pieces (queen promotion is encoded as regular move)
-UNDERPROMOTION_PIECES = [chess.KNIGHT, chess.BISHOP, chess.ROOK]
+UNDERPROMOTION_PIECES: list[int] = [chess.KNIGHT, chess.BISHOP, chess.ROOK]
 
 # Underpromotion directions: -1 (left capture), 0 (straight), 1 (right capture)
-UNDERPROMOTION_DIRECTIONS = [-1, 0, 1]
+UNDERPROMOTION_DIRECTIONS: list[int] = [-1, 0, 1]
 
 # Move encoding size: 64 squares × 73 move types
-NUM_MOVE_TYPES = 56 + 8 + 9  # queen moves + knight moves + underpromotions
-MOVE_ENCODING_SIZE = 64 * NUM_MOVE_TYPES  # 4672
+# queen moves + knight moves + underpromotions
+NUM_MOVE_TYPES = 56 + 8 + 9
+MOVE_ENCODING_SIZE = 64 * NUM_MOVE_TYPES
 
 # Precomputed lookup tables (initialized lazily)
-_move_to_index: dict[tuple, int] = {}
-_index_to_move: dict[int, tuple] = {}
+_move_to_index: dict[tuple[int, int, int | None], int] = {}
+_index_to_move: dict[int, tuple[int, int, int | None]] = {}
 _initialized = False
 
 
-def _init_lookup_tables():
+def _init_lookup_tables() -> None:
     """Initialize the move encoding lookup tables."""
     global _move_to_index, _index_to_move, _initialized
 
@@ -63,28 +64,30 @@ def _init_lookup_tables():
         return
 
     for from_sq in range(64):
-        from_file = from_sq % 8
-        from_rank = from_sq // 8
+        from_file: int = from_sq % 8
+        from_rank: int = from_sq // 8
 
-        base_idx = from_sq * NUM_MOVE_TYPES
-        move_type = 0
+        base_idx: int = from_sq * NUM_MOVE_TYPES
 
         # Queen-like moves: 8 directions × 7 distances
         for direction_idx, (dx, dy) in enumerate(QUEEN_DIRECTIONS):
             for distance in range(1, 8):
-                to_file = from_file + dx * distance
-                to_rank = from_rank + dy * distance
+                to_file: int = from_file + dx * distance
+                to_rank: int = from_rank + dy * distance
 
                 if 0 <= to_file < 8 and 0 <= to_rank < 8:
-                    to_sq = to_rank * 8 + to_file
-                    idx = base_idx + direction_idx * 7 + (distance - 1)
+                    to_sq: int = to_rank * 8 + to_file
+                    idx: int = base_idx + direction_idx * 7 + (distance - 1)
 
                     # Store for both directions
-                    key = (from_sq, to_sq, None)  # None = no underpromotion
+                    # None = no underpromotion
+                    key: tuple[int, int, int | None] = (
+                        from_sq,
+                        to_sq,
+                        None,
+                    )
                     _move_to_index[key] = idx
                     _index_to_move[idx] = key
-
-                move_type += 1
 
         # Knight moves
         for knight_idx, (dx, dy) in enumerate(KNIGHT_MOVES):
@@ -100,11 +103,13 @@ def _init_lookup_tables():
                 _index_to_move[idx] = key
 
         # Underpromotions (only from 7th rank for white / 2nd rank for black)
-        if from_rank == 6:  # White pawn on 7th rank
+        # White pawn on 7th rank
+        if from_rank == 6:
             for promo_idx, promo_piece in enumerate(UNDERPROMOTION_PIECES):
                 for dir_idx, dx in enumerate(UNDERPROMOTION_DIRECTIONS):
                     to_file = from_file + dx
-                    to_rank = 7  # Promotion rank for white
+                    # Promotion rank for white
+                    to_rank = 7
 
                     if 0 <= to_file < 8:
                         to_sq = to_rank * 8 + to_file
@@ -114,11 +119,13 @@ def _init_lookup_tables():
                         _move_to_index[key] = idx
                         _index_to_move[idx] = key
 
-        if from_rank == 1:  # Black pawn on 2nd rank
+        # Black pawn on 2nd rank
+        if from_rank == 1:
             for promo_idx, promo_piece in enumerate(UNDERPROMOTION_PIECES):
                 for dir_idx, dx in enumerate(UNDERPROMOTION_DIRECTIONS):
                     to_file = from_file + dx
-                    to_rank = 0  # Promotion rank for black
+                    # Promotion rank for black
+                    to_rank = 0
 
                     if 0 <= to_file < 8:
                         to_sq = to_rank * 8 + to_file
@@ -151,7 +158,11 @@ def encode_move(move: chess.Move) -> Optional[int]:
     if move.promotion is not None and move.promotion != chess.QUEEN:
         promo = move.promotion
 
-    key = (from_sq, to_sq, promo)
+    key: tuple[chess.Square, chess.Square, chess.PieceType | None] = (
+        from_sq,
+        to_sq,
+        promo,
+    )
 
     # Direct lookup
     if key in _move_to_index:
@@ -164,15 +175,15 @@ def encode_move(move: chess.Move) -> Optional[int]:
             return _move_to_index[key]
 
     # Fallback: compute directly for edge cases
-    from_file = from_sq % 8
-    from_rank = from_sq // 8
-    to_file = to_sq % 8
-    to_rank = to_sq // 8
+    from_file: int = from_sq % 8
+    from_rank: int = from_sq // 8
+    to_file: int = to_sq % 8
+    to_rank: int = to_sq // 8
 
-    dx = to_file - from_file
-    dy = to_rank - from_rank
+    dx: int = to_file - from_file
+    dy: int = to_rank - from_rank
 
-    base_idx = from_sq * NUM_MOVE_TYPES
+    base_idx: int = from_sq * NUM_MOVE_TYPES
 
     # Check if knight move
     if (abs(dx), abs(dy)) in [(1, 2), (2, 1)]:
@@ -184,15 +195,15 @@ def encode_move(move: chess.Move) -> Optional[int]:
     if dx == 0 or dy == 0 or abs(dx) == abs(dy):
         # Normalize direction
         if dx != 0:
-            norm_dx = dx // abs(dx)
+            norm_dx: int = dx // abs(dx)
         else:
             norm_dx = 0
         if dy != 0:
-            norm_dy = dy // abs(dy)
+            norm_dy: int = dy // abs(dy)
         else:
             norm_dy = 0
 
-        distance = max(abs(dx), abs(dy))
+        distance: int = max(abs(dx), abs(dy))
 
         for dir_idx, (ddx, ddy) in enumerate(QUEEN_DIRECTIONS):
             if norm_dx == ddx and norm_dy == ddy:
@@ -216,8 +227,8 @@ def encode_move_from_perspective(move: chess.Move, flip: bool = False) -> Option
         return encode_move(move)
 
     # Flip squares vertically
-    from_sq = chess.square_mirror(move.from_square)
-    to_sq = chess.square_mirror(move.to_square)
+    from_sq: chess.Square = chess.square_mirror(move.from_square)
+    to_sq: chess.Square = chess.square_mirror(move.to_square)
 
     flipped_move = chess.Move(from_sq, to_sq, promotion=move.promotion)
     return encode_move(flipped_move)
@@ -249,7 +260,7 @@ def decode_move(index: int, board: chess.Board) -> Optional[chess.Move]:
         move = chess.Move(from_sq, to_sq, promotion=promo)
     else:
         # Check if this is actually a pawn promotion (needs queen)
-        piece = board.piece_at(from_sq)
+        piece: chess.Piece | None = board.piece_at(from_sq)
         if piece and piece.piece_type == chess.PAWN:
             to_rank = to_sq // 8
             if to_rank == 7 or to_rank == 0:
@@ -267,7 +278,7 @@ def decode_move(index: int, board: chess.Board) -> Optional[chess.Move]:
 
 
 def decode_move_from_perspective(
-    index: int, board: chess.Board, flip: bool = False
+    index: int | np.intp, board: chess.Board, flip: bool = False
 ) -> Optional[chess.Move]:
     """
     Decode a policy index, optionally flipping from black's perspective.
@@ -282,6 +293,8 @@ def decode_move_from_perspective(
     """
     _init_lookup_tables()
 
+    index = int(index)
+
     if index < 0 or index >= MOVE_ENCODING_SIZE:
         return None
 
@@ -291,15 +304,15 @@ def decode_move_from_perspective(
     from_sq, to_sq, promo = _index_to_move[index]
 
     if flip:
-        from_sq = chess.square_mirror(from_sq)
-        to_sq = chess.square_mirror(to_sq)
+        from_sq: chess.Square = chess.square_mirror(from_sq)
+        to_sq: chess.Square = chess.square_mirror(to_sq)
 
     # Create move
-    piece = board.piece_at(from_sq)
+    piece: chess.Piece | None = board.piece_at(from_sq)
     if promo is not None:
         move = chess.Move(from_sq, to_sq, promotion=promo)
     elif piece and piece.piece_type == chess.PAWN:
-        to_rank = to_sq // 8
+        to_rank: int = to_sq // 8
         if to_rank == 7 or to_rank == 0:
             move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
         else:
@@ -331,7 +344,7 @@ def flip_policy(policy: np.ndarray) -> np.ndarray:
     """
     _init_lookup_tables()
 
-    flipped = np.zeros_like(policy)
+    flipped: np.ndarray = np.zeros_like(policy)
 
     # Only iterate over non-zero elements (much faster than enumerate over all 4672)
     nonzero_indices = np.nonzero(policy)[0]
@@ -343,12 +356,12 @@ def flip_policy(policy: np.ndarray) -> np.ndarray:
         from_sq, to_sq, promo = _index_to_move[idx]
 
         # Flip squares
-        flipped_from = chess.square_mirror(from_sq)
-        flipped_to = chess.square_mirror(to_sq)
+        flipped_from: chess.Square = chess.square_mirror(from_sq)
+        flipped_to: chess.Square = chess.square_mirror(to_sq)
 
-        key = (flipped_from, flipped_to, promo)
+        key: tuple[int, int, int | None] = (flipped_from, flipped_to, promo)
         if key in _move_to_index:
-            flipped_idx = _move_to_index[key]
+            flipped_idx: int = _move_to_index[key]
             flipped[flipped_idx] = policy[idx]
 
     return flipped

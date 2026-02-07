@@ -9,25 +9,31 @@ Orchestrates:
 """
 
 import os
+from pathlib import Path
 import time
-from dataclasses import dataclass, field
-from typing import Optional, Callable
+from typing import Any, Callable
 
+from matplotlib.pylab import Generator
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from torch.amp import autocast, GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 import chess
 
 from .network import DualHeadNetwork
 from .mcts import MCTS
-from .arena import Arena, NetworkPlayer, RandomPlayer, ArenaStats
+from .arena import Arena, ArenaStats
 from .replay_buffer import ReplayBuffer
 from .checkpoint_manager import CheckpointManager
 from .move_encoding import encode_move_from_perspective, MOVE_ENCODING_SIZE
-from .spatial_encoding import PositionHistory, DEFAULT_HISTORY_LENGTH
+from .spatial_encoding import PositionHistory
 from .device import get_device, supports_mixed_precision
+
+try:
+    from config import TrainingConfig  # type: ignore[import-not-found]
+except ImportError:
+    from src.config import TrainingConfig
 
 
 def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
@@ -43,58 +49,11 @@ def values_to_wdl_targets(values: torch.Tensor) -> torch.Tensor:
         0 = win, 1 = draw, 2 = loss
     """
     # Convert: 1.0 -> 0, 0.0 -> 1, -1.0 -> 2
-    wdl_targets = torch.round(1.0 - values).long()
+    wdl_targets: torch.Tensor = torch.round(1.0 - values).long()
     return torch.clamp(wdl_targets, min=0, max=2)
 
 
-@dataclass
-class TrainingConfig:
-    """Configuration for AlphaZero training."""
-
-    # Self-play settings
-    games_per_iteration: int = 100
-    num_simulations: int = 100
-    mcts_batch_size: int = 8  # Batch size for MCTS GPU inference
-    max_moves: int = 200
-
-    # Training settings
-    epochs_per_iteration: int = 3
-    batch_size: int = 256
-    learning_rate: float = 0.01
-    lr_decay: float = 0.95
-    min_learning_rate: float = 1e-5
-    weight_decay: float = 1e-4
-
-    # Replay buffer
-    buffer_size: int = 500000
-    min_buffer_size: int = 5000
-    recent_weight: float = 0.8
-
-    # Arena evaluation
-    arena_interval: int = 5  # Evaluate every N iterations
-    arena_games: int = 20
-    arena_simulations: int = 100
-    win_threshold: float = 0.55  # Win rate to replace best model
-    veto_threshold: float = 0.35  # Min score vs old/pretrained to avoid veto
-    pretrained_path: Optional[str] = (
-        None  # Path to pretrained model for arena comparison
-    )
-
-    # Checkpointing
-    checkpoint_path: str = "checkpoints"
-    checkpoint_interval: int = 1
-
-    # MCTS settings
-    temperature_moves: int = 30  # Use temperature=1 for first N moves
-    dirichlet_alpha: float = 0.3
-    dirichlet_epsilon: float = 0.25
-    c_puct: float = 1.5  # Exploration constant (higher = more exploration)
-
-    # History
-    history_length: int = DEFAULT_HISTORY_LENGTH
-
-
-class AlphaZeroTrainer:
+class AlphaZeroTrainer(object):
     """
     AlphaZero training loop.
 
@@ -104,8 +63,8 @@ class AlphaZeroTrainer:
     def __init__(
         self,
         network: DualHeadNetwork,
-        config: Optional[TrainingConfig] = None,
-    ):
+        config: TrainingConfig | None = None,
+    ) -> None:
         """
         Initialize trainer.
 
@@ -113,7 +72,7 @@ class AlphaZeroTrainer:
             network: Neural network to train.
             config: Training configuration.
         """
-        self.network = network
+        self.network: DualHeadNetwork = network
         self.config = config or TrainingConfig()
 
         # Create components
@@ -138,31 +97,41 @@ class AlphaZeroTrainer:
 
         # Mixed precision
         self._use_amp = supports_mixed_precision()
-        self._scaler = GradScaler("cuda") if self._use_amp else None
+        self._scaler: GradScaler | None = GradScaler("cuda") if self._use_amp else None
 
         self._rng = np.random.default_rng(42)
 
         # Tracking
         self._iteration = 0
-        self._best_network_path: Optional[str] = None
-        self._best_network: Optional[DualHeadNetwork] = None
+        self._best_network_path: str | None = None
+        self._best_network: DualHeadNetwork | None = None
         self._best_iteration: int = 0
-        self._old_checkpoints: list = []  # List of (iteration, path) tuples
-        self._last_training_stats: Optional[dict] = None  # For checkpoint saving
+        # List of (iteration, path) tuples
+        self._old_checkpoints: list = []
+        # For checkpoint saving
+        self._last_training_stats: dict[str, Any] | None = None
         # Adaptive KL tracking
-        self._last_avg_kl: float = 0.0  # Track KL for adaptive weight
-        self._current_kl_weight: float = 0.1  # Current adaptive KL weight
+        # Track KL for adaptive weight
+        self._last_avg_kl: float = 0.0
+        # Current adaptive KL weight
+        self._current_kl_weight: float = 0.1
         # Veto recovery tracking
-        self._veto_recovery_remaining: int = 0  # Iterations remaining with boosted mix
-        self._original_pretrain_mix: float = 0.0  # Original mix ratio before boost
-        self._kl_warning_count: int = 0  # Consecutive KL warnings
+        # Iterations remaining with boosted mix
+        self._veto_recovery_remaining: int = 0
+        # Original mix ratio before boost
+        self._original_pretrain_mix: float = 0.0
+        # Consecutive KL warnings
+        self._kl_warning_count: int = 0
         # Veto escalation tracking (prevents infinite rollback loops)
-        self._consecutive_vetoes: int = 0  # Counter of consecutive vetoes
-        self._exploration_ratio: float = 0.0  # Ratio of games using current network
-        self._exploration_remaining: int = 0  # Iterations of forced exploration
+        # Counter of consecutive vetoes
+        self._consecutive_vetoes: int = 0
+        # Ratio of games using current network
+        self._exploration_ratio: float = 0.0
+        # Iterations of forced exploration
+        self._exploration_remaining: int = 0
 
         # Load pretrained model for arena comparison
-        self._pretrained_network: Optional[DualHeadNetwork] = None
+        self._pretrained_network: DualHeadNetwork | None = None
         if self.config.pretrained_path and os.path.exists(self.config.pretrained_path):
             try:
                 self._pretrained_network = DualHeadNetwork.load(
@@ -184,19 +153,23 @@ class AlphaZeroTrainer:
         )
 
         # Data mixing: load pretrain data if configured
-        self._pretrain_states: Optional[np.ndarray] = None
-        self._pretrain_policy_indices: Optional[np.ndarray] = None
-        self._pretrain_values: Optional[np.ndarray] = None
-        self._pretrain_mix_ratio = getattr(self.config, "pretrain_mix_ratio", 0.0)
+        self._pretrain_states: np.ndarray | None = None
+        self._pretrain_policy_indices: np.ndarray | None = None
+        self._pretrain_values: np.ndarray | None = None
+        self._pretrain_mix_ratio: Any | float = getattr(
+            self.config, "pretrain_mix_ratio", 0.0
+        )
 
         if self._pretrain_mix_ratio > 0:
-            chunks_dir = getattr(self.config, "pretrain_chunks_dir", "data/chunks")
+            chunks_dir: Any | str = getattr(
+                self.config, "pretrain_chunks_dir", "data/chunks"
+            )
             self._load_pretrain_data(chunks_dir)
 
     def train_iteration(
         self,
-        callback: Optional[Callable[[dict], None]] = None,
-    ) -> dict:
+        callback: Callable[[dict], None] | None = None,
+    ) -> dict[str, Any]:
         """
         Run one training iteration.
 
@@ -214,7 +187,7 @@ class AlphaZeroTrainer:
         self._iteration += 1
 
         # Reseed RNG based on iteration (reproducible + works with resume)
-        self._rng = np.random.default_rng(self._iteration)
+        self._rng: Generator = np.random.default_rng(self._iteration)
 
         # Check if veto recovery period is over
         self._check_veto_recovery()
@@ -244,8 +217,10 @@ class AlphaZeroTrainer:
 
             # Early warning: check KL divergence thresholds
             avg_kl = training_stats.get("avg_kl_loss", 0)
-            kl_warning = getattr(self.config, "kl_warning_threshold", 0.20)
-            kl_critical = getattr(self.config, "kl_critical_threshold", 0.30)
+            kl_warning: Any | float = getattr(self.config, "kl_warning_threshold", 0.20)
+            kl_critical: Any | float = getattr(
+                self.config, "kl_critical_threshold", 0.30
+            )
 
             if avg_kl > kl_critical:
                 # Critical: force arena evaluation
@@ -272,7 +247,8 @@ class AlphaZeroTrainer:
                                 "phase": "kl_warning",
                                 "kl_loss": avg_kl,
                                 "threshold": kl_warning,
-                                "message": f"KL elevated - boosted pretrain mix {old_mix:.0%} -> {self._pretrain_mix_ratio:.0%}",
+                                "message": f"KL elevated - boosted pretrain mix "
+                                f"{old_mix:.0%} -> {self._pretrain_mix_ratio:.0%}",
                             }
                         )
                 elif callback:
@@ -302,7 +278,7 @@ class AlphaZeroTrainer:
             if callback:
                 callback({"phase": "arena_start", "iteration": self._iteration})
 
-            arena_stats = self._run_arena(callback)
+            arena_stats: ArenaStats = self._run_arena(callback)
             stats["arena_stats"] = arena_stats
 
         # Checkpoint (only if training actually happened)
@@ -336,8 +312,8 @@ class AlphaZeroTrainer:
 
     def _run_self_play(
         self,
-        callback: Optional[Callable[[dict], None]] = None,
-    ) -> dict:
+        callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         """Generate self-play games."""
         stats = {
             "games_played": 0,
@@ -423,20 +399,20 @@ class AlphaZeroTrainer:
     def _play_self_play_game(
         self,
         game_idx: int,
-        callback: Optional[Callable[[dict], None]] = None,
-    ) -> dict:
+        callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         """Play a single self-play game."""
-        board = chess.Board()
-        history = PositionHistory(self.config.history_length)
+        board: chess.Board = chess.Board()
+        history: PositionHistory = PositionHistory(self.config.history_length)
         history.push(board)
 
         # Use best network for self-play if available (prevents buffer pollution)
         # Exploration mode: use current network for some games after repeated vetoes
-        use_best = getattr(self.config, "use_best_for_selfplay", True)
+        use_best: bool = getattr(self.config, "use_best_for_selfplay", True)
 
         if self._exploration_ratio > 0 and self._rng.random() < self._exploration_ratio:
             # Exploration: use current network to generate diverse data
-            selfplay_network = self.network
+            selfplay_network: DualHeadNetwork = self.network
         elif use_best and self._best_network is not None:
             selfplay_network = self._best_network
         else:
@@ -452,9 +428,9 @@ class AlphaZeroTrainer:
             history_length=self.config.history_length,
         )
 
-        states = []
-        policies = []
-        move_count = 0
+        states: list[np.ndarray] = []
+        policies: list[np.ndarray] = []
+        move_count: int = 0
 
         while not board.is_game_over() and move_count < self.config.max_moves:
             # Set temperature based on move count
@@ -469,38 +445,38 @@ class AlphaZeroTrainer:
 
             # Run MCTS with real history
             # history.get_boards() returns [current, T-1, T-2, ...], we want [T-1, T-2, ...]
-            history_boards = history.get_boards()[1:]
+            history_boards: list[chess.Board] = history.get_boards()[1:]
             policy = mcts.search(board, add_noise=True, history_boards=history_boards)
             policies.append(policy)
 
             # Select move by sampling from policy (uses temperature for exploration)
-            legal_moves = list(board.legal_moves)
+            legal_moves: list[chess.Move] = list(board.legal_moves)
             if not legal_moves:
                 break
 
             # Get move probabilities for legal moves
-            flip = board.turn == chess.BLACK
-            move_probs = []
+            flip: bool = board.turn == chess.BLACK
+            move_probs_list: list[float] = []
             for m in legal_moves:
-                idx = encode_move_from_perspective(m, flip)
+                idx: int | None = encode_move_from_perspective(m, flip)
                 if idx is not None and idx < len(policy):
-                    move_probs.append(policy[idx])
+                    move_probs_list.append(policy[idx])
                 else:
-                    move_probs.append(0.0)
+                    move_probs_list.append(0.0)
 
-            move_probs = np.array(move_probs)
+            move_probs = np.array(move_probs_list)
             if move_probs.sum() > 0:
                 move_probs = move_probs / move_probs.sum()
-                move_idx = self._rng.choice(len(legal_moves), p=move_probs)
-                move = legal_moves[move_idx]
+                move_idx: int = self._rng.choice(len(legal_moves), p=move_probs)
+                move: chess.Move = legal_moves[move_idx]
             else:
                 # Fallback to random if no valid probabilities
-                move = self._rng.choice(legal_moves)
+                move = legal_moves[int(self._rng.integers(len(legal_moves)))]
 
             # Get move info before pushing
-            move_san = board.san(move)
-            from_square = move.from_square
-            to_square = move.to_square
+            move_san: str = board.san(move)
+            from_square: int = move.from_square
+            to_square: int = move.to_square
 
             board.push(move)
             history.push(board)
@@ -519,7 +495,8 @@ class AlphaZeroTrainer:
                 callback(
                     {
                         "phase": "board_update",
-                        "fen": board.fen().split(" ")[0],  # Just piece positions
+                        # Just piece positions
+                        "fen": board.fen().split(" ")[0],
                         "last_move": ((from_row, from_col), (to_row, to_col)),
                         "move_san": move_san,
                         "move_number": move_count,
@@ -528,6 +505,8 @@ class AlphaZeroTrainer:
                 )
 
         # Determine winner
+        winner: chess.Color | None
+        termination: str
         if board.is_checkmate():
             winner = chess.BLACK if board.turn == chess.WHITE else chess.WHITE
             termination = "checkmate"
@@ -542,14 +521,17 @@ class AlphaZeroTrainer:
             termination = "other"
 
         if callback:
+            if winner == chess.WHITE:
+                winner_str = "white"
+            elif winner == chess.BLACK:
+                winner_str = "black"
+            else:
+                winner_str = "draw"
+
             callback(
                 {
                     "phase": "game_end",
-                    "winner": (
-                        "white"
-                        if winner == chess.WHITE
-                        else "black" if winner == chess.BLACK else "draw"
-                    ),
+                    "winner": winner_str,
                     "termination": termination,
                     "moves": move_count,
                     "game": game_idx,
@@ -566,11 +548,11 @@ class AlphaZeroTrainer:
 
     def _train_on_buffer(
         self,
-        callback: Optional[Callable[[dict], None]] = None,
-    ) -> dict:
+        callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         """Train network on replay buffer."""
         self.network.train()
-        device = get_device()
+        device: torch.device = get_device()
 
         # Enable TF32 for faster matmul on Ampere+ GPUs (RTX 30xx, 40xx)
         torch.set_float32_matmul_precision("high")
@@ -586,7 +568,7 @@ class AlphaZeroTrainer:
 
         for epoch in range(self.config.epochs_per_iteration):
             # Number of batches per epoch
-            num_samples = min(len(self._buffer), 10000)
+            num_samples: int = min(len(self._buffer), 10000)
             batches_per_epoch = num_samples // self.config.batch_size
 
             # Skip if not enough samples for even one batch
@@ -616,13 +598,13 @@ class AlphaZeroTrainer:
                     )
 
                 # Convert to tensors (non_blocking for async CPU->GPU transfer)
-                states_t = (
+                states_t: torch.Tensor = (
                     torch.from_numpy(states).float().to(device, non_blocking=True)
                 )
-                policies_t = (
+                policies_t: torch.Tensor = (
                     torch.from_numpy(policies).float().to(device, non_blocking=True)
                 )
-                values_t = (
+                values_t: torch.Tensor = (
                     torch.from_numpy(values).float().to(device, non_blocking=True)
                 )
 
@@ -632,23 +614,28 @@ class AlphaZeroTrainer:
                 if self._use_amp:
                     with autocast(device_type="cuda"):
                         pred_policies, _, wdl_logits = self.network(states_t)
-                        policy_loss = self._policy_loss(pred_policies, policies_t)
-                        value_loss = self._value_loss(wdl_logits, values_t)
-                        loss = policy_loss + value_loss
+                        policy_loss: torch.Tensor = self._policy_loss(
+                            pred_policies, policies_t
+                        )
+                        value_loss: torch.Tensor = self._value_loss(
+                            wdl_logits, values_t
+                        )
+                        loss: torch.Tensor = policy_loss + value_loss
 
                         # Add KL divergence loss to prevent catastrophic forgetting
-                        kl_loss = None
+                        kl_loss: torch.Tensor | None = None
                         if self._pretrained_network is not None:
                             kl_loss = self._kl_divergence_loss(pred_policies, states_t)
                             loss = loss + self._current_kl_weight * kl_loss
 
+                    assert self._scaler is not None
                     self._scaler.scale(loss).backward()
                     # Note: unscale_() is only needed if doing gradient clipping
                     # step() handles unscaling automatically
                     self._scaler.step(self._optimizer)
                     self._scaler.update()
                 else:
-                    pred_policies, pred_values, wdl_logits = self.network(states_t)
+                    pred_policies, _, wdl_logits = self.network(states_t)
                     policy_loss = self._policy_loss(pred_policies, policies_t)
                     value_loss = self._value_loss(wdl_logits, values_t)
                     loss = policy_loss + value_loss
@@ -699,7 +686,7 @@ class AlphaZeroTrainer:
         self.network.eval()
 
         # Update KL tracking for next iteration's adaptive weight
-        avg_kl_loss = total_kl_loss / max(1, num_batches)
+        avg_kl_loss: float = total_kl_loss / max(1, num_batches)
         self._last_avg_kl = avg_kl_loss
 
         return {
@@ -711,16 +698,16 @@ class AlphaZeroTrainer:
             "kl_weight": self._current_kl_weight,
         }
 
+    @staticmethod
     def _policy_loss(
-        self,
         pred: torch.Tensor,
         target: torch.Tensor,
     ) -> torch.Tensor:
         """Cross-entropy loss for policy."""
         return torch.nn.functional.cross_entropy(pred, target)
 
+    @staticmethod
     def _value_loss(
-        self,
         wdl_logits: torch.Tensor,
         target: torch.Tensor,
     ) -> torch.Tensor:
@@ -734,7 +721,7 @@ class AlphaZeroTrainer:
         Returns:
             Loss tensor
         """
-        wdl_targets = values_to_wdl_targets(target)
+        wdl_targets: torch.Tensor = values_to_wdl_targets(target)
         return torch.nn.functional.cross_entropy(wdl_logits, wdl_targets)
 
     def _kl_divergence_loss(
@@ -753,9 +740,13 @@ class AlphaZeroTrainer:
 
         with torch.no_grad():
             pretrain_policy, _, _ = self._pretrained_network(states)
-            pretrain_policy = torch.nn.functional.softmax(pretrain_policy, dim=-1)
+            pretrain_policy: torch.Tensor = torch.nn.functional.softmax(
+                pretrain_policy, dim=-1
+            )
 
-        current_log_policy = torch.nn.functional.log_softmax(current_policy, dim=-1)
+        current_log_policy: torch.Tensor = torch.nn.functional.log_softmax(
+            current_policy, dim=-1
+        )
         return torch.nn.functional.kl_div(
             current_log_policy, pretrain_policy, reduction="batchmean"
         )
@@ -767,27 +758,31 @@ class AlphaZeroTrainer:
         When KL is below target, use base weight. When above, scale up
         progressively to create a "soft wall" against drift.
         """
-        kl_target = getattr(self.config, "kl_target", 0.15)
-        kl_weight_base = getattr(self.config, "kl_weight_base", 0.1)
-        kl_weight_max = getattr(self.config, "kl_weight_max", 2.0)
-        kl_adaptive_factor = getattr(self.config, "kl_adaptive_factor", 10.0)
+        kl_target: Any | float = getattr(self.config, "kl_target", 0.15)
+        kl_weight_base: Any | float = getattr(self.config, "kl_weight_base", 0.1)
+        kl_weight_max: Any | float = getattr(self.config, "kl_weight_max", 2.0)
+        kl_adaptive_factor: Any | float = getattr(
+            self.config, "kl_adaptive_factor", 10.0
+        )
 
         # If using old-style single kl_loss_weight, fall back to it
-        if self.config.kl_loss_weight > 0 and kl_weight_base == 0.1:
+        if self.config.kl_loss_weight > 0 and np.isclose(
+            kl_weight_base, 0.1, rtol=1e-09, atol=1e-09
+        ):
             kl_weight_base = self.config.kl_loss_weight
 
         if current_kl <= kl_target:
             return kl_weight_base
 
         # Scale weight progressively above target
-        excess_ratio = (current_kl - kl_target) / kl_target
+        excess_ratio: Any | float = (current_kl - kl_target) / kl_target
         scaled_weight = kl_weight_base * (1 + kl_adaptive_factor * excess_ratio)
         return min(scaled_weight, kl_weight_max)
 
     def _handle_veto(
         self,
-        stats,
-        callback: Optional[Callable[[dict], None]] = None,
+        stats: ArenaStats,
+        callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """
         Handle veto by rolling back to best known state with escalation.
@@ -809,7 +804,7 @@ class AlphaZeroTrainer:
         # Increment consecutive veto counter
         self._consecutive_vetoes += 1
 
-        recovery_actions = []
+        recovery_actions: list[str] = []
 
         # 1. Restore network weights from best_network
         if self._best_network is not None:
@@ -819,9 +814,9 @@ class AlphaZeroTrainer:
             )
 
         # 2. Purge recent buffer entries (they came from degraded model)
-        purge_ratio = getattr(self.config, "veto_buffer_purge_ratio", 0.25)
+        purge_ratio: Any | float = getattr(self.config, "veto_buffer_purge_ratio", 0.25)
         if purge_ratio > 0:
-            purged = self._buffer.purge_recent(purge_ratio)
+            purged: int | Any = self._buffer.purge_recent(purge_ratio)
             recovery_actions.append(
                 f"Purged {purged} buffer entries ({purge_ratio:.0%})"
             )
@@ -839,20 +834,26 @@ class AlphaZeroTrainer:
         recovery_actions.append("Reset optimizer state")
 
         # 4. Boost pretrain mix temporarily
-        veto_recovery_iters = getattr(self.config, "veto_recovery_iterations", 3)
+        veto_recovery_iters: Any | int = getattr(
+            self.config, "veto_recovery_iterations", 3
+        )
         if veto_recovery_iters > 0 and self._pretrain_mix_ratio > 0:
             self._veto_recovery_remaining = veto_recovery_iters
             self._original_pretrain_mix = self._pretrain_mix_ratio
             self._pretrain_mix_ratio = min(0.6, self._pretrain_mix_ratio + 0.2)
             recovery_actions.append(
-                f"Boosted pretrain mix: {self._original_pretrain_mix:.0%} -> {self._pretrain_mix_ratio:.0%} for {veto_recovery_iters} iterations"
+                f"Boosted pretrain mix: {self._original_pretrain_mix:.0%}"
+                f" -> {self._pretrain_mix_ratio:.0%}"
+                f" for {veto_recovery_iters} iterations"
             )
 
         # === ESCALATION LEVELS ===
 
         # Escalation level 2: Reduce learning rate after 2+ consecutive vetoes
         if self._consecutive_vetoes >= 2:
-            lr_factor = getattr(self.config, "veto_escalation_lr_factor", 0.5)
+            lr_factor: Any | float = getattr(
+                self.config, "veto_escalation_lr_factor", 0.5
+            )
             new_lr = max(self.config.min_learning_rate, current_lr * lr_factor)
             for pg in self._optimizer.param_groups:
                 pg["lr"] = new_lr
@@ -862,7 +863,9 @@ class AlphaZeroTrainer:
 
         # Escalation level 3: Enable exploration mode after 3+ consecutive vetoes
         if self._consecutive_vetoes >= 3:
-            exploration_ratio = getattr(self.config, "veto_exploration_ratio", 0.3)
+            exploration_ratio: Any | float = getattr(
+                self.config, "veto_exploration_ratio", 0.3
+            )
             self._exploration_ratio = exploration_ratio
             self._exploration_remaining = veto_recovery_iters
             recovery_actions.append(
@@ -871,9 +874,13 @@ class AlphaZeroTrainer:
 
         # Escalation level 4: Critical measures after 4+ consecutive vetoes
         if self._consecutive_vetoes >= 4:
-            critical_purge = getattr(self.config, "veto_critical_purge_ratio", 0.5)
+            critical_purge: Any | float = getattr(
+                self.config, "veto_critical_purge_ratio", 0.5
+            )
             # Additional purge (on top of normal purge)
-            extra_purged = self._buffer.purge_recent(critical_purge - purge_ratio)
+            extra_purged: int | Any = self._buffer.purge_recent(
+                critical_purge - purge_ratio
+            )
             # Force max pretrain mix
             self._pretrain_mix_ratio = 0.8
             recovery_actions.append(
@@ -923,23 +930,29 @@ class AlphaZeroTrainer:
             return
 
         # Store chunk paths for streaming
-        self._pretrain_chunk_paths = list(ChunkManager.iter_chunk_paths(chunks_dir))
+        self._pretrain_chunk_paths: list[str] = list(
+            ChunkManager.iter_chunk_paths(chunks_dir)
+        )
         if not self._pretrain_chunk_paths:
             print("Warning: No pretrain chunks found")
             return
 
-        self._pretrain_chunks_dir = chunks_dir
+        self._pretrain_chunks_dir: str = chunks_dir
         self._pretrain_batch_count = 0
-        self._pretrain_refresh_interval = 500  # Refresh chunks every N batches
+        # Refresh chunks every N batches
+        self._pretrain_refresh_interval = 500
 
         total_examples = metadata.get("total_examples", 0)
-        num_chunks = len(self._pretrain_chunk_paths)
+        num_chunks: int = len(self._pretrain_chunk_paths)
 
         # Load initial chunks (configurable, default 15 for ~300K positions)
-        max_chunks_in_memory = min(self.config.pretrain_chunks_loaded, num_chunks)
-        self._pretrain_loaded_chunk_indices = list(range(max_chunks_in_memory))
+        max_chunks_in_memory: int = min(self.config.pretrain_chunks_loaded, num_chunks)
+        self._pretrain_loaded_chunk_indices: list[int] = list(
+            range(max_chunks_in_memory)
+        )
         self._load_pretrain_chunks()
 
+        assert self._pretrain_states is not None
         print(f"Pretrain streaming: {total_examples:,} examples in {num_chunks} chunks")
         print(
             f"  Loaded {max_chunks_in_memory} chunks in memory ({len(self._pretrain_states):,} positions)"
@@ -984,11 +997,12 @@ class AlphaZeroTrainer:
 
         num_chunks = len(self._pretrain_chunk_paths)
         if num_chunks <= len(self._pretrain_loaded_chunk_indices):
-            return  # All chunks already loaded
+            # All chunks already loaded
+            return
 
         # Replace oldest chunk with a new random one
-        loaded_set = set(self._pretrain_loaded_chunk_indices)
-        available = [i for i in range(num_chunks) if i not in loaded_set]
+        loaded_set: set[int] = set(self._pretrain_loaded_chunk_indices)
+        available: list[int] = [i for i in range(num_chunks) if i not in loaded_set]
 
         if available:
             # Remove oldest, add new random chunk
@@ -997,7 +1011,9 @@ class AlphaZeroTrainer:
             self._pretrain_loaded_chunk_indices.append(new_chunk)
             self._load_pretrain_chunks()
 
-    def _sample_mixed_batch(self, batch_size: int) -> tuple:
+    def _sample_mixed_batch(
+        self, batch_size: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Sample a mixed batch from self-play buffer and pretrain data.
 
@@ -1009,19 +1025,21 @@ class AlphaZeroTrainer:
 
         # Calculate split
         pretrain_count = int(batch_size * self._pretrain_mix_ratio)
-        selfplay_count = batch_size - pretrain_count
+        selfplay_count: int = batch_size - pretrain_count
 
         # Sample from self-play buffer
         sp_states, sp_policies, sp_values = self._buffer.sample(selfplay_count)
 
         # Sample from pretrain data
         if pretrain_count > 0 and self._pretrain_states is not None:
-            indices = self._rng.choice(
+            assert self._pretrain_values is not None
+            assert self._pretrain_policy_indices is not None
+            indices: np.ndarray = self._rng.choice(
                 len(self._pretrain_states), pretrain_count, replace=False
             )
 
-            pt_states = self._pretrain_states[indices]
-            pt_values = self._pretrain_values[indices]
+            pt_states: np.ndarray = self._pretrain_states[indices]
+            pt_values: np.ndarray = self._pretrain_values[indices]
 
             # Convert policy indices to policy vectors with label smoothing
             # This makes pretrain targets softer, closer to MCTS distributions
@@ -1035,12 +1053,12 @@ class AlphaZeroTrainer:
                     pt_policies[i, idx] = 1.0 - label_smoothing + smoothing_value
 
             # Concatenate
-            states = np.concatenate([sp_states, pt_states], axis=0)
-            policies = np.concatenate([sp_policies, pt_policies], axis=0)
-            values = np.concatenate([sp_values, pt_values], axis=0)
+            states: np.ndarray = np.concatenate([sp_states, pt_states], axis=0)
+            policies: np.ndarray = np.concatenate([sp_policies, pt_policies], axis=0)
+            values: np.ndarray = np.concatenate([sp_values, pt_values], axis=0)
 
             # Shuffle to mix the batches
-            shuffle_idx = self._rng.permutation(batch_size)
+            shuffle_idx: np.ndarray = self._rng.permutation(batch_size)
             states = states[shuffle_idx]
             policies = policies[shuffle_idx]
             values = values[shuffle_idx]
@@ -1051,11 +1069,11 @@ class AlphaZeroTrainer:
 
     def _run_arena(
         self,
-        callback: Optional[Callable[[dict], None]] = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> ArenaStats:
         """Run full arena evaluation against Random, Best, and Old models."""
         # Select an old model for anti-forgetting check (if available)
-        old_network = None
+        old_network: DualHeadNetwork | None = None
         old_iteration = None
         if self._old_checkpoints:
             old_iteration, old_path = self._select_old_checkpoint()
@@ -1066,7 +1084,7 @@ class AlphaZeroTrainer:
                     old_network = None
 
         # Run full evaluation
-        stats = self.arena.run_full_evaluation(
+        stats: ArenaStats = self.arena.run_full_evaluation(
             current_network=self.network,
             best_network=self._best_network,
             old_network=old_network,
@@ -1094,7 +1112,7 @@ class AlphaZeroTrainer:
             self._exploration_remaining = 0
 
             # Add current to old checkpoints list
-            checkpoint_path = (
+            checkpoint_path: Path = (
                 self._checkpoint_manager.checkpoint_dir
                 / f"iteration_{self._iteration}_network.pt"
             )
@@ -1105,6 +1123,65 @@ class AlphaZeroTrainer:
             self._handle_veto(stats, callback)
 
         if callback:
+            zero_stats = {"wins": 0, "losses": 0, "draws": 0, "score": 0, "avg_time": 0}
+
+            if stats.vs_random:
+                vs_random_dict = {
+                    "wins": stats.vs_random.wins,
+                    "losses": stats.vs_random.losses,
+                    "draws": stats.vs_random.draws,
+                    "score": stats.vs_random.score,
+                    "avg_time": stats.vs_random.avg_time,
+                }
+            else:
+                vs_random_dict = zero_stats
+
+            if stats.vs_mcts:
+                vs_mcts_dict = {
+                    "wins": stats.vs_mcts.wins,
+                    "losses": stats.vs_mcts.losses,
+                    "draws": stats.vs_mcts.draws,
+                    "score": stats.vs_mcts.score,
+                    "avg_time": stats.vs_mcts.avg_time,
+                }
+            else:
+                vs_mcts_dict = zero_stats
+
+            if stats.vs_best:
+                vs_best_dict: dict[str, Any] | None = {
+                    "wins": stats.vs_best.wins,
+                    "losses": stats.vs_best.losses,
+                    "draws": stats.vs_best.draws,
+                    "score": stats.vs_best.score,
+                    "from_iteration": stats.vs_best.from_iteration,
+                    "avg_time": stats.vs_best.avg_time,
+                }
+            else:
+                vs_best_dict = None
+
+            if stats.vs_old:
+                vs_old_dict: dict[str, Any] | None = {
+                    "wins": stats.vs_old.wins,
+                    "losses": stats.vs_old.losses,
+                    "draws": stats.vs_old.draws,
+                    "score": stats.vs_old.score,
+                    "from_iteration": stats.vs_old.from_iteration,
+                    "avg_time": stats.vs_old.avg_time,
+                }
+            else:
+                vs_old_dict = None
+
+            if stats.vs_pretrained:
+                vs_pretrained_dict: dict[str, Any] | None = {
+                    "wins": stats.vs_pretrained.wins,
+                    "losses": stats.vs_pretrained.losses,
+                    "draws": stats.vs_pretrained.draws,
+                    "score": stats.vs_pretrained.score,
+                    "avg_time": stats.vs_pretrained.avg_time,
+                }
+            else:
+                vs_pretrained_dict = None
+
             callback(
                 {
                     "phase": "arena_complete",
@@ -1113,77 +1190,17 @@ class AlphaZeroTrainer:
                     "is_new_best": stats.is_new_best,
                     "veto": stats.veto,
                     "veto_reason": stats.veto_reason,
-                    "vs_random": {
-                        "wins": stats.vs_random.wins if stats.vs_random else 0,
-                        "losses": stats.vs_random.losses if stats.vs_random else 0,
-                        "draws": stats.vs_random.draws if stats.vs_random else 0,
-                        "score": stats.vs_random.score if stats.vs_random else 0,
-                        "avg_time": stats.vs_random.avg_time if stats.vs_random else 0,
-                    },
-                    "vs_mcts": {
-                        "wins": stats.vs_mcts.wins if stats.vs_mcts else 0,
-                        "losses": stats.vs_mcts.losses if stats.vs_mcts else 0,
-                        "draws": stats.vs_mcts.draws if stats.vs_mcts else 0,
-                        "score": stats.vs_mcts.score if stats.vs_mcts else 0,
-                        "avg_time": stats.vs_mcts.avg_time if stats.vs_mcts else 0,
-                    },
-                    "vs_best": (
-                        {
-                            "wins": stats.vs_best.wins if stats.vs_best else 0,
-                            "losses": stats.vs_best.losses if stats.vs_best else 0,
-                            "draws": stats.vs_best.draws if stats.vs_best else 0,
-                            "score": stats.vs_best.score if stats.vs_best else 0,
-                            "from_iteration": (
-                                stats.vs_best.from_iteration if stats.vs_best else None
-                            ),
-                            "avg_time": stats.vs_best.avg_time if stats.vs_best else 0,
-                        }
-                        if stats.vs_best
-                        else None
-                    ),
-                    "vs_old": (
-                        {
-                            "wins": stats.vs_old.wins if stats.vs_old else 0,
-                            "losses": stats.vs_old.losses if stats.vs_old else 0,
-                            "draws": stats.vs_old.draws if stats.vs_old else 0,
-                            "score": stats.vs_old.score if stats.vs_old else 0,
-                            "from_iteration": (
-                                stats.vs_old.from_iteration if stats.vs_old else None
-                            ),
-                            "avg_time": stats.vs_old.avg_time if stats.vs_old else 0,
-                        }
-                        if stats.vs_old
-                        else None
-                    ),
-                    "vs_pretrained": (
-                        {
-                            "wins": (
-                                stats.vs_pretrained.wins if stats.vs_pretrained else 0
-                            ),
-                            "losses": (
-                                stats.vs_pretrained.losses if stats.vs_pretrained else 0
-                            ),
-                            "draws": (
-                                stats.vs_pretrained.draws if stats.vs_pretrained else 0
-                            ),
-                            "score": (
-                                stats.vs_pretrained.score if stats.vs_pretrained else 0
-                            ),
-                            "avg_time": (
-                                stats.vs_pretrained.avg_time
-                                if stats.vs_pretrained
-                                else 0
-                            ),
-                        }
-                        if stats.vs_pretrained
-                        else None
-                    ),
+                    "vs_random": vs_random_dict,
+                    "vs_mcts": vs_mcts_dict,
+                    "vs_best": vs_best_dict,
+                    "vs_old": vs_old_dict,
+                    "vs_pretrained": vs_pretrained_dict,
                 }
             )
 
         return stats
 
-    def _select_old_checkpoint(self) -> tuple:
+    def _select_old_checkpoint(self) -> tuple[int | None, str | None]:
         """Select an old checkpoint for anti-forgetting check.
 
         70% chance: milestone (iter 5, 10, 25, 50, 100...)
@@ -1196,7 +1213,8 @@ class AlphaZeroTrainer:
 
         # Separate milestones and recent
         milestones = [(i, p) for i, p in self._old_checkpoints if i == 1 or i % 5 == 0]
-        recent = self._old_checkpoints[-5:]  # Last 5
+        # Last 5
+        recent = self._old_checkpoints[-5:]
 
         if rand.random() < 0.7 and milestones:
             return rand.choice(milestones)
@@ -1241,7 +1259,7 @@ class AlphaZeroTrainer:
             buffer=self._buffer if len(self._buffer) > 0 else None,
         )
 
-    def load_checkpoint(self, name: Optional[str] = None) -> bool:
+    def load_checkpoint(self, name: str | None = None) -> bool:
         """
         Load a training checkpoint.
 
@@ -1253,7 +1271,7 @@ class AlphaZeroTrainer:
         """
         # Get iteration number
         if name is None:
-            iteration = self._checkpoint_manager.get_latest_iteration()
+            iteration: int = self._checkpoint_manager.get_latest_iteration()
             if iteration == 0:
                 return False
         elif name.startswith("iteration_"):
@@ -1265,9 +1283,11 @@ class AlphaZeroTrainer:
             return False
 
         # Load using checkpoint manager
-        checkpoint = self._checkpoint_manager.load_training_checkpoint(
-            iteration=iteration,
-            load_buffer=True,
+        checkpoint: dict[str, Any] | None = (
+            self._checkpoint_manager.load_training_checkpoint(
+                iteration=iteration,
+                load_buffer=True,
+            )
         )
 
         if checkpoint is None:
@@ -1279,7 +1299,7 @@ class AlphaZeroTrainer:
 
         # Recreate optimizer with new network's parameters
         # This is critical: the old optimizer points to the old network's params
-        state = checkpoint.get("state")
+        state: Any | None = checkpoint.get("state")
         lr = self.config.learning_rate
         if state and "learning_rate" in state:
             lr = state["learning_rate"]
@@ -1295,15 +1315,17 @@ class AlphaZeroTrainer:
             try:
                 self._optimizer.load_state_dict(state["optimizer_state"])
             except Exception:
-                pass  # Optimizer state may not match
+                # Optimizer state may not match
+                pass
 
         # Note: Don't restore scaler state - it can cause issues after resume
         # The scaler will auto-adjust its scale factor during training
         if self._scaler:
-            self._scaler = GradScaler("cuda")  # Fresh scaler
+            # Fresh scaler
+            self._scaler = GradScaler("cuda")
 
         # Load buffer
-        buffer = checkpoint.get("buffer")
+        buffer: Any | None = checkpoint.get("buffer")
         if buffer is not None:
             self._buffer = buffer
 
@@ -1326,8 +1348,8 @@ class AlphaZeroTrainer:
     def train(
         self,
         num_iterations: int,
-        callback: Optional[Callable[[dict], None]] = None,
-    ) -> list[dict]:
+        callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Run multiple training iterations.
 
@@ -1338,10 +1360,10 @@ class AlphaZeroTrainer:
         Returns:
             List of iteration statistics.
         """
-        all_stats = []
+        all_stats: list[dict[str, Any]] = []
 
         for _ in range(num_iterations):
-            stats = self.train_iteration(callback)
+            stats: dict[str, Any] = self.train_iteration(callback)
             all_stats.append(stats)
 
         return all_stats

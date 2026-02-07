@@ -15,14 +15,15 @@ import json
 import os
 import argparse
 import time
-from typing import Optional, Tuple, List
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
-from torch.amp import autocast, GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 
 import sys
 
@@ -30,14 +31,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alphazero import DualHeadNetwork, get_device, supports_mixed_precision
 from alphazero.checkpoint_manager import CheckpointManager
-from config import Config, PretrainingConfig
+from config import Config, NetworkConfig, PretrainingConfig  # type: ignore[import-not-found]
 from .dataset import ChessPositionDataset
 from .chunk_manager import ChunkManager
 from .tactical_weighting import calculate_tactical_weight
 from .streaming_trainer import StreamingTrainer
 
 
-def expand_pgn_paths(paths: List[str]) -> List[str]:
+def expand_pgn_paths(paths: list[str]) -> list[str]:
     """
     Expand glob patterns and deduplicate PGN paths.
 
@@ -47,11 +48,11 @@ def expand_pgn_paths(paths: List[str]) -> List[str]:
     Returns:
         List of expanded, deduplicated file paths.
     """
-    expanded = []
+    expanded: list[str] = []
     for path in paths:
         if "*" in path or "?" in path:
             # Glob pattern - expand it
-            matches = sorted(glob.glob(path))
+            matches: list[str] = sorted(glob.glob(path))
             if not matches:
                 print(f"Warning: No files match pattern '{path}'")
             expanded.extend(matches)
@@ -66,10 +67,10 @@ def create_dataloaders(
     batch_size: int = 256,
     validation_split: float = 0.1,
     num_workers: int = 0,
-) -> Tuple[DataLoader, DataLoader]:
+) -> tuple[DataLoader, DataLoader]:
     """Create train and validation dataloaders."""
-    val_size = int(len(dataset) * validation_split)
-    train_size = len(dataset) - val_size
+    val_size: int = int(len(dataset) * validation_split)
+    train_size: int = len(dataset) - val_size
 
     train_dataset, val_dataset = random_split(
         dataset,
@@ -77,7 +78,7 @@ def create_dataloaders(
         generator=torch.Generator().manual_seed(42),
     )
 
-    train_loader = DataLoader(
+    train_loader: DataLoader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
@@ -85,7 +86,7 @@ def create_dataloaders(
         pin_memory=True,
     )
 
-    val_loader = DataLoader(
+    val_loader: DataLoader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
@@ -98,9 +99,9 @@ def create_dataloaders(
 
 def pretrain(
     cfg: PretrainingConfig,
-    network_cfg=None,
+    network_cfg: NetworkConfig | None = None,
     streaming: bool = False,
-    resume_from: Optional[str] = None,
+    resume_from: str | None = None,
 ) -> DualHeadNetwork:
     """
     Pretrain network on master games.
@@ -114,14 +115,14 @@ def pretrain(
     Returns:
         Trained DualHeadNetwork.
     """
-    device = get_device()
-    use_amp = supports_mixed_precision()
+    device: torch.device = get_device()
+    use_amp: bool = supports_mixed_precision()
 
     print(f"Device: {device}")
     print(f"Mixed precision: {use_amp}")
 
     # Get all PGN paths
-    pgn_paths = cfg.get_pgn_paths()
+    pgn_paths: list[str] = cfg.get_pgn_paths()
 
     # Print config
     print("\n[Configuration]")
@@ -138,21 +139,23 @@ def pretrain(
     print(f"  Streaming: {streaming}")
 
     # Check if we need to create or extend chunks
-    metadata = ChunkManager.load_metadata(cfg.chunks_dir)
-    processed_files = set(metadata.get("processed_files", [])) if metadata else set()
+    metadata: dict[str, Any] | None = ChunkManager.load_metadata(cfg.chunks_dir)
+    processed_files: set[str] = (
+        set(metadata.get("processed_files", [])) if metadata else set()
+    )
 
     # Check for partially processed file (resume support)
-    current_file = metadata.get("current_file") if metadata else None
-    current_file_games = metadata.get("current_file_games", 0) if metadata else 0
+    current_file: str | None = metadata.get("current_file") if metadata else None
+    current_file_games: int = metadata.get("current_file_games", 0) if metadata else 0
 
-    files_to_process = [p for p in pgn_paths if p not in processed_files]
+    files_to_process: list[str] = [p for p in pgn_paths if p not in processed_files]
 
     if files_to_process:
         from .pgn_processor import PGNProcessor
         from alphazero.spatial_encoding import PositionHistory
         from alphazero.move_encoding import encode_move_from_perspective
 
-        resume_mode = metadata is not None
+        resume_mode: bool = metadata is not None
         if resume_mode:
             print(f"\nExtending chunks with {len(files_to_process)} new file(s)...")
             print(f"  Already processed: {len(processed_files)} file(s)")
@@ -161,25 +164,26 @@ def pretrain(
                 f"\nNo chunks found, creating from {len(files_to_process)} PGN file(s)..."
             )
 
-        chunk_manager = ChunkManager(
+        chunk_manager: ChunkManager = ChunkManager(
             cfg.chunks_dir, chunk_size=cfg.chunk_size, verbose=True, resume=resume_mode
         )
-        total_position_count = 0
-        total_games_count = chunk_manager._games_processed
+        total_position_count: int = 0
+        total_games_count: int = chunk_manager._games_processed
 
         # Track cumulative totals for display (including pre-resume data)
-        initial_positions = chunk_manager._total_examples  # Positions from previous run
+        initial_positions: int = chunk_manager._total_examples
         # Include games from both completed files AND partial file
-        initial_games = chunk_manager._games_processed + current_file_games
+        initial_games: int = chunk_manager._games_processed + current_file_games
 
         for file_idx, pgn_file in enumerate(files_to_process):
             # Check if we're resuming this specific file
-            skip_games = 0
-            file_start_time = time.time()
+            skip_games: int = 0
+            file_start_time: float = time.time()
             if current_file and pgn_file == current_file:
                 skip_games = current_file_games
                 print(
-                    f"\n[File {file_idx + 1}/{len(files_to_process)}] Resuming: {pgn_file} (skipping {skip_games} games)"
+                    f"\n[File {file_idx + 1}/{len(files_to_process)}]"
+                    f" Resuming: {pgn_file} (skipping {skip_games} games)"
                 )
             else:
                 print(
@@ -188,28 +192,29 @@ def pretrain(
 
             # Suppress chunk_manager verbose output during progress
             chunk_manager.verbose = False
-            last_chunk_count = chunk_manager._chunk_count
+            last_chunk_count: int = chunk_manager._chunk_count
 
             # Track current file for crash recovery
             chunk_manager.set_current_file(pgn_file, skip_games)
 
-            processor = PGNProcessor(
+            processor: PGNProcessor = PGNProcessor(
                 pgn_file,
                 min_elo=cfg.min_elo,
-                max_games=cfg.max_games,  # Per-file limit
+                # Per-file limit
+                max_games=cfg.max_games,
                 skip_first_n_moves=cfg.skip_first_n_moves,
                 skip_first_n_games=skip_games,
             )
 
-            history = PositionHistory(3)  # Default history length
-            prev_game_idx = -1
-            file_position_count = 0
+            history: PositionHistory = PositionHistory(3)
+            prev_game_idx: int = -1
+            file_position_count: int = 0
 
             for board, move, outcome in processor.process_all():
                 if cfg.max_positions and total_position_count >= cfg.max_positions:
                     break
 
-                game_idx = processor.games_processed
+                game_idx: int = processor.games_processed
 
                 if game_idx != prev_game_idx:
                     history.clear()
@@ -220,42 +225,44 @@ def pretrain(
                 history.push(board)
                 state = history.encode(from_perspective=True)
 
-                flip = board.turn == False
-                move_idx = encode_move_from_perspective(move, flip)
+                flip: bool = board.turn == False
+                move_idx: int | None = encode_move_from_perspective(move, flip)
                 if move_idx is None:
                     continue
 
-                value = outcome if board.turn else -outcome
+                value: float = outcome if board.turn else -outcome
 
                 # Calculate tactical weight for this position
-                weight = calculate_tactical_weight(board, move)
+                weight: float = calculate_tactical_weight(board, move)
 
                 chunk_manager.add_example(state, move_idx, value, weight=weight)
                 file_position_count += 1
                 total_position_count += 1
 
                 # Update progress on same line (every new chunk)
-                current_chunks = chunk_manager._chunk_count
+                current_chunks: int = chunk_manager._chunk_count
                 if current_chunks > last_chunk_count:
                     last_chunk_count = current_chunks
-                    file_elapsed = time.time() - file_start_time
-                    progress = processor.progress
-                    if progress > 0.001:  # At least 0.1% to estimate
-                        file_eta_seconds = (file_elapsed / progress) - file_elapsed
+                    file_elapsed: float = time.time() - file_start_time
+                    progress: float = processor.progress
+                    if progress > 0.001:
+                        file_eta_seconds: float = (
+                            file_elapsed / progress
+                        ) - file_elapsed
                         if file_eta_seconds > 3600:
-                            eta_str = f"{file_eta_seconds/3600:.1f}h"
+                            eta_str: str = f"{file_eta_seconds/3600:.1f}h"
                         elif file_eta_seconds > 60:
                             eta_str = f"{file_eta_seconds/60:.0f}m"
                         else:
                             eta_str = f"{file_eta_seconds:.0f}s"
                     else:
                         eta_str = "..."
-                    speed = (
+                    speed: float = (
                         file_position_count / file_elapsed if file_elapsed > 0 else 0
                     )
                     # Show cumulative totals
-                    cumul_pos = initial_positions + total_position_count
-                    cumul_games = (
+                    cumul_pos: int = initial_positions + total_position_count
+                    cumul_games: int = (
                         initial_games + total_games_count + processor.games_processed
                     )
                     print(
@@ -268,11 +275,12 @@ def pretrain(
             # Track this file as processed
             processed_files.add(pgn_file)
             total_games_count += processor.games_processed + skip_games
-            chunk_manager.clear_current_file()  # File fully processed
-            file_time = time.time() - file_start_time
-            final_chunks = chunk_manager._chunk_count
+            # File fully processed
+            chunk_manager.clear_current_file()
+            file_time: float = time.time() - file_start_time
+            final_chunks: int = chunk_manager._chunk_count
             if file_time > 60:
-                time_str = f"{file_time/60:.1f}m"
+                time_str: str = f"{file_time/60:.1f}m"
             else:
                 time_str = f"{file_time:.0f}s"
             # Print final summary with cumulative totals
@@ -301,7 +309,7 @@ def pretrain(
         print("\nChunk info:")
         print(f"  Chunks: {metadata['num_chunks']}")
         print(f"  Total positions: {metadata['total_examples']:,}")
-        games_processed = metadata.get("games_processed", 0)
+        games_processed: int = metadata.get("games_processed", 0)
         print(
             f"  Games processed: {games_processed:,}"
             if games_processed
@@ -309,7 +317,7 @@ def pretrain(
         )
 
         # Estimate memory for full load (72 planes per position)
-        mem_gb = metadata["total_examples"] * (72 * 8 * 8 * 4 + 6) / (1024**3)
+        mem_gb: float = metadata["total_examples"] * (72 * 8 * 8 * 4 + 6) / (1024**3)
         print(f"  Est. RAM needed: {mem_gb:.1f} GB")
 
         # Auto-enable streaming if too much data
@@ -319,7 +327,7 @@ def pretrain(
 
     # Create network
     if network_cfg:
-        network = DualHeadNetwork(
+        network: DualHeadNetwork = DualHeadNetwork(
             num_filters=network_cfg.num_filters,
             num_residual_blocks=network_cfg.num_residual_blocks,
         )
@@ -334,7 +342,7 @@ def pretrain(
         print(f"  Label smoothing: {cfg.label_smoothing}")
         print(f"  Prefetch workers: {cfg.prefetch_workers}")
         print(f"  Gradient accumulation steps: {cfg.gradient_accumulation_steps}")
-        trainer = StreamingTrainer(
+        trainer: StreamingTrainer = StreamingTrainer(
             network=network,
             chunks_dir=cfg.chunks_dir,
             batch_size=cfg.batch_size,
@@ -378,7 +386,7 @@ def pretrain(
 
     # Standard mode: load all into RAM
     print("\nLoading dataset into RAM...")
-    dataset = ChessPositionDataset(
+    dataset: ChessPositionDataset = ChessPositionDataset(
         cfg.pgn_path,
         chunks_dir=cfg.chunks_dir,
         min_elo=cfg.min_elo,
@@ -388,8 +396,8 @@ def pretrain(
         verbose=True,
     )
 
-    print(f"\nDataset statistics:")
-    stats = dataset.get_statistics()
+    print("\nDataset statistics:")
+    stats: dict[str, int | float] = dataset.get_statistics()
     for key, value in stats.items():
         print(f"  {key}: {value}")
 
@@ -404,39 +412,44 @@ def pretrain(
     network.to(device)
 
     # Optimizer and scheduler
-    optimizer = optim.AdamW(
+    optimizer: optim.AdamW = optim.AdamW(
         network.parameters(),
         lr=cfg.learning_rate,
-        weight_decay=5e-4,  # Increased for regularization
+        # Increased for regularization
+        weight_decay=5e-4,
     )
 
     # ReduceLROnPlateau - reduces LR when val loss stops improving
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=3,
-        min_lr=1e-6,
+    scheduler: optim.lr_scheduler.ReduceLROnPlateau = (
+        optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=0.5,
+            patience=3,
+            min_lr=1e-6,
+        )
     )
 
-    scaler = GradScaler("cuda") if use_amp else None
+    scaler: GradScaler | None = GradScaler("cuda") if use_amp else None
 
     # Checkpoint manager
-    checkpoint_dir = os.path.dirname(cfg.output_path) or "models"
-    checkpoint_name = os.path.splitext(os.path.basename(cfg.output_path))[0]
-    checkpoint_manager = CheckpointManager(checkpoint_dir, verbose=True)
+    checkpoint_dir: str = os.path.dirname(cfg.output_path) or "models"
+    checkpoint_name: str = os.path.splitext(os.path.basename(cfg.output_path))[0]
+    checkpoint_manager: CheckpointManager = CheckpointManager(
+        checkpoint_dir, verbose=True
+    )
 
     # Training state
-    best_val_loss = float("inf")
-    best_count = 0
-    epochs_without_improvement = 0
-    start_epoch = 0
+    best_val_loss: float = float("inf")
+    best_count: int = 0
+    epochs_without_improvement: int = 0
+    start_epoch: int = 0
 
     # Handle resume
     if resume_from is not None:
         # Parse resume_from
         if resume_from.lower() == "latest":
-            best_count_to_load = None
+            best_count_to_load: int | None = None
         else:
             try:
                 best_count_to_load = int(resume_from)
@@ -447,8 +460,10 @@ def pretrain(
                 resume_from = None
 
         if resume_from is not None:
-            checkpoint = checkpoint_manager.load_best_numbered_checkpoint(
-                checkpoint_name, best_count_to_load
+            checkpoint: dict[str, Any] | None = (
+                checkpoint_manager.load_best_numbered_checkpoint(
+                    checkpoint_name, best_count_to_load
+                )
             )
 
             if checkpoint is not None:
@@ -461,7 +476,8 @@ def pretrain(
                 optimizer = optim.AdamW(
                     network.parameters(),
                     lr=cfg.learning_rate,
-                    weight_decay=5e-4,  # Increased for regularization
+                    # Increased for regularization
+                    weight_decay=5e-4,
                 )
 
                 # Recreate scaler (don't load old state - causes "No inf checks" error)
@@ -484,7 +500,7 @@ def pretrain(
                         # Old checkpoint without epoch - estimate from best_count
                         start_epoch = best_count
                         print(
-                            f"(Old checkpoint format - estimating epoch from best_count)"
+                            "(Old checkpoint format - estimating epoch from best_count)"
                         )
 
                     # Restore scheduler state
@@ -506,24 +522,23 @@ def pretrain(
 
     print("\nStarting training...\n")
     for epoch in range(start_epoch, cfg.epochs):
-        epoch_start = time.time()
-        last_print_time = -1
+        epoch_start: float = time.time()
 
         # === Training phase ===
         print(f"Epoch {epoch+1}/{cfg.epochs} loading batches...", flush=True)
         network.train()
-        train_policy_loss = 0.0
-        train_value_loss = 0.0
-        train_batches = 0
-        total_batches = len(train_loader)
+        train_policy_loss: float = 0.0
+        train_value_loss: float = 0.0
+        train_batches: int = 0
+        total_batches: int = len(train_loader)
 
-        last_pct = -1
+        last_pct: int = -1
         for batch_idx, (states, policies, values) in enumerate(train_loader):
             # Update progress only when percentage changes
-            pct = (batch_idx + 1) * 100 // total_batches
+            pct: int = (batch_idx + 1) * 100 // total_batches
             if pct != last_pct:
                 last_pct = pct
-                elapsed = int(time.time() - epoch_start)
+                elapsed: int = int(time.time() - epoch_start)
                 print(
                     f"\rEpoch {epoch+1}/{cfg.epochs} ({elapsed}s) train {pct}%   ",
                     end="",
@@ -539,15 +554,19 @@ def pretrain(
             if use_amp:
                 with autocast(device_type="cuda"):
                     pred_policies, pred_values, _ = network(states)
-                    policy_loss = nn.functional.cross_entropy(
+                    policy_loss: torch.Tensor = nn.functional.cross_entropy(
                         pred_policies, policies, label_smoothing=0.1
                     )
-                    value_loss = nn.functional.mse_loss(pred_values, values)
+                    value_loss: torch.Tensor = nn.functional.mse_loss(
+                        pred_values, values
+                    )
 
                     # Compute entropy bonus for policy diversity
-                    log_probs = nn.functional.log_softmax(pred_policies, dim=-1)
-                    probs = nn.functional.softmax(pred_policies, dim=-1)
-                    entropy = -torch.sum(probs * log_probs, dim=-1).mean()
+                    log_probs: torch.Tensor = nn.functional.log_softmax(
+                        pred_policies, dim=-1
+                    )
+                    probs: torch.Tensor = nn.functional.softmax(pred_policies, dim=-1)
+                    entropy: torch.Tensor = -torch.sum(probs * log_probs, dim=-1).mean()
 
                     loss = (
                         policy_loss
@@ -555,6 +574,7 @@ def pretrain(
                         - cfg.entropy_coefficient * entropy
                     )
 
+                assert scaler is not None
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -585,11 +605,11 @@ def pretrain(
 
         # === Validation phase ===
         network.eval()
-        val_policy_loss = 0.0
-        val_value_loss = 0.0
-        val_batches = 0
+        val_policy_loss: float = 0.0
+        val_value_loss: float = 0.0
+        val_batches: int = 0
 
-        total_val_batches = len(val_loader)
+        total_val_batches: int = len(val_loader)
         last_pct = -1
         with torch.inference_mode():
             for batch_idx, (states, policies, values) in enumerate(val_loader):
@@ -619,20 +639,20 @@ def pretrain(
                 val_batches += 1
 
         # Calculate averages
-        avg_train_policy = train_policy_loss / max(1, train_batches)
-        avg_train_value = train_value_loss / max(1, train_batches)
-        avg_train_total = avg_train_policy + avg_train_value
-        avg_val_policy = val_policy_loss / max(1, val_batches)
-        avg_val_value = val_value_loss / max(1, val_batches)
-        avg_val_total = avg_val_policy + avg_val_value
+        avg_train_policy: float = train_policy_loss / max(1, train_batches)
+        avg_train_value: float = train_value_loss / max(1, train_batches)
+        avg_train_total: float = avg_train_policy + avg_train_value
+        avg_val_policy: float = val_policy_loss / max(1, val_batches)
+        avg_val_value: float = val_value_loss / max(1, val_batches)
+        avg_val_total: float = avg_val_policy + avg_val_value
 
         # Update scheduler with validation loss (ReduceLROnPlateau)
         scheduler.step(avg_val_total)
 
-        epoch_time = time.time() - epoch_start
+        epoch_time: float = time.time() - epoch_start
 
         # Get current LR
-        current_lr = optimizer.param_groups[0]["lr"]
+        current_lr: float = optimizer.param_groups[0]["lr"]
 
         # === Print epoch summary ===
         print(f"\rEpoch {epoch+1}/{cfg.epochs} ({epoch_time:.1f}s)")
@@ -669,12 +689,12 @@ def pretrain(
             )
 
             # Print checkpoint info
-            best_path = f"{checkpoint_dir}/{checkpoint_name}_best_network.pt"
+            best_path: str = f"{checkpoint_dir}/{checkpoint_name}_best_network.pt"
             print(f"Checkpoint saved: {best_path}")
 
-            is_milestone = best_count == 1 or best_count % 5 == 0
+            is_milestone: bool = best_count == 1 or best_count % 5 == 0
             if is_milestone:
-                milestone_path = (
+                milestone_path: str = (
                     f"{checkpoint_dir}/{checkpoint_name}_best_{best_count}_network.pt"
                 )
                 print(f"Checkpoint saved: {milestone_path}")
@@ -685,7 +705,8 @@ def pretrain(
             epochs_without_improvement += 1
             print(f"  No improvement ({epochs_without_improvement}/{cfg.patience})")
 
-        print()  # Blank line between epochs
+        # Blank line between epochs
+        print()
 
         # Early stopping
         if epochs_without_improvement >= cfg.patience:
@@ -813,29 +834,29 @@ Examples:
         help="Resume from checkpoint: 'latest' or epoch number",
     )
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Generate default config
     if args.generate_config:
-        from config import generate_default_config
+        from config import generate_default_config  # type: ignore[import-not-found]
 
         print(generate_default_config())
         return 0
 
     # Load config
     if args.config and os.path.exists(args.config):
-        config = Config.load(args.config)
+        config: Config = Config.load(args.config)
         print(f"Loaded config from: {args.config}")
     else:
         config = Config.default()
         if args.config and not os.path.exists(args.config):
             print(f"Config file not found: {args.config}, using defaults")
 
-    cfg = config.pretraining
+    cfg: PretrainingConfig = config.pretraining
 
     # Override with CLI arguments
     if args.pgn:
-        expanded = expand_pgn_paths(args.pgn)
+        expanded: list[str] = expand_pgn_paths(args.pgn)
         if len(expanded) == 1:
             cfg.pgn_path = expanded[0]
             cfg.pgn_paths = None
@@ -862,15 +883,15 @@ Examples:
         cfg.max_chunks = args.max_chunks
 
     # Validate required fields
-    pgn_paths = cfg.get_pgn_paths()
+    pgn_paths: list[str] = cfg.get_pgn_paths()
     if not pgn_paths:
         print("Error: No PGN files specified")
         print("Use --pgn to specify PGN file(s) or update config.json")
         return 1
 
-    missing = [p for p in pgn_paths if not os.path.exists(p)]
+    missing: list[str] = [p for p in pgn_paths if not os.path.exists(p)]
     if missing:
-        print(f"Error: PGN file(s) not found:")
+        print("Error: PGN file(s) not found:")
         for p in missing:
             print(f"  - {p}")
         return 1

@@ -8,9 +8,15 @@ Provides a canvas-based chess board with:
 - Coordinate labels
 """
 
+from __future__ import annotations
+
 import tkinter as tk
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 from pathlib import Path
+
+if TYPE_CHECKING:
+    from PIL.ImageTk import PhotoImage as _PILPhotoImage
 
 try:
     import chess
@@ -26,13 +32,14 @@ try:
 
     _USE_IMAGES = True
 except ImportError:
-    pass  # Fall back to Unicode
+    # Fall back to Unicode
+    pass
 
 # Piece assets directory
-_ASSETS_DIR = Path(__file__).parent.parent.parent / "assets" / "pieces"
+_ASSETS_DIR: Path = Path(__file__).parent.parent.parent / "assets" / "pieces"
 
 # Map chess symbols to asset filenames
-_SYMBOL_TO_FILE = {
+_SYMBOL_TO_FILE: dict[str, str] = {
     "K": "wk",
     "Q": "wq",
     "R": "wr",
@@ -56,9 +63,10 @@ class PromotionDialog(tk.Toplevel):
     def __init__(
         self,
         parent: tk.Widget,
-        color: bool,  # chess.WHITE or chess.BLACK
-        position: tuple[int, int] = None,
-    ):
+        # chess.WHITE or chess.BLACK
+        color: bool,
+        position: tuple[int, int] | None = None,
+    ) -> None:
         """
         Initialize promotion dialog.
 
@@ -70,11 +78,11 @@ class PromotionDialog(tk.Toplevel):
         super().__init__(parent)
 
         self.result: int | None = None
-        self.color = color
+        self.color: bool = color
 
         # Configure dialog
         self.title("Promotion")
-        self.transient(parent)
+        self.transient(parent.winfo_toplevel())
         self.resizable(False, False)
         self.configure(bg=COLORS["bg_primary"])
 
@@ -84,14 +92,16 @@ class PromotionDialog(tk.Toplevel):
         # Position dialog after creating buttons
         self.update_idletasks()
 
-        dialog_width = self.winfo_reqwidth()
-        dialog_height = self.winfo_reqheight()
+        dialog_width: int = self.winfo_reqwidth()
+        dialog_height: int = self.winfo_reqheight()
 
         if position:
+            x: int
+            y: int
             x, y = position
             # Ensure dialog stays on screen
-            screen_width = self.winfo_screenwidth()
-            screen_height = self.winfo_screenheight()
+            screen_width: int = self.winfo_screenwidth()
+            screen_height: int = self.winfo_screenheight()
             x = max(0, min(x, screen_width - dialog_width))
             y = max(0, min(y, screen_height - dialog_height))
             self.geometry(f"+{x}+{y}")
@@ -115,11 +125,11 @@ class PromotionDialog(tk.Toplevel):
 
     def _create_buttons(self) -> None:
         """Create piece selection buttons."""
-        frame = tk.Frame(self, bg=COLORS["bg_secondary"], padx=5, pady=5)
+        frame: tk.Frame = tk.Frame(self, bg=COLORS["bg_secondary"], padx=5, pady=5)
         frame.pack()
 
         # Title
-        title = tk.Label(
+        title: tk.Label = tk.Label(
             frame,
             text="Choose promotion:",
             font=FONTS["small"],
@@ -129,11 +139,11 @@ class PromotionDialog(tk.Toplevel):
         title.pack(pady=(5, 10))
 
         # Piece buttons container
-        btn_frame = tk.Frame(frame, bg=COLORS["bg_secondary"])
+        btn_frame: tk.Frame = tk.Frame(frame, bg=COLORS["bg_secondary"])
         btn_frame.pack()
 
         # Pieces to choose from
-        pieces = [
+        pieces: list[tuple[int, str, str]] = [
             (chess.QUEEN, "Q" if self.color else "q", "Queen"),
             (chess.ROOK, "R" if self.color else "r", "Rook"),
             (chess.BISHOP, "B" if self.color else "b", "Bishop"),
@@ -141,7 +151,7 @@ class PromotionDialog(tk.Toplevel):
         ]
 
         for piece_type, symbol, name in pieces:
-            btn = tk.Button(
+            btn: tk.Button = tk.Button(
                 btn_frame,
                 text=PIECE_UNICODE_ALT.get(symbol, symbol),
                 font=("Segoe UI Symbol", 28),
@@ -191,7 +201,7 @@ class ChessBoardWidget(tk.Canvas):
         size: int = 480,
         on_move: Callable[[chess.Move], None] | None = None,
         flipped: bool = False,
-    ):
+    ) -> None:
         """
         Initialize the chess board widget.
 
@@ -209,17 +219,17 @@ class ChessBoardWidget(tk.Canvas):
             highlightthickness=0,
         )
 
-        self.size = size
-        self.square_size = size // 8
-        self.on_move = on_move
-        self.flipped = flipped
+        self.size: int = size
+        self.square_size: int = size // 8
+        self.on_move: Callable[[chess.Move], None] | None = on_move
+        self.flipped: bool = flipped
 
         # Chess state
-        self.board = chess.Board()
+        self.board: chess.Board = chess.Board()
         self.selected_square: int | None = None
         self.legal_moves: set[chess.Move] = set()
         self.last_move: chess.Move | None = None
-        self.dragging = False
+        self.dragging: bool = False
         self.drag_piece: str | None = None
         self.drag_from: int | None = None
         self.drag_pos: tuple[int, int] | None = None
@@ -227,44 +237,50 @@ class ChessBoardWidget(tk.Canvas):
         self._drag_scale: float = 1.0
         self._drag_scale_start: float = 1.0
         self._drag_scale_target: float = 1.0
-        self._drag_scale_anim_id: int | None = None
+        self._drag_scale_anim_id: str | None = None
         self._drag_scale_start_time: float | None = None
         self._drag_scale_duration: float = 0.1
-        self._drag_scale_on_complete: callable = None
+        self._drag_scale_on_complete: Callable[[], None] | None = None
         # Drag position animation state
         self._drag_pos_start: tuple[int, int] | None = None
         self._drag_pos_target: tuple[int, int] | None = None
-        self._drag_pos_anim_id: int | None = None
+        self._drag_pos_anim_id: str | None = None
         self._drag_pos_start_time: float | None = None
         self._drag_pos_duration: float = 0.15
-        self._drag_pos_on_complete: callable = None
+        self._drag_pos_on_complete: Callable[[], None] | None = None
 
         # Interaction state
-        self.interactive = True
-        self.player_color: chess.Color | None = chess.WHITE  # None = both colors
+        self.interactive: bool = True
+        # None = both colors
+        self.player_color: chess.Color | None = chess.WHITE
 
         # Editor mode state
-        self.editor_mode = False
+        self.editor_mode: bool = False
         self.selected_piece_to_place: chess.Piece | None = None
         self.on_position_changed: Callable[[], None] | None = None
 
         # Animation state
-        self._animation_id: int | None = None
-        self._animating = False
-        self._anim_rook: dict | None = None  # For castling animation
+        self._animation_id: str | None = None
+        self._animating: bool = False
+        # For castling animation
+        self._anim_rook: dict[str, Any] | None = None
 
         # Piece image cache
         self._piece_images: dict[str, Any] = {}
-        self._piece_images_raw: dict[str, Any] = {}  # Raw PIL images for scaling
-        self._drag_scaled_image: Any = None  # Cached scaled image for drag
-        self._shrink_at_square: int | None = None  # Square where shrink animation plays
-        self._use_images = _USE_IMAGES
+        # Raw PIL images for scaling
+        self._piece_images_raw: dict[str, Any] = {}
+        # Square where shrink animation plays
+        self._drag_scaled_image: _PILPhotoImage | None = None
+        # Square where shrink animation plays
+        self._shrink_at_square: int | None = None
+        self._use_images: bool = _USE_IMAGES
 
         # Bind events
         self.bind("<Button-1>", self._on_click)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
-        self.bind("<Button-3>", self._on_right_click)  # Right-click for editor
+        # Right-click for editor
+        self.bind("<Button-3>", self._on_right_click)
 
         # Load piece images
         if self._use_images:
@@ -311,9 +327,11 @@ class ChessBoardWidget(tk.Canvas):
 
     def _square_to_coords(self, square: int) -> tuple[int, int]:
         """Convert square index to canvas coordinates."""
-        file = chess.square_file(square)
-        rank = chess.square_rank(square)
+        file: int = chess.square_file(square)
+        rank: int = chess.square_rank(square)
 
+        x: int
+        y: int
         if self.flipped:
             x = (7 - file) * self.square_size
             y = rank * self.square_size
@@ -325,8 +343,8 @@ class ChessBoardWidget(tk.Canvas):
 
     def _coords_to_square(self, x: int, y: int) -> int:
         """Convert canvas coordinates to square index."""
-        file = x // self.square_size
-        rank = 7 - (y // self.square_size)
+        file: int = x // self.square_size
+        rank: int = 7 - (y // self.square_size)
 
         if self.flipped:
             file = 7 - file
@@ -348,8 +366,8 @@ class ChessBoardWidget(tk.Canvas):
         # Draw pieces
         for square in chess.SQUARES:
             # Hide piece if dragging from that square or shrinking at that square
-            skip_drag = self.dragging and square == self.drag_from
-            skip_shrink = (
+            skip_drag: bool = self.dragging and square == self.drag_from
+            skip_shrink: bool = (
                 self._shrink_at_square is not None and square == self._shrink_at_square
             )
             if not (skip_drag or skip_shrink):
@@ -361,13 +379,15 @@ class ChessBoardWidget(tk.Canvas):
 
     def _draw_square(self, square: int) -> None:
         """Draw a single square with appropriate highlighting."""
+        x: int
+        y: int
         x, y = self._square_to_coords(square)
-        file = chess.square_file(square)
-        rank = chess.square_rank(square)
+        file: int = chess.square_file(square)
+        rank: int = chess.square_rank(square)
 
         # Base color
-        is_light = (file + rank) % 2 == 1
-        color = COLORS["light_square"] if is_light else COLORS["dark_square"]
+        is_light: bool = (file + rank) % 2 == 1
+        color: str = COLORS["light_square"] if is_light else COLORS["dark_square"]
 
         # Highlight selected square
         if square == self.selected_square:
@@ -382,7 +402,7 @@ class ChessBoardWidget(tk.Canvas):
 
         # Highlight king in check
         elif self.board.is_check():
-            king_square = self.board.king(self.board.turn)
+            king_square: int | None = self.board.king(self.board.turn)
             if square == king_square:
                 color = COLORS["check"]
 
@@ -398,12 +418,12 @@ class ChessBoardWidget(tk.Canvas):
         # Draw legal move indicators
         for move in self.legal_moves:
             if move.to_square == square:
-                cx = x + self.square_size // 2
-                cy = y + self.square_size // 2
+                cx: int = x + self.square_size // 2
+                cy: int = y + self.square_size // 2
 
                 if self.board.piece_at(square):
                     # Capture indicator (ring)
-                    r = self.square_size // 2 - 4
+                    r: int = self.square_size // 2 - 4
                     self.create_oval(
                         cx - r,
                         cy - r,
@@ -426,8 +446,10 @@ class ChessBoardWidget(tk.Canvas):
 
         # Draw drag hover indicator (inner border)
         if self.dragging and square == self._drag_hover_square:
-            border_width = 4
-            hover_color = COLORS["hover_light"] if is_light else COLORS["hover_dark"]
+            border_width: int = 4
+            hover_color: str = (
+                COLORS["hover_light"] if is_light else COLORS["hover_dark"]
+            )
             self.create_rectangle(
                 x + border_width / 2,
                 y + border_width / 2,
@@ -440,33 +462,40 @@ class ChessBoardWidget(tk.Canvas):
 
     def _load_piece_images(self) -> None:
         """Load and resize piece images from assets directory."""
+        from PIL import Image, ImageTk
+
         for symbol, filename in _SYMBOL_TO_FILE.items():
-            file_path = _ASSETS_DIR / f"{filename}.png"
+            file_path: Path = _ASSETS_DIR / f"{filename}.png"
             if file_path.exists():
-                img = Image.open(file_path).convert("RGBA")
-                self._piece_images_raw[symbol] = img  # Keep raw for scaling
-                img_resized = img.resize(
+                img: Image.Image = Image.open(file_path).convert("RGBA")
+                # Keep raw for scaling
+                self._piece_images_raw[symbol] = img
+                img_resized: Image.Image = img.resize(
                     (self.square_size, self.square_size), Image.Resampling.LANCZOS
                 )
                 self._piece_images[symbol] = ImageTk.PhotoImage(img_resized)
 
-    def _get_piece_image(self, symbol: str) -> Any:
+    def _get_piece_image(self, symbol: str) -> _PILPhotoImage | None:
         """Get piece image."""
         return self._piece_images.get(symbol)
 
-    def _get_scaled_drag_image(self, symbol: str, scale: float) -> Any:
+    def _get_scaled_drag_image(
+        self, symbol: str, scale: float
+    ) -> _PILPhotoImage | None:
         """Get a scaled piece image for dragging."""
+        from PIL import Image, ImageTk
+
         if symbol not in self._piece_images_raw:
             return None
-        size = int(self.square_size * scale)
-        img = self._piece_images_raw[symbol].resize(
+        size: int = int(self.square_size * scale)
+        img: Image.Image = self._piece_images_raw[symbol].resize(
             (size, size), Image.Resampling.LANCZOS
         )
         self._drag_scaled_image = ImageTk.PhotoImage(img)
         return self._drag_scaled_image
 
     def _start_drag_scale_animation(
-        self, target: float, on_complete: callable = None
+        self, target: float, on_complete: Callable[[], None] | None = None
     ) -> None:
         """Start a scale animation to target value."""
         import time
@@ -487,11 +516,11 @@ class ChessBoardWidget(tk.Canvas):
         if self._drag_scale_start_time is None:
             return
 
-        elapsed = time.time() - self._drag_scale_start_time
-        progress = min(elapsed / self._drag_scale_duration, 1.0)
+        elapsed: float = time.time() - self._drag_scale_start_time
+        progress: float = min(elapsed / self._drag_scale_duration, 1.0)
 
         # Ease-out cubic for smooth deceleration
-        eased = 1 - (1 - progress) ** 3
+        eased: float = 1 - (1 - progress) ** 3
 
         self._drag_scale = (
             self._drag_scale_start
@@ -506,12 +535,12 @@ class ChessBoardWidget(tk.Canvas):
             self._drag_scale_anim_id = None
             self._drag_scale_start_time = None
             if self._drag_scale_on_complete:
-                callback = self._drag_scale_on_complete
+                callback: Callable[[], None] = self._drag_scale_on_complete
                 self._drag_scale_on_complete = None
                 callback()
 
     def _start_drag_pos_animation(
-        self, target: tuple[int, int], on_complete: callable = None
+        self, target: tuple[int, int], on_complete: Callable[[], None] | None = None
     ) -> None:
         """Start a position animation for the dragged piece."""
         import time
@@ -532,16 +561,21 @@ class ChessBoardWidget(tk.Canvas):
         if self._drag_pos_start_time is None or self._drag_pos_start is None:
             return
 
-        elapsed = time.time() - self._drag_pos_start_time
-        progress = min(elapsed / self._drag_pos_duration, 1.0)
+        elapsed: float = time.time() - self._drag_pos_start_time
+        progress: float = min(elapsed / self._drag_pos_duration, 1.0)
 
         # Ease-out cubic for smooth deceleration
-        eased = 1 - (1 - progress) ** 3
+        eased: float = 1 - (1 - progress) ** 3
 
+        start_x: int
+        start_y: int
         start_x, start_y = self._drag_pos_start
+        assert self._drag_pos_target is not None
+        target_x: int
+        target_y: int
         target_x, target_y = self._drag_pos_target
-        current_x = int(start_x + (target_x - start_x) * eased)
-        current_y = int(start_y + (target_y - start_y) * eased)
+        current_x: int = int(start_x + (target_x - start_x) * eased)
+        current_y: int = int(start_y + (target_y - start_y) * eased)
         self.drag_pos = (current_x, current_y)
         self._draw_board()
 
@@ -554,23 +588,25 @@ class ChessBoardWidget(tk.Canvas):
             self._drag_pos_start = None
             self._drag_pos_target = None
             if self._drag_pos_on_complete:
-                callback = self._drag_pos_on_complete
+                pos_callback: Callable[[], None] = self._drag_pos_on_complete
                 self._drag_pos_on_complete = None
-                callback()
+                pos_callback()
 
     def _draw_piece(self, square: int) -> None:
         """Draw a piece on a square."""
-        piece = self.board.piece_at(square)
+        piece: chess.Piece | None = self.board.piece_at(square)
         if piece is None:
             return
 
+        x: int
+        y: int
         x, y = self._square_to_coords(square)
-        cx = x + self.square_size // 2
-        cy = y + self.square_size // 2
+        cx: int = x + self.square_size // 2
+        cy: int = y + self.square_size // 2
 
         if self._use_images:
             # Use downloaded PNG images
-            image = self._get_piece_image(piece.symbol())
+            image: _PILPhotoImage | None = self._get_piece_image(piece.symbol())
             if image:
                 self.create_image(cx, cy, image=image, anchor="center")
             else:
@@ -581,10 +617,12 @@ class ChessBoardWidget(tk.Canvas):
 
     def _draw_piece_unicode(self, cx: int, cy: int, piece: chess.Piece) -> None:
         """Draw piece using Unicode characters (fallback)."""
-        symbol = piece.symbol()
-        unicode_char = PIECE_UNICODE.get(symbol, "?")
+        symbol: str = piece.symbol()
+        unicode_char: str = PIECE_UNICODE.get(symbol, "?")
 
         # Use different colors for pieces for better visibility
+        fill_color: str
+        outline_color: str
         if piece.color == chess.WHITE:
             fill_color = "#ffffff"
             outline_color = "#000000"
@@ -593,7 +631,7 @@ class ChessBoardWidget(tk.Canvas):
             outline_color = "#ffffff"
 
         # Draw piece with outline for visibility
-        font = ("Segoe UI Symbol", self.square_size // 2)
+        font: tuple[str, int] = ("Segoe UI Symbol", self.square_size // 2)
 
         # Shadow/outline effect
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
@@ -618,24 +656,28 @@ class ChessBoardWidget(tk.Canvas):
         if not self.drag_piece or not self.drag_pos:
             return
 
+        x: int
+        y: int
         x, y = self.drag_pos
 
         if self._use_images:
             # Use scaled PNG image for drag effect
-            image = self._get_scaled_drag_image(self.drag_piece, self._drag_scale)
+            image: _PILPhotoImage | None = self._get_scaled_drag_image(
+                self.drag_piece, self._drag_scale
+            )
             if image:
                 self.create_image(x, y, image=image, anchor="center")
                 return
 
         # Fallback to Unicode
-        unicode_char = PIECE_UNICODE.get(self.drag_piece, "?")
+        unicode_char: str = PIECE_UNICODE.get(self.drag_piece, "?")
 
-        is_white = self.drag_piece.isupper()
-        fill_color = "#ffffff" if is_white else "#000000"
-        outline_color = "#000000" if is_white else "#ffffff"
+        is_white: bool = self.drag_piece.isupper()
+        fill_color: str = "#ffffff" if is_white else "#000000"
+        outline_color: str = "#000000" if is_white else "#ffffff"
 
-        font_size = int(self.square_size // 2 * self._drag_scale)
-        font = ("Segoe UI Symbol", font_size)
+        font_size: int = int(self.square_size // 2 * self._drag_scale)
+        font: tuple[str, int] = ("Segoe UI Symbol", font_size)
 
         # Shadow/outline
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
@@ -657,22 +699,25 @@ class ChessBoardWidget(tk.Canvas):
 
     def _draw_coordinates(self) -> None:
         """Draw file and rank labels with improved visibility."""
-        bold_font = (FONTS["coordinates"][0], FONTS["coordinates"][1], "bold")
+        bold_font: tuple[str, int, str] = (
+            FONTS["coordinates"][0],
+            FONTS["coordinates"][1],
+            "bold",
+        )
 
         for i in range(8):
             # File labels (a-h) - bottom row
-            file_label = chr(ord("a") + (7 - i if self.flipped else i))
-            x = i * self.square_size + self.square_size - 3
-            y = self.size - 1
+            file_label: str = chr(ord("a") + (7 - i if self.flipped else i))
+            x: int = i * self.square_size + self.square_size - 3
+            y: int = self.size - 1
 
             # Use high contrast colors for better readability
-            is_light = (i + 0) % 2 == 1
+            is_light: bool = (i + 0) % 2 == 1
+            text_color: str
             if is_light:
-                # Light square: use dark text with light outline
-                text_color = "#739552"  # Darker green for contrast
+                text_color = "#739552"
             else:
-                # Dark square: use light text
-                text_color = "#ebecd0"  # Light cream for contrast
+                text_color = "#ebecd0"
 
             # Draw text (shadow effect removed for Tkinter compatibility)
             self.create_text(
@@ -680,7 +725,7 @@ class ChessBoardWidget(tk.Canvas):
             )
 
             # Rank labels (1-8) - left column
-            rank_label = str(i + 1 if self.flipped else 8 - i)
+            rank_label: str = str(i + 1 if self.flipped else 8 - i)
             x = 2
             y = i * self.square_size
 
@@ -700,21 +745,21 @@ class ChessBoardWidget(tk.Canvas):
         """Check if an animation is in progress."""
         return self._animating
 
-    def _on_right_click(self, event: tk.Event) -> None:
+    def _on_right_click(self, event: tk.Event[tk.Canvas]) -> None:
         """Handle right-click - remove piece in editor mode."""
         if not self.editor_mode:
             return
 
-        square = self._coords_to_square(event.x, event.y)
+        square: int = self._coords_to_square(event.x, event.y)
         if square is not None and self.board.piece_at(square):
             self.board.remove_piece_at(square)
             self._draw_board()
             if self.on_position_changed:
                 self.on_position_changed()
 
-    def _handle_editor_click(self, event: tk.Event) -> None:
+    def _handle_editor_click(self, event: tk.Event[tk.Canvas]) -> None:
         """Handle click in editor mode."""
-        square = self._coords_to_square(event.x, event.y)
+        square: int = self._coords_to_square(event.x, event.y)
         if square is None:
             return
 
@@ -726,7 +771,7 @@ class ChessBoardWidget(tk.Canvas):
                 self.on_position_changed()
         else:
             # Select existing piece for drag
-            piece = self.board.piece_at(square)
+            piece: chess.Piece | None = self.board.piece_at(square)
             if piece:
                 self.selected_square = square
                 self.drag_from = square
@@ -740,7 +785,8 @@ class ChessBoardWidget(tk.Canvas):
             return
 
         # Scale down callback
-        def on_scale_complete():
+        def on_scale_complete() -> None:
+            """Reset drag state after scale-down animation completes."""
             self.dragging = False
             self.drag_pos = None
             self.drag_piece = None
@@ -750,12 +796,14 @@ class ChessBoardWidget(tk.Canvas):
 
         if target_square != self.drag_from:
             # Move piece to new square (free placement, no rules)
-            piece = self.board.piece_at(self.drag_from)
+            piece: chess.Piece | None = self.board.piece_at(self.drag_from)
             if piece:
                 self.board.remove_piece_at(self.drag_from)
                 self.board.set_piece_at(target_square, piece)
 
             # Snap to destination
+            fx: int
+            fy: int
             fx, fy = self._square_to_coords(target_square)
             self.drag_pos = (fx + self.square_size // 2, fy + self.square_size // 2)
             self._shrink_at_square = target_square
@@ -777,7 +825,7 @@ class ChessBoardWidget(tk.Canvas):
             self._draw_board()
             self._start_drag_scale_animation(1.0, on_scale_complete)
 
-    def _on_click(self, event: tk.Event) -> None:
+    def _on_click(self, event: tk.Event[tk.Canvas]) -> None:
         """Handle mouse click."""
         if not self.interactive or self._animating:
             return
@@ -791,8 +839,8 @@ class ChessBoardWidget(tk.Canvas):
         if self.player_color is not None and self.board.turn != self.player_color:
             return
 
-        square = self._coords_to_square(event.x, event.y)
-        piece = self.board.piece_at(square)
+        square: int = self._coords_to_square(event.x, event.y)
+        piece: chess.Piece | None = self.board.piece_at(square)
 
         if self.selected_square is None:
             # First click - select piece
@@ -810,7 +858,7 @@ class ChessBoardWidget(tk.Canvas):
                 self._draw_board()
         else:
             # Second click - try to make move
-            move = self._find_move(self.selected_square, square)
+            move: chess.Move | None = self._find_move(self.selected_square, square)
 
             if move:
                 self._make_move(move)
@@ -832,7 +880,7 @@ class ChessBoardWidget(tk.Canvas):
 
             self._draw_board()
 
-    def _on_drag(self, event: tk.Event) -> None:
+    def _on_drag(self, event: tk.Event[tk.Canvas]) -> None:
         """Handle mouse drag."""
         if not self.interactive or self._animating or self.drag_piece is None:
             return
@@ -847,7 +895,7 @@ class ChessBoardWidget(tk.Canvas):
         self._drag_hover_square = self._coords_to_square(event.x, event.y)
         self._draw_board()
 
-    def _on_release(self, event: tk.Event) -> None:
+    def _on_release(self, event: tk.Event[tk.Canvas]) -> None:
         """Handle mouse release."""
         if not self.interactive or self._animating:
             return
@@ -858,7 +906,7 @@ class ChessBoardWidget(tk.Canvas):
             self._drag_hover_square = None
             return
 
-        target_square = self._coords_to_square(event.x, event.y)
+        target_square: int = self._coords_to_square(event.x, event.y)
         self._drag_hover_square = None
 
         # Editor mode: free piece placement
@@ -866,10 +914,11 @@ class ChessBoardWidget(tk.Canvas):
             self._handle_editor_release(target_square)
             return
 
-        move = self._find_move(self.drag_from, target_square)
+        move: chess.Move | None = self._find_move(self.drag_from, target_square)
 
         # Scale down callback (used after position animation if needed)
-        def on_scale_complete():
+        def on_scale_complete() -> None:
+            """Reset drag state after scale-down animation completes."""
             self.dragging = False
             self.drag_pos = None
             self.drag_piece = None
@@ -879,7 +928,9 @@ class ChessBoardWidget(tk.Canvas):
 
         if move:
             # Valid move: snap to destination, process move, shrink
-            final_square = move.to_square
+            final_square: int = move.to_square
+            fx: int
+            fy: int
             fx, fy = self._square_to_coords(final_square)
             self.drag_pos = (fx + self.square_size // 2, fy + self.square_size // 2)
             self._shrink_at_square = final_square
@@ -898,9 +949,14 @@ class ChessBoardWidget(tk.Canvas):
 
         elif target_square != self.drag_from:
             # Invalid move: animate back AND shrink simultaneously
-            original_square = self.drag_from
+            original_square: int = self.drag_from
+            ox: int
+            oy: int
             ox, oy = self._square_to_coords(original_square)
-            target_pos = (ox + self.square_size // 2, oy + self.square_size // 2)
+            target_pos: tuple[int, int] = (
+                ox + self.square_size // 2,
+                oy + self.square_size // 2,
+            )
 
             # Clear selection state
             self.selected_square = None
@@ -909,9 +965,10 @@ class ChessBoardWidget(tk.Canvas):
             self._shrink_at_square = original_square
 
             # Track completion of both animations
-            anim_complete = {"pos": False, "scale": False}
+            anim_complete: dict[str, bool] = {"pos": False, "scale": False}
 
-            def check_both_complete():
+            def check_both_complete() -> None:
+                """Check if both position and scale animations are done."""
                 if anim_complete["pos"] and anim_complete["scale"]:
                     self.dragging = False
                     self.drag_pos = None
@@ -920,11 +977,13 @@ class ChessBoardWidget(tk.Canvas):
                     self._shrink_at_square = None
                     self._draw_board()
 
-            def on_pos_done():
+            def on_pos_done() -> None:
+                """Mark position animation as complete and check overall."""
                 anim_complete["pos"] = True
                 check_both_complete()
 
-            def on_scale_done():
+            def on_scale_done() -> None:
+                """Mark scale animation as complete and check overall."""
                 anim_complete["scale"] = True
                 check_both_complete()
 
@@ -944,48 +1003,58 @@ class ChessBoardWidget(tk.Canvas):
     def _find_move(self, from_sq: int, to_sq: int) -> chess.Move | None:
         """Find a legal move from the given squares."""
         # Check for promotion
-        piece = self.board.piece_at(from_sq)
+        piece: chess.Piece | None = self.board.piece_at(from_sq)
         if piece and piece.piece_type == chess.PAWN:
-            to_rank = chess.square_rank(to_sq)
+            to_rank: int = chess.square_rank(to_sq)
             if (piece.color == chess.WHITE and to_rank == 7) or (
                 piece.color == chess.BLACK and to_rank == 0
             ):
                 # Check if any promotion move is legal
-                test_move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
+                test_move: chess.Move = chess.Move(
+                    from_sq, to_sq, promotion=chess.QUEEN
+                )
                 if test_move in self.board.legal_moves:
                     # Show promotion dialog
-                    promotion_piece = self._show_promotion_dialog(piece.color, to_sq)
-                    move = chess.Move(from_sq, to_sq, promotion=promotion_piece)
+                    promotion_piece: int = self._show_promotion_dialog(
+                        piece.color, to_sq
+                    )
+                    move: chess.Move = chess.Move(
+                        from_sq, to_sq, promotion=promotion_piece
+                    )
                     if move in self.board.legal_moves:
                         return move
 
         # Regular move
-        move = chess.Move(from_sq, to_sq)
-        if move in self.board.legal_moves:
-            return move
+        regular_move: chess.Move = chess.Move(from_sq, to_sq)
+        if regular_move in self.board.legal_moves:
+            return regular_move
 
         return None
 
     def _show_promotion_dialog(self, color: bool, to_square: int) -> int:
         """Show promotion dialog and return selected piece type."""
         # Calculate dialog position near the promotion square
+        x: int
+        y: int
         x, y = self._square_to_coords(to_square)
-        screen_x = self.winfo_rootx() + x
-        screen_y = self.winfo_rooty() + y
+        screen_x: int = self.winfo_rootx() + x
+        screen_y: int = self.winfo_rooty() + y
 
         # Adjust position to not go off screen
         if color == chess.WHITE:
-            screen_y -= 80  # Show above the square for white
+            # Show above the square for white
+            screen_y -= 80
         else:
-            screen_y += self.square_size + 10  # Show below for black
+            # Show below for black
+            screen_y += self.square_size + 10
 
-        dialog = PromotionDialog(self, color, (screen_x, screen_y))
+        dialog: PromotionDialog = PromotionDialog(self, color, (screen_x, screen_y))
         return dialog.show()
 
     def _make_move(self, move: chess.Move, animate: bool = True) -> None:
         """Make a move and trigger callback."""
         # Skip animation if piece was dragged (user already "animated" it manually)
-        should_animate = animate and not self.dragging
+        should_animate: bool = animate and not self.dragging
 
         # Clear selection state
         self.selected_square = None
@@ -995,7 +1064,8 @@ class ChessBoardWidget(tk.Canvas):
 
         if should_animate:
             # Animate the move, then apply it
-            def on_animation_complete():
+            def on_animation_complete() -> None:
+                """Apply the move to the board after animation finishes."""
                 self.last_move = move
                 self.board.push(move)
                 self._draw_board()
@@ -1071,13 +1141,15 @@ class ChessBoardWidget(tk.Canvas):
             self._animation_id = None
 
         # Determine from/to squares based on direction
+        from_sq: int
+        to_sq: int
         if reverse:
             from_sq, to_sq = move.to_square, move.from_square
         else:
             from_sq, to_sq = move.from_square, move.to_square
 
         # Get the piece to animate
-        piece = self.board.piece_at(from_sq)
+        piece: chess.Piece | None = self.board.piece_at(from_sq)
         if piece is None:
             # No piece to animate, just call callback
             if on_complete:
@@ -1088,11 +1160,15 @@ class ChessBoardWidget(tk.Canvas):
 
         # Set last_move NOW so squares are highlighted during animation
         # Store the original move (not reversed) for highlighting
-        self._anim_highlight_move = move
+        self._anim_highlight_move: chess.Move = move
         self.last_move = move
 
         # Calculate start and end positions (center of squares)
+        start_x: int
+        start_y: int
         start_x, start_y = self._square_to_coords(from_sq)
+        end_x: int
+        end_y: int
         end_x, end_y = self._square_to_coords(to_sq)
 
         # Center positions
@@ -1102,17 +1178,17 @@ class ChessBoardWidget(tk.Canvas):
         end_y += self.square_size // 2
 
         # Store animation state for main piece (king for castling)
-        self._anim_piece_symbol = piece.symbol()
-        self._anim_start = (start_x, start_y)
-        self._anim_end = (end_x, end_y)
-        self._anim_duration = duration_ms
-        self._anim_start_time = None
-        self._anim_on_complete = on_complete
-        self._anim_from_square = from_sq
+        self._anim_piece_symbol: str = piece.symbol()
+        self._anim_start: tuple[int, int] = (start_x, start_y)
+        self._anim_end: tuple[int, int] = (end_x, end_y)
+        self._anim_duration: int = duration_ms
+        self._anim_start_time: float | None = None
+        self._anim_on_complete: Callable[[], None] | None = on_complete
+        self._anim_from_square: int = from_sq
 
         # Check for castling - need to animate rook too
         self._anim_rook = None
-        is_castling = (not reverse and self.board.is_castling(move)) or (
+        is_castling: bool = (not reverse and self.board.is_castling(move)) or (
             reverse
             and piece.piece_type == chess.KING
             and abs(
@@ -1123,24 +1199,30 @@ class ChessBoardWidget(tk.Canvas):
 
         if is_castling:
             # Determine rook's from and to squares
-            if chess.square_file(move.to_square) == 6:  # Kingside (g-file)
-                rook_from = chess.square(
-                    7, chess.square_rank(move.from_square)
-                )  # h-file
+            rook_from: int
+            rook_to: int
+            # Kingside (g-file)
+            # h-file
+            if chess.square_file(move.to_square) == 6:
+                rook_from = chess.square(7, chess.square_rank(move.from_square))
                 rook_to = chess.square(5, chess.square_rank(move.from_square))  # f-file
-            else:  # Queenside (c-file)
-                rook_from = chess.square(
-                    0, chess.square_rank(move.from_square)
-                )  # a-file
+            # Queenside (c-file)
+            else:
+                # a-file
+                rook_from = chess.square(0, chess.square_rank(move.from_square))
                 rook_to = chess.square(3, chess.square_rank(move.from_square))  # d-file
 
             # Swap for reverse animation
             if reverse:
                 rook_from, rook_to = rook_to, rook_from
 
-            rook = self.board.piece_at(rook_from)
+            rook: chess.Piece | None = self.board.piece_at(rook_from)
             if rook:
+                rook_start_x: int
+                rook_start_y: int
                 rook_start_x, rook_start_y = self._square_to_coords(rook_from)
+                rook_end_x: int
+                rook_end_y: int
                 rook_end_x, rook_end_y = self._square_to_coords(rook_to)
 
                 self._anim_rook = {
@@ -1166,20 +1248,24 @@ class ChessBoardWidget(tk.Canvas):
         if self._anim_start_time is None:
             self._anim_start_time = time.time() * 1000  # ms
 
-        elapsed = time.time() * 1000 - self._anim_start_time
-        progress = min(elapsed / self._anim_duration, 1.0)
+        elapsed: float = time.time() * 1000 - self._anim_start_time
+        progress: float = min(elapsed / self._anim_duration, 1.0)
 
         # Ease-out cubic for smooth deceleration
-        eased = 1 - (1 - progress) ** 3
+        eased: float = 1 - (1 - progress) ** 3
 
         # Calculate current position for main piece (king)
+        start_x: int
+        start_y: int
         start_x, start_y = self._anim_start
+        end_x: int
+        end_y: int
         end_x, end_y = self._anim_end
-        current_x = start_x + (end_x - start_x) * eased
-        current_y = start_y + (end_y - start_y) * eased
+        current_x: float = start_x + (end_x - start_x) * eased
+        current_y: float = start_y + (end_y - start_y) * eased
 
         # Collect squares to exclude (for castling, exclude both king and rook)
-        exclude_squares = [self._anim_from_square]
+        exclude_squares: list[int] = [self._anim_from_square]
         if self._anim_rook:
             exclude_squares.append(self._anim_rook["from_square"])
 
@@ -1191,10 +1277,14 @@ class ChessBoardWidget(tk.Canvas):
 
         # Draw the animated rook if castling
         if self._anim_rook:
+            rook_start_x: int
+            rook_start_y: int
             rook_start_x, rook_start_y = self._anim_rook["start"]
+            rook_end_x: int
+            rook_end_y: int
             rook_end_x, rook_end_y = self._anim_rook["end"]
-            rook_current_x = rook_start_x + (rook_end_x - rook_start_x) * eased
-            rook_current_y = rook_start_y + (rook_end_y - rook_start_y) * eased
+            rook_current_x: float = rook_start_x + (rook_end_x - rook_start_x) * eased
+            rook_current_y: float = rook_start_y + (rook_end_y - rook_start_y) * eased
             self._draw_animated_piece(
                 self._anim_rook["symbol"], rook_current_x, rook_current_y
             )
@@ -1215,7 +1305,7 @@ class ChessBoardWidget(tk.Canvas):
     def _draw_animated_piece(self, symbol: str, x: float, y: float) -> None:
         """Draw a piece at the given position during animation."""
         if self._use_images:
-            image = self._get_piece_image(symbol)
+            image: _PILPhotoImage | None = self._get_piece_image(symbol)
             if image:
                 self.create_image(
                     x,
@@ -1227,11 +1317,11 @@ class ChessBoardWidget(tk.Canvas):
                 return
 
         # Unicode fallback
-        unicode_char = PIECE_UNICODE.get(symbol, "?")
-        is_white = symbol.isupper()
-        fill_color = "#ffffff" if is_white else "#000000"
-        outline_color = "#000000" if is_white else "#ffffff"
-        font = ("Segoe UI Symbol", self.square_size // 2)
+        unicode_char: str = PIECE_UNICODE.get(symbol, "?")
+        is_white: bool = symbol.isupper()
+        fill_color: str = "#ffffff" if is_white else "#000000"
+        outline_color: str = "#000000" if is_white else "#ffffff"
+        font: tuple[str, int] = ("Segoe UI Symbol", self.square_size // 2)
 
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
             self.create_text(

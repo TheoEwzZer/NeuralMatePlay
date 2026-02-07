@@ -1,5 +1,9 @@
 """Test: Opening Development."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions covering different opening phases
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === STARTING POSITION (1) ===
     {
         "name": "Starting Position (White)",
@@ -92,23 +99,27 @@ TEST_POSITIONS = [
 ]
 
 
-def _analyze_position(board, network, test):
+def _analyze_position(
+    board: chess.Board, network: DualHeadNetwork, test: dict[str, Any]
+) -> dict[str, Any]:
     """Analyze opening move quality for a single position."""
+    policy: np.ndarray
+    value: float
     policy, value = predict_for_board(board, network)
 
-    top_5 = np.argsort(policy)[::-1][:5]
+    top_5: np.ndarray = np.argsort(policy)[::-1][:5]
 
-    excellent_prob = 0
-    good_prob = 0
-    okay_prob = 0
-    dubious_prob = 0
+    excellent_prob: float = 0
+    good_prob: float = 0
+    okay_prob: float = 0
+    dubious_prob: float = 0
 
     # Calculate probabilities for each category
     for idx in range(len(policy)):
-        move = decode_move(idx, board)
+        move: chess.Move | None = decode_move(idx, board)
         if move:
-            uci = move.uci()
-            prob = policy[idx]
+            uci: str = move.uci()
+            prob: float = policy[idx]
             if uci in test["excellent"]:
                 excellent_prob += prob
             elif uci in test["good"]:
@@ -119,9 +130,10 @@ def _analyze_position(board, network, test):
                 dubious_prob += prob
 
     # Get top move category
-    top_move = decode_move(top_5[0], board)
-    top_uci = top_move.uci() if top_move else None
+    top_move: chess.Move | None = decode_move(top_5[0], board)
+    top_uci: str | None = top_move.uci() if top_move else None
 
+    category: str
     if top_uci in test["excellent"]:
         category = "excellent"
     elif top_uci in test["good"]:
@@ -146,21 +158,21 @@ def _analyze_position(board, network, test):
     }
 
 
-def test_development(network, results: TestResults):
+def test_development(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network develops pieces reasonably in opening."""
     print(header("TEST: Opening Development"))
 
-    passed_count = 0
-    total_excellent_prob = 0
-    total_good_prob = 0
-    total_dubious_prob = 0
+    passed_count: float = 0
+    total_excellent_prob: float = 0
+    total_good_prob: float = 0
+    total_dubious_prob: float = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(test["name"]))
         print(board)
 
-        stats = _analyze_position(board, network, test)
+        stats: dict[str, Any] = _analyze_position(board, network, test)
 
         # Accumulate stats
         total_excellent_prob += stats["excellent_prob"]
@@ -173,10 +185,12 @@ def test_development(network, results: TestResults):
         print("  " + "-" * 45)
 
         for i, idx in enumerate(stats["top_5"]):
-            move = decode_move(idx, board)
-            prob = stats["policy"][idx]
+            move: chess.Move | None = decode_move(idx, board)
+            prob: float = stats["policy"][idx]
             if move:
-                uci = move.uci()
+                uci: str = move.uci()
+                cat: str
+                color: str
                 if uci in test["excellent"]:
                     cat = "EXCELLENT"
                     color = Colors.GREEN
@@ -193,11 +207,11 @@ def test_development(network, results: TestResults):
                     cat = ""
                     color = ""
 
-                end_color = Colors.ENDC if color else ""
+                end_color: str = Colors.ENDC if color else ""
                 print(f"  {color}{i+1:<6} {uci:<8} {prob*100:>7.2f}% {cat}{end_color}")
 
         # Check if position passed
-        top_move = stats["top_move"]
+        top_move: str | None = stats["top_move"]
         if stats["top_category"] in ["excellent", "good"]:
             print(f"\n  {ok(f'Good opening move: {top_move}')}")
             passed_count += 1
@@ -217,10 +231,10 @@ def test_development(network, results: TestResults):
         )
 
     # Summary
-    num_positions = len(TEST_POSITIONS)
-    avg_excellent = total_excellent_prob / num_positions
-    avg_good = total_good_prob / num_positions
-    avg_dubious = total_dubious_prob / num_positions
+    num_positions: int = len(TEST_POSITIONS)
+    avg_excellent: float = total_excellent_prob / num_positions
+    avg_good: float = total_good_prob / num_positions
+    avg_dubious: float = total_dubious_prob / num_positions
 
     print(subheader("Summary"))
     print(f"  Positions tested: {num_positions}")
@@ -244,8 +258,8 @@ def test_development(network, results: TestResults):
             "Network may play h4, a4, etc. frequently",
         )
 
-    score = passed_count / num_positions
-    overall_passed = score >= 0.5
+    score: float = passed_count / num_positions
+    overall_passed: bool = score >= 0.5
 
     results.add("Opening Development", overall_passed, score, 1.0)
     return score

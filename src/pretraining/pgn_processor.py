@@ -7,14 +7,14 @@ by reading games in chunks.
 
 import os
 import re
-from typing import Generator, Optional, Tuple
+from collections.abc import Generator
 from io import StringIO
 
 import chess
 import chess.pgn
 
 
-class PGNProcessor:
+class PGNProcessor(object):
     """
     Memory-efficient PGN file processor.
 
@@ -26,11 +26,11 @@ class PGNProcessor:
         self,
         pgn_path: str,
         min_elo: int = 2200,
-        max_games: Optional[int] = None,
+        max_games: int | None = None,
         chunk_size: int = 10000,
         skip_first_n_moves: int = 8,
         skip_first_n_games: int = 0,
-    ):
+    ) -> None:
         """
         Initialize PGN processor.
 
@@ -42,19 +42,21 @@ class PGNProcessor:
             skip_first_n_moves: Skip opening moves (too theoretical).
             skip_first_n_games: Skip first N games (for resume).
         """
-        self.pgn_path = pgn_path
-        self.min_elo = min_elo
-        self.max_games = max_games
-        self.chunk_size = chunk_size
-        self.skip_first_n_moves = skip_first_n_moves
-        self.skip_first_n_games = skip_first_n_games
+        self.pgn_path: str = pgn_path
+        self.min_elo: int = min_elo
+        self.max_games: int | None = max_games
+        self.chunk_size: int = chunk_size
+        self.skip_first_n_moves: int = skip_first_n_moves
+        self.skip_first_n_games: int = skip_first_n_games
 
         # File stats
-        self._file_size = os.path.getsize(pgn_path) if os.path.exists(pgn_path) else 0
-        self._bytes_read = 0
-        self._games_processed = 0
-        self._games_skipped = 0
-        self._positions_extracted = 0
+        self._file_size: int = (
+            os.path.getsize(pgn_path) if os.path.exists(pgn_path) else 0
+        )
+        self._bytes_read: int = 0
+        self._games_processed: int = 0
+        self._games_skipped: int = 0
+        self._positions_extracted: int = 0
 
     @property
     def progress(self) -> float:
@@ -79,7 +81,7 @@ class PGNProcessor:
 
     def process_all(
         self,
-    ) -> Generator[Tuple[chess.Board, chess.Move, float], None, None]:
+    ) -> Generator[tuple[chess.Board, chess.Move, float], None, None]:
         """
         Process entire PGN file.
 
@@ -96,7 +98,7 @@ class PGNProcessor:
                 ):
                     break
 
-                game = chess.pgn.read_game(f)
+                game: chess.pgn.Game | None = chess.pgn.read_game(f)
                 if game is None:
                     break
 
@@ -108,7 +110,7 @@ class PGNProcessor:
                     continue
 
                 # Get outcome
-                outcome = self._get_outcome(game)
+                outcome: float | None = self._get_outcome(game)
                 if outcome is None:
                     continue
 
@@ -120,8 +122,8 @@ class PGNProcessor:
                 self._games_processed += 1
 
                 # Extract positions
-                board = game.board()
-                move_num = 0
+                board: chess.Board = game.board()
+                move_num: int = 0
 
                 for move in game.mainline_moves():
                     move_num += 1
@@ -139,7 +141,7 @@ class PGNProcessor:
     def process_chunk(
         self,
         start_game: int = 0,
-    ) -> Generator[Tuple[chess.Board, chess.Move, float], None, None]:
+    ) -> Generator[tuple[chess.Board, chess.Move, float], None, None]:
         """
         Process a chunk of games.
 
@@ -149,12 +151,12 @@ class PGNProcessor:
         Yields:
             Tuple of (board, move, outcome) for each position.
         """
-        games_in_chunk = 0
-        current_game = 0
+        games_in_chunk: int = 0
+        current_game: int = 0
 
         with open(self.pgn_path, "r", encoding="utf-8", errors="ignore") as f:
             while games_in_chunk < self.chunk_size:
-                game = chess.pgn.read_game(f)
+                game: chess.pgn.Game | None = chess.pgn.read_game(f)
                 if game is None:
                     break
 
@@ -170,7 +172,7 @@ class PGNProcessor:
                     continue
 
                 # Get outcome
-                outcome = self._get_outcome(game)
+                outcome: float | None = self._get_outcome(game)
                 if outcome is None:
                     continue
 
@@ -178,8 +180,8 @@ class PGNProcessor:
                 self._games_processed += 1
 
                 # Extract positions
-                board = game.board()
-                move_num = 0
+                board: chess.Board = game.board()
+                move_num: int = 0
 
                 for move in game.mainline_moves():
                     move_num += 1
@@ -196,8 +198,8 @@ class PGNProcessor:
     def _passes_elo_filter(self, game: chess.pgn.Game) -> bool:
         """Check if game passes ELO filter."""
         try:
-            white_elo = int(game.headers.get("WhiteElo", 0))
-            black_elo = int(game.headers.get("BlackElo", 0))
+            white_elo: int = int(game.headers.get("WhiteElo", 0))
+            black_elo: int = int(game.headers.get("BlackElo", 0))
 
             # Check minimum ELO
             if white_elo < self.min_elo or black_elo < self.min_elo:
@@ -207,15 +209,17 @@ class PGNProcessor:
         except (ValueError, TypeError):
             return False
 
-    def _get_outcome(self, game: chess.pgn.Game) -> Optional[float]:
+    @staticmethod
+    def _get_outcome(game: chess.pgn.Game) -> float | None:
         """Get game outcome as float. Filters out time forfeits and abandoned games."""
         # Filter out games that didn't end normally (timeout, abandoned, etc.)
         # These have results that don't reflect the actual position quality
-        termination = game.headers.get("Termination", "Normal")
+        termination: str = game.headers.get("Termination", "Normal")
         if termination and termination.lower() not in ["normal", ""]:
-            return None  # Skip time forfeit, abandoned, rules infraction
+            # Skip time forfeit, abandoned, rules infraction
+            return None
 
-        result = game.headers.get("Result", "*")
+        result: str = game.headers.get("Result", "*")
         if result == "1-0":
             return 1.0
         elif result == "0-1":
@@ -227,10 +231,10 @@ class PGNProcessor:
 
     def count_games(self) -> int:
         """Count total games in PGN (can be slow for large files)."""
-        count = 0
+        count: int = 0
         with open(self.pgn_path, "r", encoding="utf-8", errors="ignore") as f:
             while True:
-                game = chess.pgn.read_game(f)
+                game: chess.pgn.Game | None = chess.pgn.read_game(f)
                 if game is None:
                     break
                 count += 1
@@ -248,6 +252,6 @@ class PGNProcessor:
         self._positions_extracted = 0
 
 
-def parse_pgn_string(pgn_string: str) -> Optional[chess.pgn.Game]:
+def parse_pgn_string(pgn_string: str) -> chess.pgn.Game | None:
     """Parse a PGN string into a game object."""
     return chess.pgn.read_game(StringIO(pgn_string))

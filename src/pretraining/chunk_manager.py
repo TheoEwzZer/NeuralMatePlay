@@ -12,7 +12,7 @@ Uses HDF5 format with LZF compression for:
 
 import json
 import os
-from typing import Optional, Iterator, List
+from typing import Any, Iterator
 import numpy as np
 import h5py
 
@@ -21,7 +21,7 @@ import h5py
 DEFAULT_CHUNK_SIZE = 10000
 
 
-class ChunkManager:
+class ChunkManager(object):
     """
     Manages chunked storage of chess positions using HDF5.
 
@@ -38,7 +38,7 @@ class ChunkManager:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         verbose: bool = True,
         resume: bool = False,
-    ):
+    ) -> None:
         """
         Initialize chunk manager.
 
@@ -48,26 +48,28 @@ class ChunkManager:
             verbose: Print progress information.
             resume: Resume from existing chunks (for incremental creation).
         """
-        self.chunks_dir = chunks_dir
-        self.chunk_size = chunk_size
-        self.verbose = verbose
+        self.chunks_dir: str = chunks_dir
+        self.chunk_size: int = chunk_size
+        self.verbose: bool = verbose
 
         # Buffer for accumulating examples before writing
         self._state_buffer: list[np.ndarray] = []
-        self._policy_buffer: list[int] = []  # Store as indices
+        # Store as indices
+        self._policy_buffer: list[int] = []
         self._value_buffer: list[float] = []
-        self._weight_buffer: list[float] = []  # Tactical weights
+        # Tactical weights
+        self._weight_buffer: list[float] = []
 
-        self._chunk_count = 0
-        self._total_examples = 0
-        self._games_processed = 0
-        self._processed_files: List[str] = []
-        self._current_file: Optional[str] = None
+        self._chunk_count: int = 0
+        self._total_examples: int = 0
+        self._games_processed: int = 0
+        self._processed_files: list[str] = []
+        self._current_file: str | None = None
         self._current_file_games: int = 0
 
         # Resume from existing chunks
         if resume:
-            metadata = self.load_metadata(chunks_dir)
+            metadata: dict[str, Any] | None = self.load_metadata(chunks_dir)
             if metadata:
                 self._chunk_count = metadata.get("num_chunks", 0)
                 self._total_examples = metadata.get("total_examples", 0)
@@ -124,14 +126,14 @@ class ChunkManager:
 
         os.makedirs(self.chunks_dir, exist_ok=True)
 
-        states = np.array(self._state_buffer, dtype=np.float32)
-        policy_indices = np.array(self._policy_buffer, dtype=np.uint16)
-        values = np.array(self._value_buffer, dtype=np.float32)
-        weights = np.array(self._weight_buffer, dtype=np.float32)
+        states: np.ndarray = np.array(self._state_buffer, dtype=np.float32)
+        policy_indices: np.ndarray = np.array(self._policy_buffer, dtype=np.uint16)
+        values: np.ndarray = np.array(self._value_buffer, dtype=np.float32)
+        weights: np.ndarray = np.array(self._weight_buffer, dtype=np.float32)
 
         # Validate data before writing to prevent corrupted chunks
         if np.isnan(states).any() or np.isinf(states).any():
-            nan_count = np.isnan(states).sum() + np.isinf(states).sum()
+            nan_count: int = int(np.isnan(states).sum() + np.isinf(states).sum())
             print(
                 f"  WARNING: Skipping chunk {self._chunk_count} - {nan_count} NaN/Inf in states"
             )
@@ -142,7 +144,7 @@ class ChunkManager:
             return
 
         if np.isnan(values).any() or np.isinf(values).any():
-            nan_count = np.isnan(values).sum() + np.isinf(values).sum()
+            nan_count: int = int(np.isnan(values).sum() + np.isinf(values).sum())
             print(
                 f"  WARNING: Skipping chunk {self._chunk_count} - {nan_count} NaN/Inf in values"
             )
@@ -152,7 +154,7 @@ class ChunkManager:
             self._weight_buffer.clear()
             return
 
-        chunk_path = self.get_chunk_path(self._chunk_count)
+        chunk_path: str = self.get_chunk_path(self._chunk_count)
         with h5py.File(chunk_path, "w") as f:
             # States with LZF compression (fast, good compression for float data)
             f.create_dataset("states", data=states, compression="lzf")
@@ -163,7 +165,7 @@ class ChunkManager:
             # Tactical weights - small, no compression needed
             f.create_dataset("weights", data=weights)
 
-        n_examples = len(self._state_buffer)
+        n_examples: int = len(self._state_buffer)
         self._total_examples += n_examples
 
         if self.verbose:
@@ -181,7 +183,7 @@ class ChunkManager:
 
     def _save_metadata_incremental(self) -> None:
         """Save metadata incrementally for crash recovery."""
-        metadata = {
+        metadata: dict[str, Any] = {
             "num_chunks": self._chunk_count,
             "total_examples": self._total_examples,
             "chunk_size": self.chunk_size,
@@ -190,30 +192,28 @@ class ChunkManager:
             "current_file": self._current_file,
             "current_file_games": self._current_file_games,
         }
-        metadata_path = os.path.join(self.chunks_dir, "metadata.json")
+        metadata_path: str = os.path.join(self.chunks_dir, "metadata.json")
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
     def set_games_processed(self, count: int) -> None:
         """Set the number of games processed (for metadata)."""
-        self._games_processed = count
+        self._games_processed: int = count
 
-    def set_processed_files(self, files: List[str]) -> None:
+    def set_processed_files(self, files: list[str]) -> None:
         """Set the list of processed PGN files (for resume tracking)."""
         self._processed_files = files
 
-    def get_processed_files(self) -> List[str]:
+    def get_processed_files(self) -> list[str]:
         """Get the list of already processed PGN files."""
         return self._processed_files.copy()
 
-    def set_current_file(
-        self, file_path: Optional[str], games_processed: int = 0
-    ) -> None:
+    def set_current_file(self, file_path: str | None, games_processed: int = 0) -> None:
         """Set the current file being processed (for resume tracking)."""
         self._current_file = file_path
         self._current_file_games = games_processed
 
-    def get_current_file(self) -> tuple[Optional[str], int]:
+    def get_current_file(self) -> tuple[str | None, int]:
         """Get the current file and games processed in it."""
         return self._current_file, self._current_file_games
 
@@ -234,7 +234,7 @@ class ChunkManager:
             self._flush_buffer()
 
         # Write metadata as JSON
-        metadata = {
+        metadata: dict[str, Any] = {
             "num_chunks": self._chunk_count,
             "total_examples": self._total_examples,
             "chunk_size": self.chunk_size,
@@ -243,26 +243,28 @@ class ChunkManager:
             "current_file": self._current_file,
             "current_file_games": self._current_file_games,
         }
-        metadata_path = os.path.join(self.chunks_dir, "metadata.json")
+        metadata_path: str = os.path.join(self.chunks_dir, "metadata.json")
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
         if self.verbose:
             print(
-                f"Finalized: {self._chunk_count} chunks, {self._total_examples} total examples, {self._games_processed} games"
+                f"Finalized: {self._chunk_count} chunks,"
+                f" {self._total_examples} total examples,"
+                f" {self._games_processed} games"
             )
 
         return self._total_examples
 
     @classmethod
-    def load_metadata(cls, chunks_dir: str) -> Optional[dict]:
+    def load_metadata(cls, chunks_dir: str) -> dict[str, Any] | None:
         """
         Load metadata from chunks directory.
 
         Returns:
             Metadata dict or None if no chunks found.
         """
-        json_path = os.path.join(chunks_dir, "metadata.json")
+        json_path: str = os.path.join(chunks_dir, "metadata.json")
         if os.path.exists(json_path):
             with open(json_path, "r") as f:
                 return json.load(f)
@@ -271,18 +273,18 @@ class ChunkManager:
         if not os.path.exists(chunks_dir):
             return None
 
-        chunk_paths = list(cls.iter_chunk_paths(chunks_dir))
+        chunk_paths: list[str] = list(cls.iter_chunk_paths(chunks_dir))
         if not chunk_paths:
             return None
 
         # Regenerate metadata from existing chunks
         print(f"Regenerating metadata from {len(chunk_paths)} chunks...")
-        total_examples = 0
+        total_examples: int = 0
         for chunk_path in chunk_paths:
-            chunk = cls.load_chunk(chunk_path)
+            chunk: dict[str, np.ndarray] = cls.load_chunk(chunk_path)
             total_examples += len(chunk["states"])
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "num_chunks": len(chunk_paths),
             "total_examples": total_examples,
             "chunk_size": 10000,
@@ -298,26 +300,26 @@ class ChunkManager:
         return metadata
 
     @classmethod
-    def load_chunk(cls, chunk_path: str) -> dict:
+    def load_chunk(cls, chunk_path: str) -> dict[str, np.ndarray]:
         """Load a single chunk file."""
         with h5py.File(chunk_path, "r") as f:
             # Validate required fields
-            required_fields = ["states", "policy_indices", "values"]
-            missing = [field for field in required_fields if field not in f]
+            required_fields: list[str] = ["states", "policy_indices", "values"]
+            missing: list[str] = [field for field in required_fields if field not in f]
             if missing:
                 raise ValueError(
                     f"Chunk {chunk_path} is missing required fields: {missing}. "
                     "Please regenerate chunks with the latest preprocessing."
                 )
 
-            data = {
-                "states": f["states"][:],
-                "policy_indices": f["policy_indices"][:],
-                "values": f["values"][:],
+            data: dict[str, np.ndarray] = {
+                "states": np.array(f["states"]),
+                "policy_indices": np.array(f["policy_indices"]),
+                "values": np.array(f["values"]),
             }
 
             if "weights" in f:
-                data["weights"] = f["weights"][:]
+                data["weights"] = np.array(f["weights"])
 
         # Validate data for NaN/Inf values
         if np.isnan(data["states"]).any() or np.isinf(data["states"]).any():
@@ -333,9 +335,9 @@ class ChunkManager:
         if not os.path.exists(chunks_dir):
             return
 
-        chunk_idx = 0
+        chunk_idx: int = 0
         while True:
-            chunk_path = os.path.join(chunks_dir, f"chunk_{chunk_idx:04d}.h5")
+            chunk_path: str = os.path.join(chunks_dir, f"chunk_{chunk_idx:04d}.h5")
             if not os.path.exists(chunk_path):
                 break
             yield chunk_path
@@ -349,13 +351,13 @@ class ChunkManager:
     @classmethod
     def count_examples(cls, chunks_dir: str) -> int:
         """Count total examples across all chunks."""
-        metadata = cls.load_metadata(chunks_dir)
+        metadata: dict[str, Any] | None = cls.load_metadata(chunks_dir)
         if metadata:
             return metadata["total_examples"]
 
         # Fallback: count manually
-        total = 0
+        total: int = 0
         for chunk_path in cls.iter_chunk_paths(chunks_dir):
-            chunk = cls.load_chunk(chunk_path)
+            chunk: dict[str, np.ndarray] = cls.load_chunk(chunk_path)
             total += len(chunk["states"])
         return total

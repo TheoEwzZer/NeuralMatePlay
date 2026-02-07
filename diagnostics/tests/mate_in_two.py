@@ -1,5 +1,9 @@
 """Test: Mate in 2."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -15,9 +19,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Test positions with mate in 2 (17 positions like mate_in_one)
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === QUEEN SACRIFICE MATES (4 positions) ===
     {
         "name": "Scholar's Mate Pattern",
@@ -128,12 +135,14 @@ TEST_POSITIONS = [
 ]
 
 
-def _is_mate_in_n(board, n, memo=None):
+def _is_mate_in_n(
+    board: chess.Board, n: int, memo: dict[str, chess.Move | None] | None = None
+) -> chess.Move | None:
     """Check if there's a forced mate in n moves. Returns the first move if found."""
     if memo is None:
         memo = {}
 
-    board_key = board.fen()
+    board_key: str = board.fen()
     if board_key in memo:
         return memo[board_key]
 
@@ -151,7 +160,7 @@ def _is_mate_in_n(board, n, memo=None):
 
         if n > 1 and not board.is_game_over():
             # Opponent's best defense
-            can_escape = False
+            can_escape: bool = False
             for defense in board.legal_moves:
                 board.push(defense)
                 if not _is_mate_in_n(board, n - 1, memo):
@@ -171,25 +180,25 @@ def _is_mate_in_n(board, n, memo=None):
     return None
 
 
-def test_mate_in_two(network, results: TestResults):
+def test_mate_in_two(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if the network can find mate in 2."""
     print(header("TEST: Mate in 2"))
 
-    passed = 0
-    total_valid = 0
+    passed: float = 0
+    total_valid: int = 0
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
         # Verify there's actually a mate in 2
-        mating_move = _is_mate_in_n(board, 2)
+        mating_move: chess.Move | None = _is_mate_in_n(board, 2)
 
         if not mating_move and test["first_move"]:
             # Try the suggested first move
             try:
-                suggested = chess.Move.from_uci(test["first_move"])
+                suggested: chess.Move = chess.Move.from_uci(test["first_move"])
                 if suggested in board.legal_moves:
                     print(f"\n  Expected first move: {test['first_move']}")
                 else:
@@ -202,15 +211,17 @@ def test_mate_in_two(network, results: TestResults):
             total_valid += 1
             print(f"\n  Mating sequence starts with: {mating_move.uci()}")
 
+            policy: np.ndarray
+            value: float
             policy, value = predict_for_board(board, network)
 
-            top_5 = np.argsort(policy)[::-1][:5]
+            top_5: np.ndarray = np.argsort(policy)[::-1][:5]
 
             print(f"  Value: {value:+.4f}")
             print(f"\n  {'Rank':<6} {'Move':<8} {'Prob':>8} {'Mate?':<10}")
             print("  " + "-" * 35)
 
-            mate_found_at = None
+            mate_found_at: int | None = None
             for i, idx in enumerate(top_5):
                 move = decode_move(idx, board)
                 prob = policy[idx]
@@ -244,6 +255,8 @@ def test_mate_in_two(network, results: TestResults):
             results.add_diagnostic("mate_in_2", f"{test['name']}_rank", mate_found_at)
         else:
             # Evaluation position
+            policy: np.ndarray
+            value: float
             policy, value = predict_for_board(board, network)
             print(f"\n  Value evaluation: {value:+.4f}")
 
@@ -252,7 +265,7 @@ def test_mate_in_two(network, results: TestResults):
         results.add("Mate in 2", False, 0.0, 1.0)
         return 0.0
 
-    score = passed / total_valid
+    score: float = passed / total_valid
     results.add_diagnostic("mate_in_2", "total_tested", total_valid)
     results.add_diagnostic("mate_in_2", "found", passed)
     results.add("Mate in 2", score >= 0.3, score, 1.0)

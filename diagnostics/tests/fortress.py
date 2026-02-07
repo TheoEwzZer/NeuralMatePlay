@@ -1,5 +1,9 @@
 """Test: Fortress Recognition."""
 
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
 import numpy as np
 import chess
 
@@ -13,9 +17,12 @@ from ..core import (
     predict_for_board,
 )
 
+if TYPE_CHECKING:
+    from src.alphazero.network import DualHeadNetwork
+
 
 # Fortress positions - draw despite material deficit
-TEST_POSITIONS = [
+TEST_POSITIONS: list[dict[str, Any]] = [
     # === ROOK FORTRESSES ===
     {
         "name": "Rook vs Queen Fortress",
@@ -79,22 +86,24 @@ TEST_POSITIONS = [
 ]
 
 
-def test_fortress(network, results: TestResults):
+def test_fortress(network: DualHeadNetwork, results: TestResults) -> float:
     """Test if network recognizes fortress positions."""
     print(header("TEST: Fortress Recognition"))
 
-    passed = 0
-    total = len(TEST_POSITIONS)
+    passed: float = 0
+    total: int = len(TEST_POSITIONS)
 
     for test in TEST_POSITIONS:
-        board = chess.Board(test["fen"])
+        board: chess.Board = chess.Board(test["fen"])
         print(subheader(f"{test['name']}: {test['description']}"))
         print(board)
 
+        policy: np.ndarray
+        value: float
         policy, value = predict_for_board(board, network)
 
-        expected = test["expected_eval"]
-        material = test["material_diff"]
+        expected: str = test["expected_eval"]
+        material: int = test["material_diff"]
 
         print(f"\n  Value: {value:+.4f}")
         print(f"  Material: {material:+d}")
@@ -135,7 +144,7 @@ def test_fortress(network, results: TestResults):
         results.add_diagnostic("fortress", f"{test['name']}_value", float(value))
         results.add_diagnostic("fortress", f"{test['name']}_material", material)
 
-    score = passed / total
+    score: float = passed / total
     results.add_diagnostic("fortress", "total_tested", total)
     results.add_diagnostic("fortress", "correct", passed)
     results.add("Fortress", score >= 0.4, score, 1.0)

@@ -42,7 +42,7 @@ class SearchTreePanel(tk.Frame):
         # Allow panel to expand beyond initial size
         self.pack_propagate(False)
 
-        self._tree_data: List[Dict[str, Any]] = []
+        self._tree_data: list[dict[str, Any]] = []
         self._expanded: set = set()  # Set of expanded node paths
 
         self._create_widgets(bg)
@@ -137,7 +137,7 @@ class SearchTreePanel(tk.Frame):
 
     def update_tree(
         self,
-        tree_data: List[Dict[str, Any]],
+        tree_data: list[dict[str, Any]],
         depth: int = 0,
         top_n: int = 0,
         mate_in: int | None = None,
@@ -196,7 +196,7 @@ class SearchTreePanel(tk.Frame):
 
     def _create_node_widget(
         self,
-        node: Dict[str, Any],
+        node: dict[str, Any],
         depth: int,
         path: str,
     ) -> None:
@@ -360,7 +360,7 @@ class SearchTreePanel(tk.Frame):
         self._expand_nodes_recursive(self._tree_data, "")
         self._rebuild_display()
 
-    def _expand_nodes_recursive(self, nodes: List[Dict], parent_path: str) -> None:
+    def _expand_nodes_recursive(self, nodes: list[dict], parent_path: str) -> None:
         """Recursively expand all nodes."""
         for node in nodes:
             path = f"{parent_path}/{node['san']}" if parent_path else node["san"]
