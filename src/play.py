@@ -208,6 +208,8 @@ def run_cli(
         contempt=0.5,
         uncertainty_weight=0.2,
         draw_sibling_fpu=True,
+        # Flatten overconfident priors (+strength in MCTS matches)
+        policy_temperature=1.6,
     )
     # Deterministic play
     mcts.temperature = 0.1

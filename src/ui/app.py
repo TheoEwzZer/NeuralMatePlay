@@ -77,6 +77,8 @@ class ChessGameApp(object):
     # Default MCTS settings for play mode (optimized for quality over speed)
     DEFAULT_MCTS_BATCH_SIZE = 8
     DEFAULT_HISTORY_LENGTH = 3
+    # Softmax temperature on the network priors (flattens overconfident policies)
+    POLICY_TEMPERATURE = 1.6
 
     # Dynamic time management constants
     # Minimum simulations floor (even in time pressure)
@@ -968,6 +970,7 @@ class ChessGameApp(object):
                     contempt=0.5,
                     uncertainty_weight=0.2,
                     draw_sibling_fpu=True,
+                    policy_temperature=self.POLICY_TEMPERATURE,
                 )
                 # Initialize game history with starting position
                 self.game_positions = [self.board_widget.get_board().copy()]
@@ -996,6 +999,7 @@ class ChessGameApp(object):
                     contempt=0.5,
                     uncertainty_weight=0.2,
                     draw_sibling_fpu=True,
+                    policy_temperature=self.POLICY_TEMPERATURE,
                 )
                 # Initialize game history with starting position
                 self.game_positions = [self.board_widget.get_board().copy()]
@@ -1150,8 +1154,8 @@ class ChessGameApp(object):
         board: chess.Board = self.board_widget.get_board()
         move_stack: list[chess.Move] = list(board.move_stack)
 
-        # Create a fresh board and replay to get all positions
-        temp_board: chess.Board = chess.Board()
+        # Replay from the game's starting position (may be a custom FEN)
+        temp_board: chess.Board = board.root()
         # Starting position
         self.game_positions = [temp_board.copy()]
 
@@ -1697,6 +1701,25 @@ class ChessGameApp(object):
             except Exception:
                 pass
 
+        # No tree: best move of the raw network policy (single evaluation)
+        if self.mcts is not None:
+            saved_sims: int = self.mcts.num_simulations
+            self.mcts.num_simulations = 0
+            try:
+                history_boards: list[chess.Board] | None = (
+                    self.game_positions[:-1] if len(self.game_positions) > 1 else None
+                )
+                policy_move: chess.Move | None = self.mcts.get_best_move(
+                    board, history_boards=history_boards
+                )
+                if policy_move is not None:
+                    print(f"Instant move from policy: {policy_move}")
+                    return policy_move
+            except Exception:
+                pass
+            finally:
+                self.mcts.num_simulations = saved_sims
+
         # Fallback: random legal move
         legal_moves: list[chess.Move] = list(board.legal_moves)
         if legal_moves:
@@ -2143,6 +2166,7 @@ class ChessGameApp(object):
                 contempt=0.5,
                 uncertainty_weight=0.2,
                 draw_sibling_fpu=True,
+                policy_temperature=self.POLICY_TEMPERATURE,
             )
 
         except Exception as e:
