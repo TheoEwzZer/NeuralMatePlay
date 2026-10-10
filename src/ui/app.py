@@ -10,7 +10,7 @@ Professional chess.com-inspired design with AI debugging features.
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox, filedialog
 from typing import Any, Literal, TYPE_CHECKING
 import threading
 import queue
@@ -37,9 +37,14 @@ from .styles import (
     FONTS,
     apply_theme,
     create_styled_button,
-    create_panel,
     create_tooltip,
     create_confirmation_dialog,
+    load_piece_image,
+    Card,
+    ChoiceList,
+    HelpBadge,
+    SegmentedControl,
+    Slider,
     ThinkingIndicator,
 )
 from .board_widget import ChessBoardWidget
@@ -52,6 +57,13 @@ from .components import (
     OpeningDisplay,
     PhaseIndicator,
     SearchTreePanel,
+)
+from .components.ai_insights import (
+    AdvantageGraph,
+    AIPlanPanel,
+    CandidateMovesPanel,
+    WinChancePanel,
+    expected_score,
 )
 
 if TYPE_CHECKING:
@@ -113,10 +125,10 @@ class ChessGameApp(object):
             time_control: Time in minutes per player (None = no time limit)
         """
         self.root = tk.Tk()
-        self.root.title("NeuralMate Chess - AlphaZero")
+        self.root.title("NeuralMate - Échecs contre l'IA")
         self.root.resizable(True, True)
-        self.root.geometry("1700x950")
-        self.root.minsize(1400, 850)
+        self.root.geometry("1720x1000")
+        self.root.minsize(1480, 900)
 
         apply_theme(self.root)
 
@@ -155,6 +167,8 @@ class ChessGameApp(object):
         self.ai_thinking: bool = False
         self.ai_thread: threading.Thread | None = None
         self.ai_cancelled: bool = False
+        # Incremented on every new game: stale AI results are ignored
+        self.game_id: int = 0
 
         # Move history for back/forward navigation
         self.undone_moves: list[tuple[chess.Move, chess.Move | None]] = []
@@ -168,6 +182,10 @@ class ChessGameApp(object):
         self.eval_history: list[float] = []
         # WDL for each eval
         self.wdl_history: list[np.ndarray | None] = []
+        # Beginner analysis history: (ply, white_score, eval_bar_value, wdl_white)
+        self.eval_points: list[tuple[int, float, float, tuple[float, float, float]]] = (
+            []
+        )
 
         # Move timing
         self.turn_start_time: float = time.time()
@@ -207,6 +225,8 @@ class ChessGameApp(object):
         self.editor_palette_buttons: dict[str, tk.Button] = {}
 
         self._create_ui()
+        self._update_player_names_for_human_ai()
+        self._update_game_info()
         self._bind_keyboard_shortcuts()
         self._load_network()
         self._start_update_loop()
@@ -220,339 +240,370 @@ class ChessGameApp(object):
         self.root.bind("<Control-N>", lambda e: self._new_game_with_confirm())
         self.root.bind("<Control-z>", lambda e: self._back_one_move())
         self.root.bind("<Control-Z>", lambda e: self._back_one_move())
-        self.root.bind("<Left>", lambda e: self._back_one_move())
-        self.root.bind("<Right>", lambda e: self._forward_one_move())
-        self.root.bind("<f>", lambda e: self._flip_board())
-        self.root.bind("<F>", lambda e: self._flip_board())
+        self.root.bind("<Left>", lambda e: self._unless_typing(self._back_one_move))
+        self.root.bind("<Right>", lambda e: self._unless_typing(self._forward_one_move))
+        self.root.bind("<f>", lambda e: self._unless_typing(self._flip_board))
+        self.root.bind("<F>", lambda e: self._unless_typing(self._flip_board))
         self.root.bind("<Escape>", lambda e: self._cancel_selection())
 
+    def _unless_typing(self, action: Any) -> None:
+        """Run a single-key shortcut unless the user is typing in a text field."""
+        if isinstance(self.root.focus_get(), tk.Entry):
+            return
+        action()
+
     def _create_ui(self) -> None:
-        """Create the main UI layout - chess.com inspired design."""
+        """Create the main UI layout: header, then 3 columns."""
+        # Header bar (logo, Play/Editor switch, status, network)
+        self._create_top_bar(self.root)
+
         # Main container
         main_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
-        main_frame.pack(padx=20, pady=15, fill="both", expand=True)
-
-        # Top bar with controls
-        self._create_top_bar(main_frame)
+        main_frame.pack(padx=20, pady=(14, 16), fill="both", expand=True)
 
         # Content area - 3 column layout
         content_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"])
-        content_frame.pack(fill="both", expand=True, pady=(10, 0))
+        content_frame.pack(fill="both", expand=True)
 
-        # Left panel - Player info, opening, phase
+        # Left panel - game setup, AI level, game info, move list
         self._create_left_panel(content_frame)
 
-        # Center panel - Board + eval bar
+        # Center panel - players, board, eval bar, navigation
         self._create_center_panel(content_frame)
 
-        # Right panel - Analysis (MCTS, eval graph, network output)
+        # Right panel - beginner analysis + technical details
         self._create_right_panel(content_frame)
 
     def _create_top_bar(self, parent: tk.Widget) -> None:
-        """Create the top bar with game controls."""
-        top_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
-        top_frame.pack(fill="x")
+        """Create the header bar."""
+        header = tk.Frame(parent, bg=COLORS["bg_secondary"])
+        header.pack(fill="x")
+        tk.Frame(parent, bg=COLORS["border"], height=1).pack(fill="x")
 
-        # Left side - Game control buttons
-        left_btns = tk.Frame(top_frame, bg=COLORS["bg_primary"])
-        left_btns.pack(side="left")
+        inner = tk.Frame(header, bg=COLORS["bg_secondary"])
+        inner.pack(fill="x", padx=20, pady=10)
 
-        self.new_game_btn: tk.Button = create_styled_button(
-            left_btns,
-            "New Game",
-            command=self._new_game,
-            style="accent",
-        )
-        self.new_game_btn.pack(side="left", padx=(0, 10))
-
-        self.back_btn: tk.Button = create_styled_button(
-            left_btns,
-            "◀",
-            command=self._back_one_move,
-            style="outline",
-        )
-        self.back_btn.pack(side="left", padx=(0, 3))
-
-        self.forward_btn: tk.Button = create_styled_button(
-            left_btns,
-            "▶",
-            command=self._forward_one_move,
-            style="outline",
-        )
-        self.forward_btn.pack(side="left", padx=(0, 10))
-
-        self.flip_btn: tk.Button = create_styled_button(
-            left_btns,
-            "Flip",
-            command=self._flip_board,
-            style="outline",
-        )
-        self.flip_btn.pack(side="left", padx=(0, 10))
-
-        self.load_btn: tk.Button = create_styled_button(
-            left_btns,
-            "Load Network",
-            command=self._load_network_dialog,
-            style="outline",
-        )
-        self.load_btn.pack(side="left")
+        # Logo
+        logo = tk.Frame(inner, bg=COLORS["bg_secondary"])
+        logo.pack(side="left")
+        tk.Label(
+            logo,
+            text="♞",
+            font=("Segoe UI Symbol", 22),
+            fg=COLORS["accent"],
+            bg=COLORS["bg_secondary"],
+        ).pack(side="left", padx=(0, 8))
+        title_box = tk.Frame(logo, bg=COLORS["bg_secondary"])
+        title_box.pack(side="left")
+        tk.Label(
+            title_box,
+            text="NeuralMate",
+            font=FONTS["heading"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_secondary"],
+            anchor="w",
+        ).pack(fill="x")
+        tk.Label(
+            title_box,
+            text="Jouez aux échecs contre une IA qui apprend seule",
+            font=FONTS["caption"],
+            fg=COLORS["text_muted"],
+            bg=COLORS["bg_secondary"],
+            anchor="w",
+        ).pack(fill="x")
 
         # Mode toggle (Play / Editor)
-        mode_toggle_frame = tk.Frame(left_btns, bg=COLORS["bg_primary"])
-        mode_toggle_frame.pack(side="left", padx=(20, 0))
-
-        tk.Label(
-            mode_toggle_frame,
-            text="Mode:",
-            bg=COLORS["bg_primary"],
-            fg=COLORS["text_muted"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(0, 5))
-
         self.app_mode_var = tk.StringVar(value="play")
-
-        self.play_mode_btn = tk.Radiobutton(
-            mode_toggle_frame,
-            text="Play",
+        self.mode_switch = SegmentedControl(
+            inner,
+            options=[("♟  Jouer", "play"), ("✎  Éditer la position", "editor")],
             variable=self.app_mode_var,
-            value="play",
             command=self._on_app_mode_change,
-            bg=COLORS["bg_primary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            activebackground=COLORS["bg_primary"],
-            activeforeground=COLORS["accent"],
-            font=FONTS["body_bold"],
-            indicatoron=False,
-            padx=10,
-            pady=3,
+            font=FONTS["small_bold"],
         )
-        self.play_mode_btn.pack(side="left")
-
-        self.editor_mode_btn = tk.Radiobutton(
-            mode_toggle_frame,
-            text="Editor",
-            variable=self.app_mode_var,
-            value="editor",
-            command=self._on_app_mode_change,
-            bg=COLORS["bg_primary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            activebackground=COLORS["bg_primary"],
-            activeforeground=COLORS["accent"],
-            font=FONTS["body_bold"],
-            indicatoron=False,
-            padx=10,
-            pady=3,
+        self.mode_switch.pack(side="left", padx=(36, 0))
+        create_tooltip(
+            self.mode_switch,
+            "Jouer : faire une partie.\nÉditer : placer les pièces librement "
+            "pour créer une position, puis la jouer.",
         )
-        self.editor_mode_btn.pack(side="left")
 
-        # Tooltips
-        create_tooltip(self.new_game_btn, "Start a new game (Ctrl+N)")
-        create_tooltip(self.back_btn, "Go back one move (Ctrl+Z / ←)")
-        create_tooltip(self.forward_btn, "Go forward (→)")
-        create_tooltip(self.flip_btn, "Flip board (F)")
-        create_tooltip(self.load_btn, "Load neural network")
-
-        # Right side - Status and network info
-        right_frame = tk.Frame(top_frame, bg=COLORS["bg_primary"])
+        # Right side - network info + load button
+        right_frame = tk.Frame(inner, bg=COLORS["bg_secondary"])
         right_frame.pack(side="right")
 
-        self.network_status = tk.Label(
+        self.load_btn: tk.Button = create_styled_button(
             right_frame,
-            text="No network loaded",
-            bg=COLORS["bg_primary"],
-            fg=COLORS["text_muted"],
-            font=FONTS["small"],
+            "Changer de modèle",
+            command=self._load_network_dialog,
+            style="outline",
+            font=FONTS["small_bold"],
+            padx=12,
+            pady=6,
         )
-        self.network_status.pack(side="right")
+        self.load_btn.pack(side="right")
+        create_tooltip(
+            self.load_btn,
+            "Charger un autre réseau de neurones (fichier .pt).\n"
+            "Un réseau plus entraîné joue plus fort.",
+        )
+
+        net_box = tk.Frame(right_frame, bg=COLORS["bg_secondary"])
+        net_box.pack(side="right", padx=(0, 12))
+        tk.Label(
+            net_box,
+            text="CERVEAU DE L'IA",
+            font=FONTS["caption_bold"],
+            fg=COLORS["text_muted"],
+            bg=COLORS["bg_secondary"],
+            anchor="e",
+        ).pack(fill="x")
+        self.network_status = tk.Label(
+            net_box,
+            text="Aucun réseau chargé",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_muted"],
+            font=FONTS["small_bold"],
+            anchor="e",
+        )
+        self.network_status.pack(fill="x")
+
+        # Center - status pill
+        status_pill = tk.Frame(inner, bg=COLORS["bg_tertiary"])
+        status_pill.pack(side="left", expand=True)
+        pill_inner = tk.Frame(status_pill, bg=COLORS["bg_tertiary"])
+        pill_inner.pack(padx=16, pady=7)
+
+        self.status_dot = tk.Canvas(
+            pill_inner,
+            width=10,
+            height=10,
+            bg=COLORS["bg_tertiary"],
+            highlightthickness=0,
+        )
+        self.status_dot.pack(side="left", padx=(0, 9))
 
         self.status_label = tk.Label(
-            right_frame,
-            text="Your turn",
-            bg=COLORS["bg_primary"],
-            fg=COLORS["success"],
+            pill_inner,
+            text="À vous de jouer",
+            bg=COLORS["bg_tertiary"],
+            fg=COLORS["text_primary"],
             font=FONTS["body_bold"],
         )
-        self.status_label.pack(side="right", padx=(0, 20))
+        self.status_label.pack(side="left")
+        self._set_status("À vous de jouer", "turn")
+
+    def _set_status(self, text: str, kind: str = "info") -> None:
+        """
+        Update the header status pill.
+
+        Args:
+            text: Status text
+            kind: "turn", "thinking", "check", "over", "editor" or "info"
+        """
+        colors: dict[str, str] = {
+            "turn": COLORS["success"],
+            "thinking": COLORS["accent"],
+            "check": COLORS["error"],
+            "over": COLORS["warning"],
+            "editor": COLORS["opening_eco"],
+            "info": COLORS["text_muted"],
+        }
+        color: str = colors.get(kind, COLORS["text_muted"])
+        self.status_label.configure(text=text)
+        self.status_dot.delete("all")
+        self.status_dot.create_oval(1, 1, 9, 9, fill=color, outline="")
 
     def _create_left_panel(self, parent: tk.Widget) -> None:
-        """Create the left panel with player info and game info."""
-        left_panel = tk.Frame(parent, bg=COLORS["bg_primary"], width=200)
-        left_panel.pack(side="left", fill="y", padx=(0, 15))
+        """Create the left column (play setup or editor tools)."""
+        left_panel = tk.Frame(parent, bg=COLORS["bg_primary"], width=320)
+        left_panel.pack(side="left", fill="y", padx=(0, 18))
         left_panel.pack_propagate(False)
 
         # Play mode content
         self.play_left_content = tk.Frame(left_panel, bg=COLORS["bg_primary"])
         self.play_left_content.pack(fill="both", expand=True)
 
-        # Black player info (top, opponent when playing white)
-        self.black_player_info = PlayerInfo(
-            self.play_left_content,
-            color=chess.BLACK,
-            name="AI",
-        )
-        self.black_player_info.pack(fill="x", pady=(0, 10))
-
-        # Opening display
-        self.opening_display = OpeningDisplay(self.play_left_content)
-        self.opening_display.pack(fill="x", pady=(0, 10))
-
-        # Phase indicator
-        self.phase_indicator = PhaseIndicator(self.play_left_content)
-        self.phase_indicator.pack(fill="x", pady=(0, 10))
-
-        # Spacer
-        spacer = tk.Frame(self.play_left_content, bg=COLORS["bg_primary"])
-        spacer.pack(fill="both", expand=True)
-
-        # White player info (bottom, you when playing white)
-        self.white_player_info = PlayerInfo(
-            self.play_left_content,
-            color=chess.WHITE,
-            name="You",
-        )
-        self.white_player_info.pack(fill="x", pady=(10, 0))
-
-        # Game mode selection (collapsed panel)
+        # Game mode + color + new game
         self._create_mode_panel(self.play_left_content)
+
+        # Game info: opening + phase side by side, then the move list
+        info_card = Card(self.play_left_content, padding=0)
+        info_card.pack(fill="both", expand=True)
+
+        info_row = tk.Frame(info_card.body, bg=COLORS["bg_secondary"])
+        info_row.pack(fill="x", padx=14, pady=(12, 0))
+        info_row.grid_columnconfigure(0, weight=1, uniform="info")
+        info_row.grid_columnconfigure(1, weight=1, uniform="info")
+
+        self.opening_display = OpeningDisplay(info_row)
+        self.opening_display.grid(row=0, column=0, sticky="nw", padx=(0, 8))
+        self.opening_display._name_label.configure(wraplength=125)
+
+        self.phase_indicator = PhaseIndicator(info_row, show_tip=False)
+        self.phase_indicator.grid(row=0, column=1, sticky="nw")
+
+        tk.Frame(info_card.body, bg=COLORS["border"], height=1).pack(
+            fill="x", padx=14, pady=(10, 0)
+        )
+
+        # Move list fills the remaining height
+        self.move_list = MoveList(info_card.body, width=300, height=120)
+        self.move_list.configure(highlightthickness=0)
+        self.move_list.pack(fill="both", expand=True)
 
         # Editor mode content (initially hidden)
         self.editor_left_content = tk.Frame(left_panel, bg=COLORS["bg_primary"])
         self._create_editor_panel(self.editor_left_content)
 
     def _create_mode_panel(self, parent: tk.Widget) -> None:
-        """Create the game mode selection panel."""
-        mode_panel: tk.Frame = create_panel(parent, title="Game Mode")
-        mode_panel.pack(fill="x", pady=(10, 0))
-
-        mode_content = tk.Frame(mode_panel, bg=COLORS["bg_secondary"])
-        mode_content.pack(fill="x", padx=10, pady=(0, 10))
+        """Create the game setup card (mode, color, AI level, new game)."""
+        mode_card = Card(parent, title="Nouvelle partie")
+        mode_card.pack(fill="x", pady=(0, 12))
+        body: tk.Frame = mode_card.body
 
         self.mode_var = tk.StringVar(value="human_vs_ai")
-
-        modes = [
-            ("Human vs AI", "human_vs_ai"),
-            ("AI vs AI", "ai_vs_ai"),
-            ("Human vs Human", "human_vs_human"),
-        ]
-
-        for text, value in modes:
-            rb = tk.Radiobutton(
-                mode_content,
-                text=text,
-                variable=self.mode_var,
-                value=value,
-                command=self._on_mode_change,
-                bg=COLORS["bg_secondary"],
-                fg=COLORS["text_primary"],
-                selectcolor=COLORS["bg_tertiary"],
-                activebackground=COLORS["bg_secondary"],
-                activeforeground=COLORS["text_primary"],
-                font=FONTS["small"],
-            )
-            rb.pack(anchor="w")
+        ChoiceList(
+            body,
+            options=[
+                ("human_vs_ai", "♔", "Contre l'IA", "Affrontez le réseau de neurones"),
+                ("ai_vs_ai", "⚙", "IA contre IA", "Regardez l'IA jouer seule"),
+                ("human_vs_human", "⚔", "Deux joueurs", "Jouez à deux sur cet écran"),
+            ],
+            variable=self.mode_var,
+            command=self._on_mode_change,
+        ).pack(fill="x")
 
         # Color selection
-        self.color_frame = tk.Frame(mode_content, bg=COLORS["bg_secondary"])
-        self.color_frame.pack(fill="x", pady=(5, 0))
+        self.color_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
+        self.color_frame.pack(fill="x", pady=(10, 0))
 
         tk.Label(
             self.color_frame,
-            text="Play as:",
+            text="Vous jouez les",
             bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
+            fg=COLORS["text_secondary"],
             font=FONTS["small"],
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 10))
 
         self.color_var = tk.StringVar(value="white")
+        SegmentedControl(
+            self.color_frame,
+            options=[("♔ Blancs", "white"), ("♚ Noirs", "black")],
+            variable=self.color_var,
+            command=self._on_color_change,
+        ).pack(side="left", fill="x", expand=True)
 
-        for text, value in [("White", "white"), ("Black", "black")]:
-            rb = tk.Radiobutton(
-                self.color_frame,
-                text=text,
-                variable=self.color_var,
-                value=value,
-                command=self._on_color_change,
-                bg=COLORS["bg_secondary"],
-                fg=COLORS["text_primary"],
-                selectcolor=COLORS["bg_tertiary"],
-                font=FONTS["small"],
-            )
-            rb.pack(side="left", padx=(5, 0))
+        self.new_game_btn: tk.Button = create_styled_button(
+            body,
+            "Nouvelle partie",
+            command=self._new_game_with_confirm,
+            style="accent",
+            pady=9,
+        )
+        self.new_game_btn.pack(fill="x", pady=(12, 0))
+        create_tooltip(self.new_game_btn, "Recommencer une partie (Ctrl+N)")
 
         # AI Settings panel
         self._create_ai_settings_panel(parent)
 
+    # Named AI strength presets: (simulations, label, description)
+    AI_LEVELS: list[tuple[int, str, str]] = [
+        (1, "Instinct", "Joue son premier réflexe, sans réfléchir."),
+        (100, "Rapide", "Réfléchit très peu : idéal pour débuter."),
+        (200, "Normal", "Un bon compromis entre force et rapidité."),
+        (800, "Fort", "Réfléchit longuement avant chaque coup."),
+        (1600, "Max", "Toute sa puissance, mais plus lent."),
+    ]
+
     def _create_ai_settings_panel(self, parent: tk.Widget) -> None:
-        """Create the AI settings panel with simulations slider."""
-        ai_panel: tk.Frame = create_panel(parent, title="AI Settings")
-        ai_panel.pack(fill="x", pady=(10, 0))
-
-        ai_content = tk.Frame(ai_panel, bg=COLORS["bg_secondary"])
-        ai_content.pack(fill="x", padx=10, pady=(0, 10))
-
-        # Simulations label and value
-        sim_header = tk.Frame(ai_content, bg=COLORS["bg_secondary"])
-        sim_header.pack(fill="x")
-
-        tk.Label(
-            sim_header,
-            text="Simulations:",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
-            font=FONTS["small"],
-        ).pack(side="left")
-
-        self.sim_value_label = tk.Label(
-            sim_header,
-            text=str(self.num_simulations),
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            font=("Consolas", 10, "bold"),
+        """Create the AI strength card with named presets and a fine slider."""
+        ai_card = Card(
+            parent,
+            title="Niveau de l'IA",
+            help_text=(
+                "Avant chaque coup, l'IA imagine des positions futures pour choisir "
+                "le meilleur coup.\n\nPlus elle en étudie, plus elle joue fort… "
+                "mais plus elle met de temps à répondre."
+            ),
         )
-        self.sim_value_label.pack(side="right")
+        ai_card.pack(fill="x", pady=(0, 12))
+        ai_content: tk.Frame = ai_card.body
 
-        # Simulations slider
+        self.level_var = tk.StringVar(value="")
+        SegmentedControl(
+            ai_content,
+            options=[(label, str(sims)) for sims, label, _ in self.AI_LEVELS],
+            variable=self.level_var,
+            command=lambda: self._set_simulations(int(self.level_var.get())),
+            font=FONTS["caption_bold"],
+        ).pack(fill="x")
+
+        # Simulations slider (fine tuning, logarithmic)
         self.sim_var = tk.IntVar(value=self.num_simulations)
-        self.sim_slider = ttk.Scale(
+        self.sim_slider = Slider(
             ai_content,
             from_=1,
             to=2000,
-            orient="horizontal",
             variable=self.sim_var,
             command=self._on_simulations_change,
+            log=True,
         )
-        self.sim_slider.pack(fill="x", pady=(5, 0))
+        self.sim_slider.pack(fill="x", pady=(8, 0))
+        create_tooltip(
+            self.sim_slider, "Réglage fin : glissez pour choisir précisément."
+        )
 
-        # Preset buttons
-        preset_frame = tk.Frame(ai_content, bg=COLORS["bg_secondary"])
-        preset_frame.pack(fill="x", pady=(5, 0))
+        self.sim_value_label = tk.Label(
+            ai_content,
+            text="",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            font=FONTS["caption_bold"],
+            anchor="w",
+        )
+        self.sim_value_label.pack(fill="x", pady=(2, 0))
 
-        presets: list[int] = [1, 100, 400, 800, 1600]
-        for preset in presets:
-            btn = tk.Button(
-                preset_frame,
-                text=str(preset),
-                command=lambda p=preset: self._set_simulations(p),
-                bg=COLORS["bg_tertiary"],
-                fg=COLORS["text_primary"],
-                font=("Segoe UI", 8),
-                relief="flat",
-                width=4,
-                cursor="hand2",
-            )
-            btn.pack(side="left", padx=(0, 3))
+        self.level_desc_label = tk.Label(
+            ai_content,
+            text="",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+            font=FONTS["caption"],
+            anchor="w",
+            justify="left",
+            wraplength=260,
+        )
+        self.level_desc_label.pack(fill="x")
+        self._refresh_level_display()
+
+    def _refresh_level_display(self) -> None:
+        """Sync the level presets and labels with the current simulations."""
+        sims: int = self.num_simulations
+        plural: str = "s" if sims > 1 else ""
+        self.sim_value_label.configure(
+            text=f"{sims} position{plural} étudiée{plural} par coup"
+        )
+        preset = next((lvl for lvl in self.AI_LEVELS if lvl[0] == sims), None)
+        if preset is not None:
+            self.level_var.set(str(sims))
+            self.level_desc_label.configure(text=preset[2])
+        else:
+            self.level_var.set("")
+            self.level_desc_label.configure(text="Niveau personnalisé.")
 
     def _on_simulations_change(self, value: str) -> None:
         """Handle simulations slider change."""
         new_sims: int = int(float(value))
         self.num_simulations = new_sims
-        self.sim_value_label.configure(text=str(new_sims))
+        self.base_simulations = new_sims
+        self._refresh_level_display()
 
         # Update MCTS if it exists
         if self.mcts is not None:
             self.mcts.num_simulations = new_sims
+        if self.pure_mcts_player is not None:
+            self.pure_mcts_player._num_simulations = new_sims
 
     def _set_simulations(self, value: int) -> None:
         """Set simulations to a preset value."""
@@ -564,175 +615,133 @@ class ChessGameApp(object):
         from .styles import PIECE_UNICODE
 
         # Piece palette
-        palette_panel: tk.Frame = create_panel(parent, title="Pieces")
-        palette_panel.pack(fill="x", pady=(0, 10))
+        palette_card = Card(
+            parent,
+            title="Pièces",
+            help_text=(
+                "Choisissez une pièce puis cliquez sur une case pour la poser.\n"
+                "Clic droit sur une case : retirer la pièce.\n"
+                "Vous pouvez aussi déplacer les pièces en les glissant."
+            ),
+        )
+        palette_card.pack(fill="x", pady=(0, 12))
+        palette_content: tk.Frame = palette_card.body
 
-        palette_content = tk.Frame(palette_panel, bg=COLORS["bg_secondary"])
-        palette_content.pack(fill="x", padx=10, pady=(0, 10))
-
-        # White pieces label
-        tk.Label(
-            palette_content,
-            text="White",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
-            font=FONTS["small"],
-        ).pack(anchor="w")
-
-        # White pieces grid (2 rows of 3)
-        white_grid = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
-        white_grid.pack(pady=(0, 5))
-
-        white_pieces = [
-            (chess.KING, "K"),
-            (chess.QUEEN, "Q"),
-            (chess.ROOK, "R"),
-            (chess.BISHOP, "B"),
-            (chess.KNIGHT, "N"),
-            (chess.PAWN, "P"),
+        rows = [
+            ("Blancs", chess.WHITE, ["K", "Q", "R", "B", "N", "P"]),
+            ("Noirs", chess.BLACK, ["k", "q", "r", "b", "n", "p"]),
         ]
-        for i, (piece_type, symbol) in enumerate(white_pieces):
-            btn = tk.Button(
-                white_grid,
-                text=PIECE_UNICODE.get(symbol, symbol),
-                command=lambda pt=piece_type: self._select_editor_piece(
-                    chess.WHITE, pt
-                ),
-                bg=COLORS["bg_tertiary"],
-                fg=COLORS["text_primary"],
-                font=("Segoe UI Symbol", 16),
-                width=2,
-                relief="flat",
-                cursor="hand2",
-            )
-            btn.grid(row=i // 3, column=i % 3, padx=2, pady=2)
-            self.editor_palette_buttons[f"w{symbol}"] = btn
+        piece_types: dict[str, int] = {
+            "k": chess.KING,
+            "q": chess.QUEEN,
+            "r": chess.ROOK,
+            "b": chess.BISHOP,
+            "n": chess.KNIGHT,
+            "p": chess.PAWN,
+        }
+        for label, color, symbols in rows:
+            tk.Label(
+                palette_content,
+                text=label.upper(),
+                bg=COLORS["bg_secondary"],
+                fg=COLORS["text_muted"],
+                font=FONTS["caption_bold"],
+                anchor="w",
+            ).pack(fill="x", pady=(0, 3))
 
-        # Black pieces label
-        tk.Label(
+            grid = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
+            grid.pack(fill="x", pady=(0, 8))
+            for i, symbol in enumerate(symbols):
+                piece_type: int = piece_types[symbol.lower()]
+                btn = tk.Button(
+                    grid,
+                    command=lambda c=color, pt=piece_type: self._select_editor_piece(
+                        c, pt
+                    ),
+                    bg=COLORS["palette_bg"],
+                    activebackground=COLORS["accent"],
+                    relief="flat",
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="hand2",
+                )
+                img = load_piece_image(symbol, 34)
+                if img is not None:
+                    btn.configure(image=img, width=40, height=40)
+                else:
+                    btn.configure(
+                        text=PIECE_UNICODE.get(symbol, symbol),
+                        font=("Segoe UI Symbol", 18),
+                        fg=COLORS["text_primary"],
+                        width=2,
+                    )
+                btn.grid(row=0, column=i, padx=(0, 4))
+                key: str = f"w{symbol}" if color == chess.WHITE else f"b{symbol}"
+                self.editor_palette_buttons[key] = btn
+
+        self.eraser_btn = create_styled_button(
             palette_content,
-            text="Black",
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
-            font=FONTS["small"],
-        ).pack(anchor="w")
-
-        # Black pieces grid (2 rows of 3)
-        black_grid = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
-        black_grid.pack(pady=(0, 5))
-
-        black_pieces = [
-            (chess.KING, "k"),
-            (chess.QUEEN, "q"),
-            (chess.ROOK, "r"),
-            (chess.BISHOP, "b"),
-            (chess.KNIGHT, "n"),
-            (chess.PAWN, "p"),
-        ]
-        for i, (piece_type, symbol) in enumerate(black_pieces):
-            btn = tk.Button(
-                black_grid,
-                text=PIECE_UNICODE.get(symbol, symbol),
-                command=lambda pt=piece_type: self._select_editor_piece(
-                    chess.BLACK, pt
-                ),
-                bg=COLORS["bg_tertiary"],
-                fg=COLORS["text_primary"],
-                font=("Segoe UI Symbol", 16),
-                width=2,
-                relief="flat",
-                cursor="hand2",
-            )
-            btn.grid(row=i // 3, column=i % 3, padx=2, pady=2)
-            self.editor_palette_buttons[f"b{symbol.lower()}"] = btn
-
-        # Eraser button
-        eraser_frame = tk.Frame(palette_content, bg=COLORS["bg_secondary"])
-        eraser_frame.pack(fill="x")
-
-        self.eraser_btn = tk.Button(
-            eraser_frame,
-            text="🗑 Eraser (Right-click)",
+            "⌫  Gomme (ou clic droit)",
             command=self._select_editor_eraser,
-            bg=COLORS["bg_tertiary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["small"],
-            relief="flat",
-            cursor="hand2",
+            style="outline",
+            font=FONTS["small_bold"],
+            pady=6,
         )
         self.eraser_btn.pack(fill="x")
 
-        # Position controls panel
-        controls_panel: tk.Frame = create_panel(parent, title="Position")
-        controls_panel.pack(fill="x", pady=(0, 10))
-
-        controls_content = tk.Frame(controls_panel, bg=COLORS["bg_secondary"])
-        controls_content.pack(fill="x", padx=10, pady=(0, 10))
+        # Position controls
+        controls_card = Card(parent, title="Réglages de la position")
+        controls_card.pack(fill="x", pady=(0, 12))
+        controls_content: tk.Frame = controls_card.body
 
         # Turn to move
         turn_frame = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
-        turn_frame.pack(fill="x", pady=(0, 5))
+        turn_frame.pack(fill="x", pady=(0, 10))
 
         tk.Label(
             turn_frame,
-            text="Turn:",
+            text="Au trait",
             bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
+            fg=COLORS["text_secondary"],
             font=FONTS["small"],
+            width=8,
+            anchor="w",
         ).pack(side="left")
 
         self.editor_turn_var = tk.StringVar(value="white")
-
-        tk.Radiobutton(
+        SegmentedControl(
             turn_frame,
-            text="White",
+            options=[("Blancs", "white"), ("Noirs", "black")],
             variable=self.editor_turn_var,
-            value="white",
             command=self._on_editor_position_change,
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(5, 0))
-
-        tk.Radiobutton(
-            turn_frame,
-            text="Black",
-            variable=self.editor_turn_var,
-            value="black",
-            command=self._on_editor_position_change,
-            bg=COLORS["bg_secondary"],
-            fg=COLORS["text_primary"],
-            selectcolor=COLORS["bg_tertiary"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(5, 0))
+        ).pack(side="left", fill="x", expand=True)
 
         # Castling rights
-        castle_frame = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
-        castle_frame.pack(fill="x", pady=(0, 5))
-
         tk.Label(
-            castle_frame,
-            text="Castling:",
+            controls_content,
+            text="Roques encore possibles",
             bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
+            fg=COLORS["text_secondary"],
             font=FONTS["small"],
-        ).pack(anchor="w")
+            anchor="w",
+        ).pack(fill="x")
 
-        castle_checks = tk.Frame(castle_frame, bg=COLORS["bg_secondary"])
-        castle_checks.pack(fill="x")
+        castle_checks = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
+        castle_checks.pack(fill="x", pady=(2, 10))
 
         self.castle_wk_var = tk.BooleanVar(value=True)
         self.castle_wq_var = tk.BooleanVar(value=True)
         self.castle_bk_var = tk.BooleanVar(value=True)
         self.castle_bq_var = tk.BooleanVar(value=True)
 
-        for text, var in [
-            ("W O-O", self.castle_wk_var),
-            ("W O-O-O", self.castle_wq_var),
-            ("B O-O", self.castle_bk_var),
-            ("B O-O-O", self.castle_bq_var),
-        ]:
+        for i, (text, var) in enumerate(
+            [
+                ("Blancs petit", self.castle_wk_var),
+                ("Blancs grand", self.castle_wq_var),
+                ("Noirs petit", self.castle_bk_var),
+                ("Noirs grand", self.castle_bq_var),
+            ]
+        ):
             tk.Checkbutton(
                 castle_checks,
                 text=text,
@@ -741,176 +750,293 @@ class ChessGameApp(object):
                 bg=COLORS["bg_secondary"],
                 fg=COLORS["text_primary"],
                 selectcolor=COLORS["bg_tertiary"],
-                font=("Segoe UI", 8),
-            ).pack(side="left")
+                activebackground=COLORS["bg_secondary"],
+                activeforeground=COLORS["text_primary"],
+                font=FONTS["caption"],
+                anchor="w",
+                highlightthickness=0,
+                bd=0,
+            ).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 10))
 
         # FEN display
-        fen_frame = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
-        fen_frame.pack(fill="x", pady=(5, 0))
-
+        fen_header = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
+        fen_header.pack(fill="x")
         tk.Label(
-            fen_frame,
-            text="FEN:",
+            fen_header,
+            text="Code FEN",
             bg=COLORS["bg_secondary"],
-            fg=COLORS["text_muted"],
+            fg=COLORS["text_secondary"],
             font=FONTS["small"],
-        ).pack(anchor="w")
+        ).pack(side="left")
+        HelpBadge(
+            fen_header,
+            "Le FEN est un texte qui décrit une position d'échecs. Vous pouvez "
+            "en coller un (copié depuis Lichess ou Chess.com) puis cliquer sur "
+            "« Charger ».",
+        ).pack(side="left", padx=(6, 0))
+
+        fen_row = tk.Frame(controls_content, bg=COLORS["bg_secondary"])
+        fen_row.pack(fill="x", pady=(4, 0))
 
         self.editor_fen_var = tk.StringVar(value=chess.STARTING_FEN)
         self.editor_fen_entry = tk.Entry(
-            fen_frame,
+            fen_row,
             textvariable=self.editor_fen_var,
             bg=COLORS["bg_tertiary"],
             fg=COLORS["text_primary"],
-            font=("Consolas", 8),
+            font=("Consolas", 9),
             insertbackground=COLORS["text_primary"],
-        )
-        self.editor_fen_entry.pack(fill="x", pady=(2, 0))
-
-        tk.Button(
-            fen_frame,
-            text="Load FEN",
-            command=self._load_editor_fen,
-            bg=COLORS["bg_tertiary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["small"],
             relief="flat",
-            cursor="hand2",
-        ).pack(fill="x", pady=(3, 0))
+            highlightthickness=1,
+            highlightbackground=COLORS["border_light"],
+            highlightcolor=COLORS["accent"],
+        )
+        self.editor_fen_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        self.editor_fen_entry.bind("<Return>", lambda e: self._load_editor_fen())
+
+        create_styled_button(
+            fen_row,
+            "Charger",
+            command=self._load_editor_fen,
+            style="outline",
+            font=FONTS["small_bold"],
+            padx=10,
+            pady=4,
+        ).pack(side="left", padx=(6, 0))
 
         # Action buttons
-        actions_panel: tk.Frame = create_panel(parent, title="Actions")
-        actions_panel.pack(fill="x", pady=(0, 10))
+        actions_card = Card(parent, title="Actions")
+        actions_card.pack(fill="x", pady=(0, 12))
+        actions_content: tk.Frame = actions_card.body
 
-        actions_content = tk.Frame(actions_panel, bg=COLORS["bg_secondary"])
-        actions_content.pack(fill="x", padx=10, pady=(0, 10))
+        row = tk.Frame(actions_content, bg=COLORS["bg_secondary"])
+        row.pack(fill="x")
+        row.grid_columnconfigure(0, weight=1, uniform="a")
+        row.grid_columnconfigure(1, weight=1, uniform="a")
 
-        tk.Button(
-            actions_content,
-            text="Clear Board",
+        create_styled_button(
+            row,
+            "Vider l'échiquier",
             command=self._editor_clear_board,
-            bg=COLORS["bg_tertiary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["small"],
-            relief="flat",
-            cursor="hand2",
-        ).pack(fill="x", pady=(0, 3))
+            style="outline",
+            font=FONTS["small_bold"],
+            pady=6,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
 
-        tk.Button(
-            actions_content,
-            text="Reset to Start",
+        create_styled_button(
+            row,
+            "Position initiale",
             command=self._editor_reset_position,
-            bg=COLORS["bg_tertiary"],
-            fg=COLORS["text_primary"],
-            font=FONTS["small"],
-            relief="flat",
-            cursor="hand2",
-        ).pack(fill="x", pady=(0, 3))
+            style="outline",
+            font=FONTS["small_bold"],
+            pady=6,
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
         # Start game button (prominent)
-        self.start_game_btn = tk.Button(
+        self.start_game_btn = create_styled_button(
             actions_content,
-            text="▶ Start Game!",
+            "▶  Jouer cette position",
             command=self._start_game_from_editor,
-            bg=COLORS["accent"],
-            fg=COLORS["text_primary"],
-            font=FONTS["body_bold"],
-            relief="flat",
-            cursor="hand2",
-            pady=8,
+            style="accent",
+            pady=9,
         )
-        self.start_game_btn.pack(fill="x", pady=(5, 0))
+        self.start_game_btn.pack(fill="x", pady=(10, 0))
 
     def _create_center_panel(self, parent: tk.Widget) -> None:
-        """Create the center panel with board and eval bar."""
+        """Create the center column: player bars, board, eval bar, navigation."""
         center_panel = tk.Frame(parent, bg=COLORS["bg_primary"])
-        center_panel.pack(side="left", fill="both")
+        center_panel.pack(side="left", fill="y")
+        self.center_panel = center_panel
 
-        # Board container (board + eval bar side by side)
-        board_container = tk.Frame(center_panel, bg=COLORS["bg_primary"])
-        board_container.pack()
+        # Player bars (packed around the board by _layout_player_bars)
+        self.black_player_info = PlayerInfo(center_panel, color=chess.BLACK, name="IA")
+        self.white_player_info = PlayerInfo(
+            center_panel, color=chess.WHITE, name="Vous"
+        )
+
+        # Board row (eval bar + board side by side)
+        self.board_row = tk.Frame(center_panel, bg=COLORS["bg_primary"])
+        self.board_row.pack()
+
+        # Evaluation bar (left of board)
+        self.eval_bar = EvalBar(self.board_row, height=640, width=26)
+        self.eval_bar.pack(side="left", padx=(0, 8))
+        create_tooltip(
+            self.eval_bar,
+            "Barre d'avantage : plus la partie blanche est grande, plus les "
+            "Blancs ont de chances de gagner (et inversement).",
+        )
 
         # Chess board
         self.board_widget = ChessBoardWidget(
-            board_container,
-            size=680,
+            self.board_row,
+            size=640,
             on_move=self._on_human_move,
         )
         self.board_widget.pack(side="left")
 
-        # Evaluation bar (right of board)
-        self.eval_bar = EvalBar(
-            board_container,
-            height=680,
-            width=35,
-        )
-        self.eval_bar.pack(side="left", padx=(8, 0))
+        # Navigation bar below the board
+        self.nav_bar = tk.Frame(center_panel, bg=COLORS["bg_primary"])
+        self.nav_bar.pack(fill="x", pady=(10, 0))
 
-        # Move list below board
-        move_list_frame = tk.Frame(center_panel, bg=COLORS["bg_primary"])
-        move_list_frame.pack(fill="x", pady=(10, 0))
-
-        self.move_list = MoveList(
-            move_list_frame,
-            width=716,
-            height=120,
+        self.back_btn: tk.Button = create_styled_button(
+            self.nav_bar,
+            "◀  Annuler le coup",
+            command=self._back_one_move,
+            style="outline",
+            font=FONTS["small_bold"],
         )
-        self.move_list.pack()
+        self.back_btn.pack(side="left", padx=(0, 6))
+
+        self.forward_btn: tk.Button = create_styled_button(
+            self.nav_bar,
+            "Rétablir  ▶",
+            command=self._forward_one_move,
+            style="outline",
+            font=FONTS["small_bold"],
+        )
+        self.forward_btn.pack(side="left", padx=(0, 6))
+
+        self.flip_btn: tk.Button = create_styled_button(
+            self.nav_bar,
+            "⇅  Retourner",
+            command=self._flip_board,
+            style="outline",
+            font=FONTS["small_bold"],
+        )
+        self.flip_btn.pack(side="left")
+
+        tk.Label(
+            self.nav_bar,
+            text="Raccourcis : ← →  ·  F  ·  Ctrl+N",
+            font=FONTS["caption"],
+            fg=COLORS["text_muted"],
+            bg=COLORS["bg_primary"],
+        ).pack(side="right")
+
+        # Tooltips
+        create_tooltip(self.back_btn, "Revenir en arrière (Ctrl+Z ou ←)")
+        create_tooltip(self.forward_btn, "Rejouer le coup annulé (→)")
+        create_tooltip(self.flip_btn, "Voir l'échiquier de l'autre côté (F)")
+
+        self._layout_player_bars()
+
+    def _layout_player_bars(self) -> None:
+        """Place the player bars above / below the board to match its orientation."""
+        flipped: bool = self.board_widget.flipped
+        top: PlayerInfo = self.white_player_info if flipped else self.black_player_info
+        bottom: PlayerInfo = (
+            self.black_player_info if flipped else self.white_player_info
+        )
+        top.pack_forget()
+        bottom.pack_forget()
+        top.pack(fill="x", before=self.board_row, pady=(0, 8))
+        bottom.pack(fill="x", after=self.board_row, pady=(8, 0))
+        self.eval_bar.set_flipped(flipped)
 
     def _create_right_panel(self, parent: tk.Widget) -> None:
-        """Create the right panel with analysis tools (no scroll, fills space)."""
-        right_panel = tk.Frame(parent, bg=COLORS["bg_primary"], width=300)
-        right_panel.pack(side="left", fill="both", expand=True, padx=(15, 0))
+        """Create the right column: beginner analysis and technical details."""
+        right_panel = tk.Frame(parent, bg=COLORS["bg_primary"])
+        right_panel.pack(side="left", fill="both", expand=True, padx=(18, 0))
 
-        # Title
-        title_label = tk.Label(
-            right_panel,
-            text="Analysis",
-            font=FONTS["heading"],
-            fg=COLORS["text_primary"],
-            bg=COLORS["bg_primary"],
-        )
-        title_label.pack(anchor="w", pady=(0, 5))
+        # Tabs + thinking indicator
+        tab_row = tk.Frame(right_panel, bg=COLORS["bg_primary"])
+        tab_row.pack(fill="x", pady=(0, 10))
+
+        self.right_tab_var = tk.StringVar(value="simple")
+        SegmentedControl(
+            tab_row,
+            options=[("Analyse", "simple"), ("Détails techniques", "expert")],
+            variable=self.right_tab_var,
+            command=self._on_right_tab_change,
+        ).pack(side="left")
 
         # AI Thinking indicator
-        self.thinking_frame = tk.Frame(right_panel, bg=COLORS["bg_primary"])
-        self.thinking_frame.pack(fill="x")
+        self.thinking_frame = tk.Frame(tab_row, bg=COLORS["bg_primary"])
+        self.thinking_frame.pack(side="right")
 
         self.thinking_indicator = ThinkingIndicator(
             self.thinking_frame,
-            text="AI thinking",
+            text="L'IA réfléchit",
             bg=COLORS["bg_primary"],
+            font=FONTS["small_bold"],
+            # Fixed width: the animated dots must not trigger relayouts
+            width=17,
+            anchor="w",
         )
-        self.thinking_indicator.pack()
-        self.thinking_indicator.pack_forget()
+
+        # ----- Beginner analysis tab -----
+        self.simple_tab = tk.Frame(right_panel, bg=COLORS["bg_primary"])
+        self.simple_tab.pack(fill="both", expand=True)
+
+        # "Who is winning": current chances + how they evolved during the game
+        self.win_panel = WinChancePanel(self.simple_tab)
+        self.win_panel.pack(fill="x", pady=(0, 10))
+        self.advantage_graph = AdvantageGraph(self.win_panel.body, height=78)
+        self.advantage_graph.pack(fill="x", pady=(8, 0))
+
+        self.candidates_panel = CandidateMovesPanel(self.simple_tab)
+        self.candidates_panel.pack(fill="x", pady=(0, 10))
+
+        self.plan_panel = AIPlanPanel(self.simple_tab)
+        self.plan_panel.pack(fill="both", expand=True)
+
+        # ----- Technical details tab (raw MCTS data) -----
+        self.expert_tab = tk.Frame(right_panel, bg=COLORS["bg_primary"])
+
+        legend_card = Card(self.expert_tab, title="Comment lire ces chiffres ?")
+        legend_card.pack(fill="x", pady=(0, 10))
+        legend: list[tuple[str, str]] = [
+            ("Visits / N", "nombre de fois où l'IA a exploré ce coup"),
+            ("Q-value / Q", "score moyen trouvé : -1 = perdu, 0 = égal, +1 = gagné"),
+            ("WR%", "Q traduit en pourcentage de victoire (50 % = égal)"),
+            ("W / D / L", "chances de Victoire / Nulle / Défaite"),
+            ("Prior / P", "intuition du réseau avant toute réflexion"),
+        ]
+        for term, meaning in legend:
+            line = tk.Frame(legend_card.body, bg=COLORS["bg_secondary"])
+            line.pack(fill="x")
+            tk.Label(
+                line,
+                text=term,
+                font=FONTS["caption_bold"],
+                fg=COLORS["text_primary"],
+                bg=COLORS["bg_secondary"],
+                width=12,
+                anchor="w",
+            ).pack(side="left")
+            tk.Label(
+                line,
+                text=meaning,
+                font=FONTS["caption"],
+                fg=COLORS["text_secondary"],
+                bg=COLORS["bg_secondary"],
+                anchor="w",
+            ).pack(side="left")
 
         # MCTS Panel
-        self.mcts_panel = MCTSPanel(right_panel, width=280, height=350)
-        self.mcts_panel.pack(fill="x", pady=(0, 5))
+        self.mcts_panel = MCTSPanel(self.expert_tab, width=280, height=260)
+        self.mcts_panel.pack(fill="x", pady=(0, 10))
 
         # Search Tree Panel
-        self.search_tree_panel = SearchTreePanel(right_panel, width=280, height=350)
-        self.search_tree_panel.pack(fill="x", pady=(0, 5))
+        self.search_tree_panel = SearchTreePanel(self.expert_tab, width=280, height=200)
+        self.search_tree_panel.pack(fill="both", expand=True, pady=(0, 10))
 
-        # Eval Graph
-        self.eval_graph = EvalGraph(right_panel, width=280, height=100)
-        self.eval_graph.pack(fill="x", pady=(0, 5))
+        # Raw eval graph (value from -1 to +1, White's point of view)
+        self.eval_graph = EvalGraph(self.expert_tab, width=280, height=100)
+        self.eval_graph.pack(fill="x", pady=(0, 10))
 
-        # Last move time display
-        time_frame = tk.Frame(right_panel, bg=COLORS["bg_secondary"])
-        time_frame.pack(fill="x", pady=(0, 5))
-
-        # Value Prediction (simple label below graph)
-        value_frame = tk.Frame(right_panel, bg=COLORS["bg_secondary"])
+        # Root value (raw)
+        value_frame = tk.Frame(self.expert_tab, bg=COLORS["bg_secondary"])
         value_frame.pack(fill="x")
 
         tk.Label(
             value_frame,
-            text="Value:",
-            font=("Segoe UI", 10),
+            text="Valeur de la racine (point de vue de l'IA) :",
+            font=FONTS["small"],
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_secondary"],
-        ).pack(side="left", padx=(10, 5), pady=5)
+        ).pack(side="left", padx=(12, 6), pady=6)
 
         self.value_label = tk.Label(
             value_frame,
@@ -919,10 +1045,58 @@ class ChessGameApp(object):
             fg=COLORS["text_primary"],
             bg=COLORS["bg_secondary"],
         )
-        self.value_label.pack(side="left", pady=5)
+        self.value_label.pack(side="left", pady=6)
 
         # Training panel - hidden, kept for compatibility
         self.training_panel = None
+
+    def _on_right_tab_change(self) -> None:
+        """Switch between the beginner analysis and the technical details."""
+        if self.right_tab_var.get() == "expert":
+            self.simple_tab.pack_forget()
+            self.expert_tab.pack(fill="both", expand=True)
+        else:
+            self.expert_tab.pack_forget()
+            self.simple_tab.pack(fill="both", expand=True)
+
+    def _show_thinking(self) -> None:
+        """Show that the AI is thinking."""
+        self.thinking_indicator.pack()
+        self.thinking_indicator.start()
+        self._set_status("L'IA réfléchit…", "thinking")
+
+    def _hide_thinking(self) -> None:
+        """Hide the AI thinking indicator."""
+        self.thinking_indicator.stop()
+        self.thinking_indicator.pack_forget()
+
+    def _reset_analysis(self) -> None:
+        """Clear every analysis display (new game / new position)."""
+        self.eval_history.clear()
+        self.wdl_history.clear()
+        self.eval_points.clear()
+        self.mcts_panel.clear()
+        self.search_tree_panel.clear()
+        self.eval_bar.clear()
+        self.eval_graph.clear()
+        self.win_panel.clear()
+        self.candidates_panel.clear()
+        self.plan_panel.clear()
+        self.advantage_graph.clear()
+        self.value_label.configure(text="0.00", fg=COLORS["text_primary"])
+        self.opening_display.clear()
+        self.move_list.clear()
+
+    def _side_names(self) -> dict[bool, str]:
+        """How each color is called in analysis sentences."""
+        if self.game_mode == "human_vs_ai":
+            return {
+                self.human_color: "vous",
+                not self.human_color: "l'IA",
+            }
+        if self.game_mode == "ai_vs_ai":
+            return {chess.WHITE: "l'IA des Blancs", chess.BLACK: "l'IA des Noirs"}
+        return {chess.WHITE: "les Blancs", chess.BLACK: "les Noirs"}
 
     def _load_network(self) -> None:
         """Load the neural network or pure MCTS player."""
@@ -943,13 +1117,13 @@ class ChessGameApp(object):
                     name="PureMCTS",
                 )
                 self.network_status.configure(
-                    text=f"Pure MCTS ({self.num_simulations} sims)",
+                    text="MCTS pur (sans réseau de neurones)",
                     fg=COLORS["accent"],
                 )
                 return
             except Exception as e:
                 self.network_status.configure(
-                    text=f"Error: {e}",
+                    text=f"Erreur : {e}",
                     fg=COLORS["error"],
                 )
                 return
@@ -975,12 +1149,12 @@ class ChessGameApp(object):
                 # Initialize game history with starting position
                 self.game_positions = [self.board_widget.get_board().copy()]
                 self.network_status.configure(
-                    text=f"Loaded: {os.path.basename(self.network_path)}",
+                    text=f"✓ {os.path.basename(self.network_path)}",
                     fg=COLORS["success"],
                 )
             except Exception as e:
                 self.network_status.configure(
-                    text=f"Error: {e}",
+                    text=f"Erreur : {e}",
                     fg=COLORS["error"],
                 )
         else:
@@ -1004,20 +1178,20 @@ class ChessGameApp(object):
                 # Initialize game history with starting position
                 self.game_positions = [self.board_widget.get_board().copy()]
                 self.network_status.configure(
-                    text="Untrained network (random)",
+                    text="⚠ Réseau non entraîné (joue au hasard)",
                     fg=COLORS["warning"],
                 )
             except Exception as e:
                 self.network_status.configure(
-                    text=f"Error: {e}",
+                    text=f"Erreur : {e}",
                     fg=COLORS["error"],
                 )
 
     def _load_network_dialog(self) -> None:
         """Show dialog to load a network file."""
         filepath: str = filedialog.askopenfilename(
-            title="Load Network",
-            filetypes=[("Network files", "*.pt"), ("All files", "*.*")],
+            title="Charger un réseau de neurones",
+            filetypes=[("Réseaux NeuralMate", "*.pt"), ("Tous les fichiers", "*.*")],
         )
         if filepath:
             self.network_path = filepath
@@ -1030,13 +1204,13 @@ class ChessGameApp(object):
         if self.game_mode == "ai_vs_ai":
             self.color_frame.pack_forget()
             self.board_widget.set_interactive(False)
-            self._update_player_names("AI (White)", "AI (Black)")
+            self._update_player_names("IA (Blancs)", "IA (Noirs)")
         elif self.game_mode == "human_vs_human":
             self.color_frame.pack_forget()
             self.board_widget.set_interactive(True)
-            self._update_player_names("White", "Black")
+            self._update_player_names("Joueur 1", "Joueur 2")
         else:
-            self.color_frame.pack(fill="x", pady=(5, 0))
+            self.color_frame.pack(fill="x", pady=(10, 0), before=self.new_game_btn)
             self.board_widget.set_interactive(True)
             self._update_player_names_for_human_ai()
 
@@ -1050,7 +1224,7 @@ class ChessGameApp(object):
         self.board_widget.set_player_color(self.human_color)
 
         if (self.human_color == chess.BLACK) != self.board_widget.flipped:
-            self.board_widget.flip()
+            self._flip_board()
 
         self._update_player_names_for_human_ai()
         self._new_game()
@@ -1059,13 +1233,15 @@ class ChessGameApp(object):
         """Update player info names."""
         self.white_player_info.set_name(white_name)
         self.black_player_info.set_name(black_name)
+        names: dict[bool, str] = self._side_names()
+        self.win_panel.set_names(names[chess.WHITE], names[chess.BLACK])
 
     def _update_player_names_for_human_ai(self) -> None:
         """Update player names for human vs AI mode."""
         if self.human_color == chess.WHITE:
-            self._update_player_names("You", "AI")
+            self._update_player_names("Vous", "IA NeuralMate")
         else:
-            self._update_player_names("AI", "You")
+            self._update_player_names("IA NeuralMate", "Vous")
 
     def _new_game_with_confirm(self) -> None:
         """Start a new game with confirmation."""
@@ -1073,9 +1249,11 @@ class ChessGameApp(object):
         if len(board.move_stack) > 0 and not board.is_game_over():
             create_confirmation_dialog(
                 self.root,
-                "New Game",
-                "Start new game? Current game will be lost.",
+                "Nouvelle partie ?",
+                "La partie en cours sera perdue.",
                 on_confirm=self._new_game,
+                confirm_text="Recommencer",
+                cancel_text="Continuer la partie",
             )
         else:
             self._new_game()
@@ -1088,22 +1266,20 @@ class ChessGameApp(object):
             self.timer_update_id = None
 
         self.ai_cancelled = True
+        self.game_id += 1
         if self.ai_thread and self.ai_thread.is_alive():
             self.ai_thread.join(timeout=0.5)
 
         self.ai_cancelled = False
         self.ai_thinking = False
 
-        self.thinking_indicator.stop()
-        self.thinking_indicator.pack_forget()
+        self._hide_thinking()
 
         # Clear MCTS tree for new game
         if self.mcts is not None:
             self.mcts.clear_cache()
 
         self.undone_moves.clear()
-        self.eval_history.clear()
-        self.wdl_history.clear()
 
         self.board_widget.reset()
 
@@ -1111,13 +1287,7 @@ class ChessGameApp(object):
         self.game_positions = [self.board_widget.get_board().copy()]
 
         # Reset all analysis panels
-        self.mcts_panel.clear()
-        self.search_tree_panel.clear()
-        self.eval_bar.clear()
-        self.eval_graph.clear()
-        self.value_label.configure(text="0.00", fg=COLORS["text_primary"])
-        self.opening_display.clear()
-        self.move_list.clear()
+        self._reset_analysis()
 
         self._update_game_info()
 
@@ -1324,6 +1494,7 @@ class ChessGameApp(object):
     def _flip_board(self) -> None:
         """Flip the board orientation."""
         self.board_widget.flip()
+        self._layout_player_bars()
 
     # ==================== Time Control Methods ====================
 
@@ -1429,17 +1600,15 @@ class ChessGameApp(object):
         # Cancel AI if thinking
         self.ai_cancelled = True
         self.ai_thinking = False
-        self.thinking_indicator.stop()
-        self.thinking_indicator.pack_forget()
+        self._hide_thinking()
 
-        loser: str = "White" if color == chess.WHITE else "Black"
-        winner: str = "Black" if color == chess.WHITE else "White"
+        loser: str = "Blancs" if color == chess.WHITE else "Noirs"
+        winner: str = "Noirs" if color == chess.WHITE else "Blancs"
 
-        self.status_label.configure(
-            text=f"{loser} ran out of time! {winner} wins", fg=COLORS["accent"]
-        )
-        messagebox.showinfo(
-            "Game Over", f"{loser} ran out of time!\n{winner} wins on time."
+        self._set_status(f"Temps écoulé — victoire des {winner}", "over")
+        self._show_result_dialog(
+            self._result_title(not color),
+            f"Les {loser} n'ont plus de temps : les {winner} gagnent au temps.",
         )
 
     @staticmethod
@@ -1676,10 +1845,11 @@ class ChessGameApp(object):
         self.ai_thinking = True
         self.ai_cancelled = False
 
-        self.thinking_indicator.pack()
-        self.thinking_indicator.start()
+        self._show_thinking()
 
-        self.ai_thread = threading.Thread(target=self._compute_ai_move, daemon=True)
+        self.ai_thread = threading.Thread(
+            target=self._compute_ai_move, args=(self.game_id,), daemon=True
+        )
         self.ai_thread.start()
 
     def _get_instant_move(self) -> chess.Move | None:
@@ -1755,7 +1925,7 @@ class ChessGameApp(object):
         if board.is_game_over():
             self._show_game_over()
 
-    def _compute_ai_move(self) -> None:
+    def _compute_ai_move(self, game_id: int = -1) -> None:
         """Compute AI move in background thread."""
         try:
             board: chess.Board = self.board_widget.get_board()
@@ -1808,6 +1978,7 @@ class ChessGameApp(object):
                             "tree_depth": tree_depth,
                             "tree_branching": tree_branching,
                             "mate_in": mate_in,
+                            "game_id": game_id,
                         },
                     )
                 )
@@ -1837,7 +2008,9 @@ class ChessGameApp(object):
                         if fen:
                             self._show_training_position(fen)
                 elif update_type == "error" and isinstance(data, str):
-                    messagebox.showerror("Error", data)
+                    self._hide_thinking()
+                    self.ai_thinking = False
+                    messagebox.showerror("Erreur", data)
 
         except queue.Empty:
             pass
@@ -1854,6 +2027,10 @@ class ChessGameApp(object):
 
     def _apply_ai_move(self, data: dict[str, Any]) -> None:
         """Apply AI move to the board with animation."""
+        # Ignore results computed for a previous game / position
+        if data.get("game_id", self.game_id) != self.game_id:
+            return
+        game_id: int = self.game_id
         self.ai_thinking = False
 
         ai_color: bool = chess.BLACK if self.human_color == chess.WHITE else chess.WHITE
@@ -1871,8 +2048,7 @@ class ChessGameApp(object):
         # Record AI thinking time
         self.last_move_time = time.time() - self.turn_start_time
 
-        self.thinking_indicator.stop()
-        self.thinking_indicator.pack_forget()
+        self._hide_thinking()
 
         move: chess.Move = data["move"]
         mcts_stats: list[dict[str, Any]] | None = data.get("mcts_stats")
@@ -1884,10 +2060,16 @@ class ChessGameApp(object):
 
         board: chess.Board = self.board_widget.get_board()
 
+        # Side that searched (the AI to move) and how to call each side
+        mover: bool = board.turn
+        names: dict[bool, str] = self._side_names()
+        mover_name: str = names[mover]
+
         # Update MCTS panel with search statistics
         if mcts_stats:
             total_visits: int = sum(s["visits"] for s in mcts_stats)
             self.mcts_panel.update_stats(board, mcts_stats, total_visits)
+            self.candidates_panel.update_moves(board, mcts_stats, mover_name)
 
             # Record stats for dynamic time management
             if self.time_control is not None:
@@ -1904,6 +2086,14 @@ class ChessGameApp(object):
         if tree_data:
             self.search_tree_panel.update_tree(
                 tree_data, tree_depth, tree_branching, mate_in
+            )
+            self.plan_panel.update_plan(
+                board,
+                tree_data,
+                depth=tree_depth,
+                mate_in=mate_in,
+                mover_name=mover_name[0].upper() + mover_name[1:],
+                opponent_name=names[not mover],
             )
 
         # Update Value label
@@ -1925,8 +2115,19 @@ class ChessGameApp(object):
                 if not isinstance(best_wdl, np.ndarray):
                     best_wdl = np.array(best_wdl, dtype=np.float32)
 
+            # Forced mate, from the searching side's point of view
+            mate_for: bool | None = None
+            if mcts_stats:
+                if mcts_stats[0].get("our_mate_in") is not None or mate_in:
+                    mate_for = mover
+                elif mcts_stats[0].get("opponent_mate_in") is not None:
+                    mate_for = not mover
+            total_sims: int = sum(s["visits"] for s in mcts_stats) if mcts_stats else 0
+
             def on_animation_complete() -> None:
                 """Apply the AI move to the board and schedule the next turn."""
+                if game_id != self.game_id:
+                    return
                 board.push(move)
                 self.board_widget.set_board(board)
                 self.board_widget.set_last_move(move)
@@ -1939,8 +2140,15 @@ class ChessGameApp(object):
                 if self.mcts is not None:
                     self.mcts.advance_root(board)
 
-                # Update evaluation after AI move (with WDL for win rate display)
-                self._update_eval_after_move(ai_value=root_value, wdl=best_wdl)
+                # Update evaluation after AI move (converted to White's view)
+                if best_wdl is not None:
+                    self._record_ai_evaluation(
+                        ply=len(board.move_stack),
+                        mover=mover,
+                        wdl=best_wdl,
+                        mate_for=mate_for,
+                        total_sims=total_sims,
+                    )
 
                 updated_board: chess.Board = self.board_widget.get_board()
                 if updated_board.is_game_over():
@@ -1948,7 +2156,14 @@ class ChessGameApp(object):
                 elif self.game_mode == "ai_vs_ai":
                     # Start timer for next AI
                     self.turn_start_time = time.time()
-                    self.root.after(300, self._trigger_ai_move)
+                    self.root.after(
+                        300,
+                        lambda: (
+                            self._trigger_ai_move()
+                            if game_id == self.game_id and self.game_mode == "ai_vs_ai"
+                            else None
+                        ),
+                    )
                 else:
                     # Start timer for human
                     self.turn_start_time = time.time()
@@ -1979,26 +2194,87 @@ class ChessGameApp(object):
         self.wdl_history.append(wdl)
         self.eval_graph.add_evaluation(display_eval, wdl)
 
+    def _record_ai_evaluation(
+        self,
+        ply: int,
+        mover: bool,
+        wdl: np.ndarray,
+        mate_for: bool | None,
+        total_sims: int,
+    ) -> None:
+        """
+        Store and display the AI's evaluation after one of its moves.
+
+        All beginner displays use White's point of view, so the bar and the
+        graph mean the same thing whichever side the AI plays.
+
+        Args:
+            ply: Number of half-moves played (after the AI move)
+            mover: Color of the AI that searched
+            wdl: [win, draw, loss] for the side that searched
+            mate_for: Side with a forced mate, if any
+            total_sims: Number of simulations behind this estimate
+        """
+        w, d, l = float(wdl[0]), float(wdl[1]), float(wdl[2])
+        wdl_white: tuple[float, float, float] = (
+            (w, d, l) if mover == chess.WHITE else (l, d, w)
+        )
+        white_score: float = expected_score(wdl_white)
+        if mate_for is not None:
+            bar_value: float = 10.0 if mate_for == chess.WHITE else -10.0
+        else:
+            bar_value = (2 * white_score - 1) * 10
+
+        self.eval_points = [p for p in self.eval_points if p[0] < ply]
+        self.eval_points.append((ply, white_score, bar_value, wdl_white))
+
+        # Raw history for the technical eval graph (value in [-1, 1])
+        self.eval_history.append(2 * white_score - 1)
+        self.wdl_history.append(np.array(wdl_white, dtype=np.float32))
+        self.eval_graph.add_evaluation(
+            2 * white_score - 1, np.array(wdl_white, dtype=np.float32)
+        )
+
+        self.eval_bar.set_evaluation(bar_value)
+        self.advantage_graph.add_point(ply, white_score)
+        self.win_panel.update_wdl(
+            *wdl_white,
+            subtitle=(
+                f"Estimation de l'IA après avoir étudié {total_sims:,} positions.".replace(
+                    ",", " "
+                )
+            ),
+            mate_for=mate_for,
+        )
+
     def _update_eval_for_position(self) -> None:
         """Update evaluation for current position (after back/forward)."""
         board: chess.Board = self.board_widget.get_board()
         move_index: int = len(board.move_stack)
 
-        # Update eval bar and graph to current position
-        if move_index < len(self.eval_history):
-            # Trim eval history to current position
-            self.eval_history = self.eval_history[:move_index]
-            self.wdl_history = self.wdl_history[:move_index]
+        # Forget evaluations of positions that were taken back
+        kept = [p for p in self.eval_points if p[0] <= move_index]
+        if len(kept) != len(self.eval_points):
+            self.eval_points = kept
+            self.eval_history = [2 * p[1] - 1 for p in kept]
+            self.wdl_history = [np.array(p[3], dtype=np.float32) for p in kept]
             self.eval_graph.set_history(self.eval_history, self.wdl_history)
+            self.advantage_graph.trim(move_index)
 
-        if self.eval_history:
-            self.eval_bar.set_evaluation(self.eval_history[-1] * 10)
+        if self.eval_points:
+            _, _, bar_value, wdl_white = self.eval_points[-1]
+            self.eval_bar.set_evaluation(bar_value)
+            self.win_panel.update_wdl(
+                *wdl_white,
+                subtitle="Dernière estimation de l'IA pour cette partie.",
+            )
         else:
             self.eval_bar.clear()
+            self.win_panel.clear()
 
-        # Note: Network Output and MCTS panels stay showing the last AI thinking position
+        # Note: candidate moves / plan panels keep showing the last AI search
 
-        self.move_list.set_current_move(move_index)
+        self.move_list.set_current_move(move_index - 1)
 
     def _update_game_info(self) -> None:
         """Update all game information displays."""
@@ -2018,51 +2294,141 @@ class ChessGameApp(object):
         self.move_list.set_moves(board)
 
         # Status
+        side: str = "Blancs" if board.turn == chess.WHITE else "Noirs"
+        human_turn: bool = (
+            self.game_mode == "human_vs_ai" and board.turn == self.human_color
+        )
         if board.is_checkmate():
-            winner: str = "Black" if board.turn == chess.WHITE else "White"
-            self.status_label.configure(
-                text=f"Checkmate! {winner} wins",
-                fg=COLORS["accent"],
-            )
+            winner: str = "Noirs" if board.turn == chess.WHITE else "Blancs"
+            self._set_status(f"Échec et mat — victoire des {winner}", "over")
         elif board.is_stalemate():
-            self.status_label.configure(text="Stalemate!", fg=COLORS["warning"])
+            self._set_status("Pat — partie nulle", "over")
         elif board.is_insufficient_material():
-            self.status_label.configure(
-                text="Draw - Insufficient material",
-                fg=COLORS["warning"],
-            )
+            self._set_status("Nulle — plus assez de pièces pour mater", "over")
+        elif board.is_game_over():
+            self._set_status("Partie nulle", "over")
         elif board.is_check():
-            self.status_label.configure(text="Check!", fg=COLORS["error"])
+            if human_turn:
+                self._set_status("Échec ! Protégez votre roi", "check")
+            else:
+                self._set_status(f"Échec au roi des {side} !", "check")
         elif self.ai_thinking:
-            self.status_label.configure(text="AI thinking...", fg=COLORS["accent"])
-        elif self.game_mode == "human_vs_ai" and board.turn == self.human_color:
-            self.status_label.configure(text="Your turn", fg=COLORS["success"])
+            self._set_status("L'IA réfléchit…", "thinking")
+        elif human_turn:
+            self._set_status("À vous de jouer", "turn")
         elif self.game_mode == "human_vs_human":
-            turn: str = "White" if board.turn == chess.WHITE else "Black"
-            self.status_label.configure(text=f"{turn} to play", fg=COLORS["success"])
+            self._set_status(f"Aux {side} de jouer", "turn")
         else:
-            self.status_label.configure(text="Playing", fg=COLORS["text_secondary"])
+            self._set_status(f"Aux {side} de jouer", "info")
+
+    def _result_title(self, winner: bool | None) -> str:
+        """Headline of the result dialog for a given winner (None = draw)."""
+        if winner is None:
+            return "Partie nulle"
+        if self.game_mode == "human_vs_ai":
+            return (
+                "Bravo, vous avez gagné !"
+                if winner == self.human_color
+                else "L'IA a gagné"
+            )
+        return f"Victoire des {'Blancs' if winner == chess.WHITE else 'Noirs'}"
 
     def _show_game_over(self) -> None:
         """Show game over dialog."""
         board: chess.Board = self.board_widget.get_board()
+        self._update_game_info()
 
         message: str
+        winner: bool | None = None
         if board.is_checkmate():
-            winner: str = "Black" if board.turn == chess.WHITE else "White"
-            message = f"Checkmate! {winner} wins!"
+            winner = not board.turn
+            loser: str = "Blancs" if board.turn == chess.WHITE else "Noirs"
+            message = f"Échec et mat : le roi des {loser} ne peut plus s'échapper."
         elif board.is_stalemate():
-            message = "Game over - Stalemate!"
+            message = (
+                "Pat : le camp au trait n'a aucun coup légal mais n'est pas en "
+                "échec. C'est une nulle."
+            )
         elif board.is_insufficient_material():
-            message = "Game over - Draw by insufficient material"
+            message = "Il ne reste plus assez de pièces pour faire échec et mat."
         elif board.can_claim_fifty_moves():
-            message = "Game over - Draw by fifty-move rule"
+            message = (
+                "Règle des 50 coups : aucune prise ni coup de pion depuis 50 coups."
+            )
         elif board.is_repetition():
-            message = "Game over - Draw by repetition"
+            message = "La même position s'est répétée trois fois."
         else:
-            message = "Game over!"
+            message = "La partie est terminée."
 
-        messagebox.showinfo("Game Over", message)
+        # The analysis panel and the bar show the final result too
+        self.win_panel.set_result(winner, self._result_title(winner), message)
+        if winner is None:
+            self.eval_bar.set_evaluation(0.0)
+        else:
+            self.eval_bar.set_evaluation(10.0 if winner == chess.WHITE else -10.0)
+
+        self._show_result_dialog(self._result_title(winner), message)
+
+    def _show_result_dialog(self, title: str, message: str) -> None:
+        """Styled end-of-game dialog with a quick "play again" button."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Fin de partie")
+        dialog.configure(bg=COLORS["bg_secondary"])
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+
+        body = tk.Frame(dialog, bg=COLORS["bg_secondary"])
+        body.pack(padx=36, pady=28)
+
+        tk.Label(
+            body,
+            text="♚",
+            font=("Segoe UI Symbol", 36),
+            fg=COLORS["accent"],
+            bg=COLORS["bg_secondary"],
+        ).pack()
+        tk.Label(
+            body,
+            text=title,
+            font=FONTS["title"],
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_secondary"],
+        ).pack(pady=(4, 6))
+        tk.Label(
+            body,
+            text=message,
+            font=FONTS["body"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_secondary"],
+            wraplength=360,
+            justify="center",
+        ).pack(pady=(0, 20))
+
+        buttons = tk.Frame(body, bg=COLORS["bg_secondary"])
+        buttons.pack()
+
+        def play_again() -> None:
+            dialog.destroy()
+            self._new_game()
+
+        create_styled_button(
+            buttons, "Revoir la partie", dialog.destroy, style="outline"
+        ).pack(side="left", padx=(0, 8))
+        create_styled_button(buttons, "Rejouer", play_again, style="accent").pack(
+            side="left"
+        )
+
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+        dialog.bind("<Return>", lambda e: play_again())
+
+        dialog.update_idletasks()
+        w: int = dialog.winfo_reqwidth()
+        h: int = dialog.winfo_reqheight()
+        x: int = self.root.winfo_rootx() + (self.root.winfo_width() - w) // 2
+        y: int = self.root.winfo_rooty() + (self.root.winfo_height() - h) // 3
+        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dialog.grab_set()
+        dialog.focus_set()
 
     def _start_training(self) -> None:
         """Start self-play training."""
@@ -2194,14 +2560,15 @@ class ChessGameApp(object):
 
             # Cancel any AI thinking
             self.ai_cancelled = True
+            self.game_id += 1
             self.ai_thinking = False
-            self.thinking_indicator.stop()
-            self.thinking_indicator.pack_forget()
+            self._hide_thinking()
+
+            # Editing must not be restricted to one side's pieces
+            self.board_widget.set_interactive(True)
 
             # Update status
-            self.status_label.configure(
-                text="Editor Mode - Place pieces", fg=COLORS["accent"]
-            )
+            self._set_status("Éditeur — placez les pièces librement", "editor")
 
             # Sync editor controls with current board state
             self._sync_editor_controls_from_board()
@@ -2218,6 +2585,9 @@ class ChessGameApp(object):
 
             # Clear editor selection highlight
             self._clear_palette_highlight()
+
+            # Restore interactivity for the current game mode
+            self.board_widget.set_interactive(self.game_mode != "ai_vs_ai")
 
             # Update status
             self._update_game_info()
@@ -2267,7 +2637,7 @@ class ChessGameApp(object):
     def _clear_palette_highlight(self) -> None:
         """Clear all palette button highlights."""
         for btn in self.editor_palette_buttons.values():
-            btn.configure(bg=COLORS["bg_tertiary"])
+            btn.configure(bg=COLORS["palette_bg"])
         self.eraser_btn.configure(bg=COLORS["bg_tertiary"])
 
     def _on_editor_position_change(self) -> None:
@@ -2317,7 +2687,7 @@ class ChessGameApp(object):
         """Load a position from the FEN entry field."""
         fen: str = self.editor_fen_var.get().strip()
         if not fen:
-            messagebox.showwarning("Invalid FEN", "Please enter a FEN string.")
+            messagebox.showwarning("FEN vide", "Collez d'abord un code FEN.")
             return
 
         try:
@@ -2329,7 +2699,7 @@ class ChessGameApp(object):
             self._sync_editor_controls_from_board()
 
         except ValueError as e:
-            messagebox.showerror("Invalid FEN", f"Could not parse FEN:\n{e}")
+            messagebox.showerror("FEN invalide", f"Impossible de lire ce FEN :\n{e}")
 
     def _editor_clear_board(self) -> None:
         """Clear all pieces from the board."""
@@ -2379,20 +2749,15 @@ class ChessGameApp(object):
         self._on_app_mode_change()
 
         # Clear MCTS cache for new position
+        self.game_id += 1
+        self.ai_cancelled = False
         if self.mcts is not None:
             self.mcts.clear_cache()
 
         # Reset game state
         self.undone_moves.clear()
-        self.eval_history.clear()
-        self.wdl_history.clear()
-        self.mcts_panel.clear()
-        self.search_tree_panel.clear()
-        self.eval_bar.clear()
-        self.eval_graph.clear()
-        self.value_label.configure(text="0.00", fg=COLORS["text_primary"])
-        self.opening_display.clear()
-        self.move_list.clear()
+        self._reset_analysis()
+        self.game_positions = [board.copy()]
 
         # Reset time control if enabled
         self._init_time_control()
@@ -2419,14 +2784,14 @@ class ChessGameApp(object):
         black_kings: int = len(board.pieces(chess.KING, chess.BLACK))
 
         if white_kings == 0:
-            errors.append("White king is missing")
+            errors.append("Il manque le roi blanc")
         elif white_kings > 1:
-            errors.append("Multiple white kings")
+            errors.append("Il y a plusieurs rois blancs")
 
         if black_kings == 0:
-            errors.append("Black king is missing")
+            errors.append("Il manque le roi noir")
         elif black_kings > 1:
-            errors.append("Multiple black kings")
+            errors.append("Il y a plusieurs rois noirs")
 
         # Check for pawns on first/last rank
         for square in chess.SQUARES:
@@ -2435,7 +2800,8 @@ class ChessGameApp(object):
                 rank: int = chess.square_rank(square)
                 if rank == 0 or rank == 7:
                     errors.append(
-                        f"Pawn on invalid rank at {chess.square_name(square)}"
+                        f"Pion impossible en {chess.square_name(square)} "
+                        "(un pion ne peut pas être sur la 1re ou la 8e rangée)"
                     )
 
         # Check if opponent king is in check (illegal position)
@@ -2444,12 +2810,16 @@ class ChessGameApp(object):
             test_board: chess.Board = board.copy()
             test_board.turn = not board.turn
             if test_board.is_check():
-                opponent: str = "White" if board.turn == chess.BLACK else "Black"
-                errors.append(f"{opponent} king would be in check (illegal)")
+                opponent: str = "blanc" if board.turn == chess.BLACK else "noir"
+                errors.append(
+                    f"Le roi {opponent} est en échec alors que ce n'est pas "
+                    "à lui de jouer (position impossible)"
+                )
 
         if errors:
             messagebox.showerror(
-                "Invalid Position", "Cannot start game:\n\n• " + "\n• ".join(errors)
+                "Position impossible",
+                "La partie ne peut pas commencer :\n\n• " + "\n• ".join(errors),
             )
             return False
 
@@ -2465,6 +2835,13 @@ class ChessGameApp(object):
         x: int = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y: int = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f"+{x}+{y}")
+
+        # On screens that are barely taller than the window, use all the space
+        if self.root.winfo_screenheight() < height + 160:
+            try:
+                self.root.state("zoomed")
+            except tk.TclError:
+                pass
 
         self.root.mainloop()
 

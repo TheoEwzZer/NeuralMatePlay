@@ -720,11 +720,6 @@ class OpeningDisplay(tk.Frame):
         bg = kwargs.pop("bg", COLORS["bg_secondary"])
         super().__init__(parent, bg=bg, width=width, **kwargs)
 
-        self.configure(
-            highlightbackground=COLORS["border"],
-            highlightthickness=1,
-        )
-
         self._current_opening: Optional[dict[str, str]] = None
         self._in_book = True
 
@@ -735,33 +730,39 @@ class OpeningDisplay(tk.Frame):
         # Title
         title = tk.Label(
             self,
-            text="OPENING",
-            font=("Segoe UI", 9, "bold"),
+            text="OUVERTURE",
+            font=FONTS["caption_bold"],
             fg=COLORS["text_muted"],
             bg=bg,
+            anchor="w",
         )
-        title.pack(pady=(8, 2))
+        title.pack(fill=tk.X)
+
+        row = tk.Frame(self, bg=bg)
+        row.pack(fill=tk.X, pady=(2, 0))
 
         # ECO code
         self._eco_label = tk.Label(
-            self,
+            row,
             text="",
-            font=("Consolas", 10, "bold"),
+            font=FONTS["caption_bold"],
             fg=COLORS["opening_eco"],
             bg=bg,
         )
-        self._eco_label.pack()
+        self._eco_label.pack(side=tk.LEFT, padx=(0, 6))
 
         # Opening name
         self._name_label = tk.Label(
-            self,
-            text="Starting Position",
-            font=("Segoe UI", 10),
+            row,
+            text="Position de départ",
+            font=FONTS["small_bold"],
             fg=COLORS["text_primary"],
             bg=bg,
-            wraplength=180,
+            wraplength=230,
+            justify=tk.LEFT,
+            anchor="w",
         )
-        self._name_label.pack(pady=(2, 8))
+        self._name_label.pack(side=tk.LEFT, fill=tk.X)
 
     def update_opening(self, board: chess.Board) -> None:
         """
@@ -793,7 +794,7 @@ class OpeningDisplay(tk.Frame):
             else:
                 self._eco_label.configure(text="")
                 self._name_label.configure(
-                    text="Unorthodox Opening",
+                    text="Ouverture peu commune",
                     fg=COLORS["text_muted"],
                 )
 
@@ -849,7 +850,7 @@ class OpeningDisplay(tk.Frame):
         """Reset to starting position."""
         self._eco_label.configure(text="")
         self._name_label.configure(
-            text="Starting Position",
+            text="Position de départ",
             fg=COLORS["text_primary"],
         )
         self._current_opening = None

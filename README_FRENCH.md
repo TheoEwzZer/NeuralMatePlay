@@ -17,9 +17,9 @@ _Combinant un pré-entraînement supervisé sur des parties de niveau maître av
 
 <div align="center">
 
-![Interface NeuralMatePlay -- L'IA gagne par échec et mat avec Qg4#](assets/example.png)
+![Interface de jeu NeuralMatePlay -- panneau d'analyse accessible aux débutants](assets/play_ui.png)
 
-*Interface de jeu montrant un échec et mat délivré par l'IA (Noirs) avec Qg4#, avec l'analyse MCTS, l'arbre de recherche, le graphe d'évaluation et l'historique des coups.*
+*Interface de jeu avec le panneau d'analyse pensé pour les débutants : qui gagne (chances Blancs / Nulle / Noirs et leur évolution), les coups envisagés par l'IA avec le temps de réflexion consacré à chacun, et la suite qu'elle prévoit. Les données MCTS brutes (N, Q, P, arbre de recherche) restent disponibles dans l'onglet « Détails techniques ».*
 
 </div>
 
@@ -477,28 +477,28 @@ La promotion au rang de "meilleur modèle" nécessite de battre la version actue
 
 ## Interface graphique
 
-NeuralMatePlay inclut une suite complète d'interfaces graphiques basées sur tkinter avec un design inspiré de chess.com pour jouer, entraîner et analyser des parties.
+NeuralMatePlay inclut une suite complète d'interfaces graphiques basées sur tkinter avec un design sombre et moderne pour jouer, entraîner et analyser des parties. L'interface de jeu explique le raisonnement de l'IA en mots simples, pour rester lisible par un débutant.
 
 ### Interface de jeu
 
 L'application de jeu principale (`python -m src.play`) fournit :
 
-| Composant                   | Description                                                                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Échiquier**               | Widget d'échiquier interactif avec glisser-déposer des pièces, mise en évidence des coups légaux et indicateur du dernier coup |
-| **Barre d'évaluation**      | Barre d'évaluation verticale style chess.com montrant qui est en train de gagner (Blancs en haut, Noirs en bas)                |
-| **Graphe d'évaluation**     | Graphe d'évaluation en temps réel suivant l'avantage positionnel au fil de la partie                                           |
-| **Panneau MCTS**            | Affiche les meilleurs coups candidats avec nombre de visites, Q-values, probabilités WDL, priors et détection de mat forcé     |
-| **Arbre de recherche**      | Vue arborescente interactive et repliable de la recherche MCTS avec Q-values colorées (vert/rouge)                             |
-| **Liste des coups**         | Historique complet des coups avec navigation (cliquer pour aller à n'importe quelle position)                                  |
-| **Affichage d'ouverture**   | Montre le nom de l'ouverture actuelle depuis la base de données ECO                                                            |
-| **Info joueurs**            | Noms des joueurs, pendules et décompte de matériel                                                                             |
-| **Indicateur de phase**     | Montre la phase actuelle de la partie (ouverture, milieu de partie, finale)                                                    |
-| **Indicateur de réflexion** | Indicateur animé pendant que l'IA calcule                                                                                      |
+| Composant                        | Description                                                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Échiquier**                    | Échiquier interactif avec glisser-déposer, coups légaux, dernier coup en surbrillance et choix de la promotion                 |
+| **Bandeaux joueurs**             | Au-dessus / en dessous de l'échiquier : nom, joueur au trait, pièces prises, avantage matériel et pendule                     |
+| **Barre d'évaluation**           | Barre verticale affichant les chances du camp qui mène en %, orientée comme l'échiquier                                       |
+| **Qui gagne ?**                  | Verdict en mots (« Léger avantage pour vous »), barre Blancs / Nulle / Noirs et courbe des chances au fil de la partie         |
+| **Coups envisagés par l'IA**     | Les meilleurs candidats écrits en toutes lettres (« Fou c5 », « Cavalier prend e5 »), part de réflexion et chances de gagner |
+| **Ce que l'IA prévoit**          | La variante principale sous forme de phrase et de coups numérotés, plus les autres idées étudiées                             |
+| **Onglet Détails techniques**    | Tableau MCTS brut (visites, Q-value, WDL, prior, mats forcés), arbre de recherche repliable et graphe d'évaluation, avec légende |
+| **Liste des coups**              | Historique complet des coups, écrits avec le nom complet des pièces                                                           |
+| **Ouverture / Phase**            | Ouverture actuelle (base ECO) et phase de jeu, avec un conseil pour débutant au survol                                        |
+| **Éditeur de position**          | Placer les pièces librement, choisir le trait et les roques, charger un FEN, puis jouer cette position                        |
 
 **Modes de jeu** : Humain vs IA, Humain vs Humain, IA vs IA (spectateur)
 
-**Fonctionnalités IA** : Simulations MCTS configurables, gestion dynamique du temps, retournement de l'échiquier, support d'annulation de coups, sélection de modèle via boîte de dialogue.
+**Fonctionnalités IA** : Niveaux nommés (Instinct, Rapide, Normal, Fort, Max) et curseur fin pour les simulations MCTS, gestion dynamique du temps, retournement de l'échiquier, annuler / rétablir, sélection de modèle via boîte de dialogue.
 
 ### Moniteur d'entraînement
 

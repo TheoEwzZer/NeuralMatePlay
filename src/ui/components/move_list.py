@@ -11,9 +11,9 @@ from typing import List, Optional, Callable, Tuple
 import chess
 
 try:
-    from ..styles import COLORS, FONTS
+    from ..styles import COLORS, FONTS, san_to_words
 except ImportError:
-    from src.ui.styles import COLORS, FONTS
+    from src.ui.styles import COLORS, FONTS, san_to_words
 
 
 class MoveList(tk.Frame):
@@ -49,12 +49,12 @@ class MoveList(tk.Frame):
         """Create widget components."""
         # Title bar
         title_frame = tk.Frame(self, bg=bg)
-        title_frame.pack(fill=tk.X, padx=10, pady=(8, 5))
+        title_frame.pack(fill=tk.X, padx=14, pady=(12, 6))
 
         title = tk.Label(
             title_frame,
-            text="Moves",
-            font=("Segoe UI", 11, "bold"),
+            text="Coups joués",
+            font=FONTS["subheading"],
             fg=COLORS["text_primary"],
             bg=bg,
         )
@@ -64,7 +64,7 @@ class MoveList(tk.Frame):
         self._count_label = tk.Label(
             title_frame,
             text="",
-            font=("Segoe UI", 9),
+            font=FONTS["caption"],
             fg=COLORS["text_muted"],
             bg=bg,
         )
@@ -72,7 +72,7 @@ class MoveList(tk.Frame):
 
         # Scrollable content
         container = tk.Frame(self, bg=bg)
-        container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        container.pack(fill=tk.BOTH, expand=True, padx=(8, 4), pady=(0, 8))
 
         # Canvas for scrolling
         self._canvas = tk.Canvas(
@@ -127,15 +127,16 @@ class MoveList(tk.Frame):
         Args:
             board: Board with move history
         """
-        # Extract moves from board
-        temp_board = chess.Board()
+        # Extract moves from board, replaying from its starting position
+        # (which may be a custom FEN set up in the editor)
+        temp_board = board.root()
         self._moves = []
         self._sans = []
 
         try:
             for move in board.move_stack:
                 self._moves.append(move)
-                san = temp_board.san(move)
+                san = san_to_words(temp_board.san(move))
                 self._sans.append(san)
                 temp_board.push(move)
         except (AssertionError, ValueError):
@@ -176,15 +177,16 @@ class MoveList(tk.Frame):
         num_moves = len(self._moves)
         full_moves = (num_moves + 1) // 2
         self._count_label.configure(
-            text=f"{full_moves} moves" if full_moves != 1 else "1 move"
+            text=f"{full_moves} coups" if full_moves > 1 else f"{full_moves} coup"
         )
 
         if not self._moves:
             # Empty state
             empty_label = tk.Label(
                 self._list_frame,
-                text="Game start",
-                font=("Segoe UI", 10),
+                text="Aucun coup pour l'instant.\nGlissez une pièce pour jouer.",
+                font=FONTS["small"],
+                justify=tk.CENTER,
                 fg=COLORS["text_muted"],
                 bg=bg,
             )
@@ -203,7 +205,7 @@ class MoveList(tk.Frame):
 
     def _create_move_row(self, index: int, move_num: int, bg: str) -> None:
         """Create a row with move number and 1-2 moves."""
-        row_bg = COLORS["move_white_bg"] if move_num % 2 == 1 else bg
+        row_bg = self._row_bg(move_num)
 
         row = tk.Frame(self._list_frame, bg=row_bg)
         row.pack(fill=tk.X, pady=1)
@@ -212,13 +214,13 @@ class MoveList(tk.Frame):
         num_label = tk.Label(
             row,
             text=f"{move_num}.",
-            font=("Consolas", 10),
+            font=FONTS["small"],
             fg=COLORS["text_muted"],
             bg=row_bg,
-            width=4,
+            width=3,
             anchor="e",
         )
-        num_label.pack(side=tk.LEFT, padx=(5, 2))
+        num_label.pack(side=tk.LEFT, padx=(0, 4))
 
         # White's move
         white_san = self._sans[index]
@@ -227,7 +229,7 @@ class MoveList(tk.Frame):
         white_label = self._create_move_label(
             row, white_san, index, white_is_current, row_bg
         )
-        white_label.pack(side=tk.LEFT, padx=2)
+        white_label.pack(side=tk.LEFT, padx=1, pady=1)
         self._move_labels.append(white_label)
 
         # Black's move (if exists)
@@ -238,7 +240,7 @@ class MoveList(tk.Frame):
             black_label = self._create_move_label(
                 row, black_san, index + 1, black_is_current, row_bg
             )
-            black_label.pack(side=tk.LEFT, padx=2)
+            black_label.pack(side=tk.LEFT, padx=1, pady=1)
             self._move_labels.append(black_label)
 
     def _create_move_label(
@@ -252,7 +254,7 @@ class MoveList(tk.Frame):
         """Create a clickable move label."""
         if is_current:
             label_bg = COLORS["move_current"]
-            label_fg = COLORS["bg_primary"]
+            label_fg = "#ffffff"
         else:
             label_bg = bg
             label_fg = COLORS["text_primary"]
@@ -260,14 +262,15 @@ class MoveList(tk.Frame):
         label = tk.Label(
             parent,
             text=san,
-            font=("Consolas", 10, "bold") if is_current else ("Consolas", 10),
+            font=FONTS["small_bold"],
             fg=label_fg,
             bg=label_bg,
-            width=7,
+            width=15,
+            wraplength=112,
+            justify=tk.LEFT,
             anchor="w",
-            cursor="hand2",
-            padx=3,
-            pady=1,
+            padx=6,
+            pady=2,
         )
 
         # Store index for click handling
@@ -281,6 +284,11 @@ class MoveList(tk.Frame):
             label.bind("<Leave>", lambda e, l=label, b=bg: l.configure(bg=b))
 
         return label
+
+    @staticmethod
+    def _row_bg(move_num: int) -> str:
+        """Alternating row background."""
+        return COLORS["move_white_bg"] if move_num % 2 == 1 else COLORS["bg_secondary"]
 
     def set_current_move(self, index: int) -> None:
         """
@@ -298,26 +306,13 @@ class MoveList(tk.Frame):
         for label in self._move_labels:
             idx = getattr(label, "_move_index", -1)
             if idx == self._current_index:
-                label.configure(
-                    bg=COLORS["move_current"],
-                    fg=COLORS["bg_primary"],
-                    font=("Consolas", 10, "bold"),
-                )
+                label.configure(bg=COLORS["move_current"], fg="#ffffff")
                 # Remove hover bindings
                 label.unbind("<Enter>")
                 label.unbind("<Leave>")
             else:
-                row_num = idx // 2 + 1
-                bg = (
-                    COLORS["move_white_bg"]
-                    if row_num % 2 == 1
-                    else COLORS["bg_secondary"]
-                )
-                label.configure(
-                    bg=bg,
-                    fg=COLORS["text_primary"],
-                    font=("Consolas", 10),
-                )
+                bg = self._row_bg(idx // 2 + 1)
+                label.configure(bg=bg, fg=COLORS["text_primary"])
                 # Add hover bindings back
                 label.bind(
                     "<Enter>", lambda e, l=label: l.configure(bg=COLORS["move_hover"])

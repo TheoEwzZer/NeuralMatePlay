@@ -17,8 +17,10 @@ class EvalBar(tk.Canvas):
     """
     Vertical evaluation bar showing who is winning.
 
-    Chess.com-style design with white on top, black on bottom.
-    The bar fills from the center based on evaluation.
+    The White part grows from the White side of the board (bottom by
+    default, top when the board is flipped). The label shows the leading
+    side's winning chances as a percentage, which is easier to read than
+    a raw evaluation number.
     """
 
     def __init__(
@@ -28,7 +30,7 @@ class EvalBar(tk.Canvas):
         width: int = 35,
         **kwargs,
     ):
-        bg = kwargs.pop("bg", COLORS["bg_secondary"])
+        bg = kwargs.pop("bg", COLORS["bg_primary"])
         super().__init__(
             parent,
             width=width,
@@ -40,11 +42,18 @@ class EvalBar(tk.Canvas):
 
         self._width = width
         self._height = height
-        self._evaluation = 0.0  # Range: -10 to +10
+        self._evaluation = 0.0  # Range: -10 to +10 (positive = White better)
         self._animated_eval = 0.0
         self._animation_id: Optional[str] = None
+        self._flipped = False  # False = White at the bottom
+        self._has_data = False
 
         # Draw initial state
+        self._draw_bar()
+
+    def set_flipped(self, flipped: bool) -> None:
+        """Put White at the top (flipped) or at the bottom (default)."""
+        self._flipped = flipped
         self._draw_bar()
 
     def _draw_bar(self) -> None:
@@ -53,106 +62,57 @@ class EvalBar(tk.Canvas):
 
         w = self._width
         h = self._height
-        padding = 2
-        bar_width = w - 2 * padding
-        bar_height = h - 2 * padding
 
-        # Background (border effect)
-        self.create_rectangle(
-            0,
-            0,
-            w,
-            h,
-            fill=COLORS["border"],
-            outline="",
-        )
+        # Black background, White part drawn on top of it
+        self.create_rectangle(0, 0, w, h, fill=COLORS["eval_black"], outline="")
 
-        # Calculate fill based on evaluation
-        # eval = 0 -> 50% white, 50% black
-        # eval = +10 -> 100% white
-        # eval = -10 -> 100% black
         clamped_eval = max(-10, min(10, self._animated_eval))
         white_ratio = (clamped_eval + 10) / 20  # 0 to 1
+        white_height = int(h * white_ratio)
 
-        # White section (top)
-        white_height = int(bar_height * white_ratio)
         if white_height > 0:
-            self.create_rectangle(
-                padding,
-                padding,
-                padding + bar_width,
-                padding + white_height,
-                fill=COLORS["eval_white"],
-                outline="",
-            )
-
-        # Black section (bottom)
-        black_height = bar_height - white_height
-        if black_height > 0:
-            self.create_rectangle(
-                padding,
-                padding + white_height,
-                padding + bar_width,
-                padding + bar_height,
-                fill=COLORS["eval_black"],
-                outline="",
-            )
+            if self._flipped:
+                self.create_rectangle(
+                    0, 0, w, white_height, fill=COLORS["eval_white"], outline=""
+                )
+            else:
+                self.create_rectangle(
+                    0, h - white_height, w, h, fill=COLORS["eval_white"], outline=""
+                )
 
         # Center line (equal position marker)
         center_y = h // 2
-        self.create_line(
-            0,
-            center_y,
-            w,
-            center_y,
-            fill=COLORS["eval_equal"],
-            width=1,
-            dash=(2, 2),
-        )
+        self.create_line(0, center_y, w, center_y, fill=COLORS["eval_equal"], width=1)
 
         # Draw evaluation text
         self._draw_eval_text()
 
     def _draw_eval_text(self) -> None:
-        """Draw the evaluation value text."""
+        """Draw the leading side's winning chances."""
+        if not self._has_data:
+            return
+
         eval_val = self._animated_eval
         w = self._width
         h = self._height
 
-        # Format evaluation
         if abs(eval_val) >= 10:
-            text = "M" if eval_val > 0 else "-M"  # Mate
+            text = "MAT"
         else:
-            text = f"{eval_val:+.1f}" if eval_val != 0 else "0.0"
+            white_score = (eval_val / 10 + 1) / 2
+            text = f"{round(max(white_score, 1 - white_score) * 100)}%"
 
-        # Position based on who's winning
-        if eval_val >= 0:
-            # Show at top (white section)
-            y = 15
-            fill = COLORS["eval_black"]
-            bg_color = COLORS["eval_white"]
-        else:
-            # Show at bottom (black section)
-            y = h - 15
-            fill = COLORS["eval_white"]
-            bg_color = COLORS["eval_black"]
-
-        # Text background for readability
-        self.create_rectangle(
-            2,
-            y - 10,
-            w - 2,
-            y + 10,
-            fill=bg_color,
-            outline="",
-            tags="eval_text",
-        )
+        white_leads = eval_val >= 0
+        white_at_bottom = not self._flipped
+        at_bottom = white_leads == white_at_bottom
+        y = h - 12 if at_bottom else 12
+        fill = COLORS["eval_black"] if white_leads else COLORS["eval_white"]
 
         self.create_text(
             w // 2,
             y,
             text=text,
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI Semibold", 8),
             fill=fill,
             tags="eval_text",
         )
@@ -166,6 +126,7 @@ class EvalBar(tk.Canvas):
             animate: Whether to animate the transition
         """
         self._evaluation = max(-10, min(10, value))
+        self._has_data = True
 
         if animate:
             self._animate_to(self._evaluation)
@@ -173,10 +134,11 @@ class EvalBar(tk.Canvas):
             self._animated_eval = self._evaluation
             self._draw_bar()
 
-    def _animate_to(self, target: float, steps: int = 10) -> None:
+    def _animate_to(self, target: float, steps: int = 12) -> None:
         """Animate the bar to target evaluation."""
         if self._animation_id:
             self.after_cancel(self._animation_id)
+            self._animation_id = None
 
         diff = target - self._animated_eval
         if abs(diff) < 0.01:
@@ -192,10 +154,11 @@ class EvalBar(tk.Canvas):
                 step_size < 0 and self._animated_eval <= target
             ):
                 self._animated_eval = target
+                self._animation_id = None
                 self._draw_bar()
             else:
                 self._draw_bar()
-                self._animation_id = self.after(20, animate_step)
+                self._animation_id = self.after(16, animate_step)
 
         animate_step()
 
@@ -205,7 +168,13 @@ class EvalBar(tk.Canvas):
 
     def clear(self) -> None:
         """Reset to equal position."""
-        self.set_evaluation(0.0, animate=False)
+        if self._animation_id:
+            self.after_cancel(self._animation_id)
+            self._animation_id = None
+        self._evaluation = 0.0
+        self._animated_eval = 0.0
+        self._has_data = False
+        self._draw_bar()
 
 
 class EvalBarHorizontal(tk.Canvas):

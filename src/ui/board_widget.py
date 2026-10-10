@@ -54,7 +54,14 @@ _SYMBOL_TO_FILE: dict[str, str] = {
     "p": "bp",
 }
 
-from .styles import COLORS, FONTS, PIECE_UNICODE, PIECE_UNICODE_ALT
+from .styles import (
+    COLORS,
+    FONTS,
+    PIECE_UNICODE,
+    PIECE_UNICODE_ALT,
+    create_tooltip,
+    load_piece_image,
+)
 
 
 class PromotionDialog(tk.Toplevel):
@@ -131,7 +138,7 @@ class PromotionDialog(tk.Toplevel):
         # Title
         title: tk.Label = tk.Label(
             frame,
-            text="Choose promotion:",
+            text="Promouvoir le pion en :",
             font=FONTS["small"],
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_secondary"],
@@ -144,10 +151,10 @@ class PromotionDialog(tk.Toplevel):
 
         # Pieces to choose from
         pieces: list[tuple[int, str, str]] = [
-            (chess.QUEEN, "Q" if self.color else "q", "Queen"),
-            (chess.ROOK, "R" if self.color else "r", "Rook"),
-            (chess.BISHOP, "B" if self.color else "b", "Bishop"),
-            (chess.KNIGHT, "N" if self.color else "n", "Knight"),
+            (chess.QUEEN, "Q" if self.color else "q", "Dame"),
+            (chess.ROOK, "R" if self.color else "r", "Tour"),
+            (chess.BISHOP, "B" if self.color else "b", "Fou"),
+            (chess.KNIGHT, "N" if self.color else "n", "Cavalier"),
         ]
 
         for piece_type, symbol, name in pieces:
@@ -165,7 +172,11 @@ class PromotionDialog(tk.Toplevel):
                 cursor="hand2",
                 command=lambda pt=piece_type: self._select(pt),
             )
+            img = load_piece_image(symbol, 56)
+            if img is not None:
+                btn.configure(image=img, width=64, height=64)
             btn.pack(side=tk.LEFT, padx=3, pady=3)
+            create_tooltip(btn, name, delay=200)
 
             # Hover effect
             btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=COLORS["button_hover"]))
@@ -398,7 +409,7 @@ class ChessBoardWidget(tk.Canvas):
             square == self.last_move.from_square or square == self.last_move.to_square
         ):
             # Blend with last move highlight
-            color = COLORS["last_move"] if is_light else "#c4c444"
+            color = COLORS["last_move"] if is_light else COLORS["last_move_dark"]
 
         # Highlight king in check
         elif self.board.is_check():
@@ -715,9 +726,9 @@ class ChessBoardWidget(tk.Canvas):
             is_light: bool = (i + 0) % 2 == 1
             text_color: str
             if is_light:
-                text_color = "#739552"
+                text_color = COLORS["coord_on_light"]
             else:
-                text_color = "#ebecd0"
+                text_color = COLORS["coord_on_dark"]
 
             # Draw text (shadow effect removed for Tkinter compatibility)
             self.create_text(
@@ -731,9 +742,9 @@ class ChessBoardWidget(tk.Canvas):
 
             is_light = (0 + (7 - i)) % 2 == 1
             if is_light:
-                text_color = "#739552"
+                text_color = COLORS["coord_on_light"]
             else:
-                text_color = "#ebecd0"
+                text_color = COLORS["coord_on_dark"]
 
             # Draw text (shadow effect removed for Tkinter compatibility)
             self.create_text(

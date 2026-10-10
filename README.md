@@ -19,9 +19,9 @@ _Combining supervised pretraining on master-level games with AlphaZero-style sel
 
 <div align="center">
 
-![NeuralMatePlay GUI -- AI wins by checkmate with Qg4#](assets/example.png)
+![NeuralMatePlay game UI -- beginner-friendly AI analysis panel](assets/play_ui.png)
 
-*Game UI showing a checkmate delivered by the AI (Black) with Qg4#, with MCTS analysis, search tree, evaluation graph and move history.*
+*Game UI (French) with the beginner-friendly analysis panel: who is winning (White / Draw / Black chances and their evolution), the moves the AI considered with how much it studied each one, and the line it expects. Raw MCTS data (N, Q, P, search tree) stays available in the "Détails techniques" tab.*
 
 </div>
 
@@ -479,28 +479,28 @@ Promotion to "best model" requires beating the current best version. A **veto** 
 
 ## Graphical User Interface
 
-NeuralMatePlay includes a full tkinter-based GUI suite with a chess.com-inspired design for playing, training and analyzing games.
+NeuralMatePlay includes a full tkinter-based GUI suite with a modern dark design for playing, training and analyzing games. The game UI is in French and explains the AI's reasoning in plain words, so it stays readable for beginners.
 
 ### Game UI
 
 The main game application (`python -m src.play`) provides:
 
-| Component              | Description                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Chess Board**        | Interactive board widget with piece dragging, legal move highlights and last-move indicator                   |
-| **Eval Bar**           | Vertical chess.com-style evaluation bar showing who is winning (White top, Black bottom)                      |
-| **Eval Graph**         | Real-time evaluation graph tracking position advantage over the course of the game                            |
-| **MCTS Panel**         | Displays top candidate moves with visit counts, Q-values, WDL probabilities, priors and forced mate detection |
-| **Search Tree**        | Interactive collapsible tree view of the MCTS search with color-coded Q-values (green/red)                    |
-| **Move List**          | Full move history with navigation (click to jump to any position)                                             |
-| **Opening Display**    | Shows the current opening name from the ECO database                                                          |
-| **Player Info**        | Player names, clocks and material count                                                                       |
-| **Phase Indicator**    | Shows current game phase (opening, middlegame, endgame)                                                       |
-| **Thinking Indicator** | Animated indicator while the AI is computing                                                                  |
+| Component                    | Description                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Chess Board**              | Interactive board with piece dragging, legal move highlights, last-move indicator and promotion dialog                 |
+| **Player Bars**              | Above / below the board: name, side to move, captured pieces, material advantage and clock                             |
+| **Eval Bar**                 | Vertical bar showing the leading side's winning chances in %, oriented like the board                                  |
+| **Who Is Winning?**          | Plain-language verdict ("Léger avantage pour vous"), White / Draw / Black bar and a graph of the chances over the game |
+| **Moves Considered**         | The AI's top candidates in words ("Fou c5", "Cavalier prend e5"), share of the search and winning chances per move |
+| **What the AI Expects**      | The principal variation as a sentence and numbered move chips, plus the other ideas it studied                          |
+| **Technical Details tab**    | Raw MCTS table (visits, Q-value, WDL, prior, forced mates), collapsible search tree and eval graph, with a legend      |
+| **Move List**                | Full move history written with full piece names                                                                        |
+| **Opening / Phase**          | Current opening from the ECO database and game phase, with a beginner tip on hover                                     |
+| **Position Editor**          | Place pieces freely, set side to move and castling rights, load a FEN, then play from that position                    |
 
 **Game modes**: Human vs AI, Human vs Human, AI vs AI (spectate)
 
-**AI features**: Configurable MCTS simulations, dynamic time management, board flip, undo support, model selection via file dialog.
+**AI features**: Named strength levels (Instinct, Rapide, Normal, Fort, Max) plus a fine slider for MCTS simulations, dynamic time management, board flip, undo / redo, model selection via file dialog.
 
 ### Training Monitor
 

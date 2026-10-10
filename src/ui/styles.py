@@ -10,146 +10,161 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from collections.abc import Callable
-from typing import LiteralString, Optional
+from typing import Any, Optional
 
 
-# Color palette - Modern dark theme
+# Color palette - Modern dark "slate" theme with a single blue accent
 COLORS: dict[str, str] = {
     # Background colors
-    # Main background
-    "bg_primary": "#1a1a2e",
-    # Panel background
-    "bg_secondary": "#16213e",
-    # Elevated elements
-    "bg_tertiary": "#0f3460",
-    # Chess board colors
-    # Light squares (cream)
-    "light_square": "#ebecd0",
-    # Dark squares (green)
-    "dark_square": "#739552",
+    # Main window background
+    "bg_primary": "#121418",
+    # Card / panel background
+    "bg_secondary": "#1b1e24",
+    # Elevated elements (inputs, secondary buttons)
+    "bg_tertiary": "#252932",
+    # Hovered elevated element
+    "bg_hover": "#2f343e",
+    # Chess board colors (cool blue-grey board)
+    "light_square": "#dee3e6",
+    "dark_square": "#8ca2ad",
+    # Editor palette buttons (mid-tone so both white and black pieces stand out)
+    "palette_bg": "#8ca2ad",
+    # Coordinates drawn on light / dark squares
+    "coord_on_light": "#7d939e",
+    "coord_on_dark": "#eef1f3",
     # Highlight colors
-    # Selected light square
-    "selected_light": "#f5f682",
-    # Selected dark square
-    "selected_dark": "#b9ca43",
+    # Selected square
+    "selected_light": "#f3e07a",
+    "selected_dark": "#c8b44f",
     # Drag hover on light square
     "hover_light": "#ffffff",
     # Drag hover on dark square
-    "hover_dark": "#c8c8c8",
+    "hover_dark": "#f2f5f7",
     # Legal move indicator
-    "legal_move": "#646d40",
+    "legal_move": "#55707e",
     # Last move highlight
-    "last_move": "#f6f669",
+    "last_move": "#cfdb8f",
+    "last_move_dark": "#a2b56a",
     # King in check
-    "check": "#e94560",
+    "check": "#f25f5c",
     # Accent colors
-    # Primary accent (red-pink)
-    "accent": "#e94560",
+    # Primary accent (blue)
+    "accent": "#5b8cff",
+    "accent_hover": "#7aa2ff",
+    "accent_active": "#4570e0",
+    # Selected tile background
+    "accent_soft": "#1f2b47",
     # Secondary accent (green)
-    "accent_secondary": "#0ead69",
-    # Tertiary accent (blue)
+    "accent_secondary": "#3ecf8e",
+    # Tertiary accent (cyan)
     "accent_tertiary": "#4cc9f0",
     # Text colors
-    # Primary text
-    "text_primary": "#ffffff",
-    # Secondary text
-    "text_secondary": "#a0a0a0",
-    # Muted text
-    "text_muted": "#666666",
+    "text_primary": "#eceef2",
+    "text_secondary": "#a9b0bc",
+    "text_muted": "#6c7380",
     # Button colors
-    "button_bg": "#0f3460",
-    "button_hover": "#1a4a7a",
-    "button_active": "#e94560",
-    "button_disabled": "#2a2a3e",
+    "button_bg": "#252932",
+    "button_hover": "#2f343e",
+    "button_active": "#5b8cff",
+    "button_disabled": "#1f2228",
     # Status colors
-    "success": "#0ead69",
-    "warning": "#ffc107",
-    "error": "#e94560",
-    "info": "#4cc9f0",
+    "success": "#3ecf8e",
+    "warning": "#f5b544",
+    "error": "#f25f5c",
+    "info": "#5b8cff",
     # Border colors
-    "border": "#2a2a4e",
-    "border_light": "#3a3a5e",
+    "border": "#2a2e37",
+    "border_light": "#3a404c",
     # Progress bar
-    "progress_bg": "#2a2a4e",
-    "progress_fill": "#e94560",
-    # Evaluation bar (chess.com style)
-    "eval_white": "#ffffff",
-    "eval_black": "#1a1a1a",
-    "eval_winning": "#4ade80",
-    "eval_losing": "#f87171",
-    "eval_equal": "#888888",
+    "progress_bg": "#2a2e37",
+    "progress_fill": "#5b8cff",
+    # Evaluation bar
+    "eval_white": "#f2f4f7",
+    "eval_black": "#2a2e36",
+    "eval_winning": "#3ecf8e",
+    "eval_losing": "#f25f5c",
+    "eval_equal": "#6c7380",
+    # Win / draw / loss segments (beginner "who is winning" bar)
+    "white_side": "#f2f4f7",
+    "draw_side": "#7b8494",
+    "black_side": "#3a3f4a",
     # Player info
-    "player_active": "#3b82f6",
-    "player_active_glow": "#60a5fa",
-    "captured_bg": "#262640",
+    "player_active": "#5b8cff",
+    "player_active_glow": "#7aa2ff",
+    "captured_bg": "#252932",
     # Evaluation graph
-    "graph_bg": "#1e1e2e",
-    "graph_line": "#60a5fa",
+    "graph_bg": "#1b1e24",
+    "graph_line": "#5b8cff",
     "graph_line_alt": "#f472b6",
-    "graph_grid": "#333355",
-    "graph_zero": "#666688",
-    "graph_marker": "#fbbf24",
+    "graph_grid": "#2a2e37",
+    "graph_zero": "#4a5160",
+    "graph_marker": "#f5b544",
     # MCTS panel
-    "visit_bar": "#8b5cf6",
-    "prior_bar": "#06b6d4",
-    "q_value_positive": "#4ade80",
-    "q_value_negative": "#f87171",
+    "visit_bar": "#5b8cff",
+    "prior_bar": "#4cc9f0",
+    "q_value_positive": "#3ecf8e",
+    "q_value_negative": "#f25f5c",
     # Move list
-    "move_current": "#facc15",
-    "move_hover": "#4b5563",
-    "move_white_bg": "#2a2a3e",
-    "move_black_bg": "#1e1e2e",
+    "move_current": "#5b8cff",
+    "move_hover": "#2f343e",
+    "move_white_bg": "#1f2228",
+    "move_black_bg": "#1b1e24",
     # Opening display
     "opening_eco": "#a78bfa",
     # Timer colors
     # Red - < 30s
-    "timer_urgent": "#ef4444",
+    "timer_urgent": "#f25f5c",
     # Orange - < 1min
-    "timer_warning": "#f59e0b",
-    # Blue - active player timer background
-    "player_active_bg": "#3b82f6",
+    "timer_warning": "#f5b544",
+    # Active player timer background
+    "player_active_bg": "#5b8cff",
 }
 
 # Font configurations
 FONTS = {
-    "title": ("Segoe UI", 24, "bold"),
-    "heading": ("Segoe UI", 16, "bold"),
-    "subheading": ("Segoe UI", 14, "bold"),
-    "body": ("Segoe UI", 12),
-    "body_bold": ("Segoe UI", 12, "bold"),
+    "title": ("Segoe UI Semibold", 22),
+    "heading": ("Segoe UI Semibold", 15),
+    "subheading": ("Segoe UI Semibold", 12),
+    "body": ("Segoe UI", 11),
+    "body_bold": ("Segoe UI Semibold", 11),
     "small": ("Segoe UI", 10),
+    "small_bold": ("Segoe UI Semibold", 10),
+    "caption": ("Segoe UI", 9),
+    "caption_bold": ("Segoe UI Semibold", 9),
+    "big_number": ("Segoe UI Semibold", 24),
     "mono": ("Consolas", 12),
     "mono_small": ("Consolas", 10),
     # Chess specific
-    "coordinates": ("Segoe UI", 13),
+    "coordinates": ("Segoe UI Semibold", 10),
+    "move": ("Segoe UI Semibold", 11),
 }
 
 # Chess piece Unicode characters
 PIECE_UNICODE: dict[str, str] = {
     # White King
-    "K": "\u2654",
+    "K": "♔",
     # White Queen
-    "Q": "\u2655",
+    "Q": "♕",
     # White Rook
-    "R": "\u2656",
+    "R": "♖",
     # White Bishop
-    "B": "\u2657",
+    "B": "♗",
     # White Knight
-    "N": "\u2658",
+    "N": "♘",
     # White Pawn
-    "P": "\u2659",
+    "P": "♙",
     # Black King
-    "k": "\u265a",
+    "k": "♚",
     # Black Queen
-    "q": "\u265b",
+    "q": "♛",
     # Black Rook
-    "r": "\u265c",
+    "r": "♜",
     # Black Bishop
-    "b": "\u265d",
+    "b": "♝",
     # Black Knight
-    "n": "\u265e",
+    "n": "♞",
     # Black Pawn
-    "p": "\u265f",
+    "p": "♟",
 }
 
 # Alternative piece symbols (for better rendering on some systems)
@@ -251,8 +266,8 @@ def apply_theme(root: tk.Tk) -> None:
     style.map(
         "Accent.TButton",
         background=[
-            ("active", "#ff6b8a"),
-            ("pressed", "#c93050"),
+            ("active", COLORS["accent_hover"]),
+            ("pressed", COLORS["accent_active"]),
         ],
     )
 
@@ -266,8 +281,12 @@ def apply_theme(root: tk.Tk) -> None:
 
     style.configure(
         "TScale",
-        background=COLORS["bg_primary"],
-        troughcolor=COLORS["progress_bg"],
+        background=COLORS["accent"],
+        troughcolor=COLORS["bg_tertiary"],
+        bordercolor=COLORS["bg_secondary"],
+        lightcolor=COLORS["accent"],
+        darkcolor=COLORS["accent"],
+        borderwidth=0,
     )
 
     style.configure(
@@ -284,6 +303,58 @@ def apply_theme(root: tk.Tk) -> None:
         foreground=COLORS["text_primary"],
     )
 
+    # Slim dark scrollbars
+    for orient in ("Vertical", "Horizontal"):
+        style.configure(
+            f"{orient}.TScrollbar",
+            background=COLORS["bg_tertiary"],
+            troughcolor=COLORS["bg_secondary"],
+            bordercolor=COLORS["bg_secondary"],
+            lightcolor=COLORS["bg_tertiary"],
+            darkcolor=COLORS["bg_tertiary"],
+            arrowcolor=COLORS["text_muted"],
+            gripcount=0,
+        )
+        style.map(
+            f"{orient}.TScrollbar",
+            background=[("active", COLORS["bg_hover"])],
+        )
+
+
+# Button style presets: (background, hover, pressed, foreground)
+_BUTTON_STYLES: dict[str, tuple[str, str, str, str]] = {
+    "accent": (
+        COLORS["accent"],
+        COLORS["accent_hover"],
+        COLORS["accent_active"],
+        "#ffffff",
+    ),
+    "normal": (
+        COLORS["button_bg"],
+        COLORS["button_hover"],
+        COLORS["accent_active"],
+        COLORS["text_primary"],
+    ),
+    "outline": (
+        COLORS["bg_tertiary"],
+        COLORS["bg_hover"],
+        COLORS["accent_active"],
+        COLORS["text_primary"],
+    ),
+    "ghost": (
+        COLORS["bg_secondary"],
+        COLORS["bg_tertiary"],
+        COLORS["bg_hover"],
+        COLORS["text_secondary"],
+    ),
+    "danger": (
+        "#3a2226",
+        "#4a2a2f",
+        COLORS["error"],
+        "#ffb4b2",
+    ),
+}
+
 
 def create_styled_button(
     parent: tk.Widget,
@@ -291,45 +362,43 @@ def create_styled_button(
     command: Callable[[], None] | None = None,
     style: str = "normal",
     width: int | None = None,
+    font: tuple | None = None,
+    padx: int = 16,
+    pady: int = 8,
 ) -> tk.Button:
     """
-    Create a styled button.
+    Create a styled flat button with hover feedback.
 
     Args:
         parent: Parent widget
         text: Button text
         command: Button command
-        style: "normal", "accent", or "outline"
+        style: "accent", "normal", "outline", "ghost" or "danger"
         width: Button width in characters
+        font: Optional font override
+        padx: Horizontal inner padding
+        pady: Vertical inner padding
 
     Returns:
         Styled tk.Button
     """
-    if style == "accent":
-        bg = COLORS["accent"]
-        hover_bg = "#ff6b8a"
-        active_bg = "#c93050"
-    elif style == "outline":
-        bg = COLORS["bg_secondary"]
-        hover_bg = COLORS["bg_tertiary"]
-        active_bg = COLORS["accent"]
-    else:
-        bg = COLORS["button_bg"]
-        hover_bg = COLORS["button_hover"]
-        active_bg = COLORS["button_active"]
+    bg, hover_bg, active_bg, fg = _BUTTON_STYLES.get(style, _BUTTON_STYLES["normal"])
 
     btn = tk.Button(
         parent,
         text=text,
         bg=bg,
-        fg=COLORS["text_primary"],
-        font=FONTS["body_bold"],
+        fg=fg,
+        font=font or FONTS["body_bold"],
         relief=tk.FLAT,
+        bd=0,
+        highlightthickness=0,
         cursor="hand2",
         activebackground=active_bg,
-        activeforeground=COLORS["text_primary"],
-        padx=20,
-        pady=10,
+        activeforeground="#ffffff",
+        disabledforeground=COLORS["text_muted"],
+        padx=padx,
+        pady=pady,
     )
     if command is not None:
         btn.configure(command=command)
@@ -340,14 +409,15 @@ def create_styled_button(
     # Hover effects
     def on_enter(e: tk.Event[tk.Button]) -> None:
         """Apply hover background color."""
-        btn.configure(bg=hover_bg)
+        if str(btn["state"]) != "disabled":
+            btn.configure(bg=hover_bg)
 
     def on_leave(e: tk.Event[tk.Button]) -> None:
         """Restore default background color."""
         btn.configure(bg=bg)
 
-    btn.bind("<Enter>", on_enter)
-    btn.bind("<Leave>", on_leave)
+    btn.bind("<Enter>", on_enter, add="+")
+    btn.bind("<Leave>", on_leave, add="+")
 
     return btn
 
@@ -417,6 +487,392 @@ def create_panel(
         title_label.pack(anchor="w", padx=padding, pady=(padding, 5))
 
     return frame
+
+
+class Card(tk.Frame):
+    """
+    Card container with an optional header (title + help badge) and a body.
+
+    Children should be packed into ``card.body``.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        title: str | None = None,
+        help_text: str | None = None,
+        padding: int = 14,
+        **kwargs,
+    ) -> None:
+        bg = kwargs.pop("bg", COLORS["bg_secondary"])
+        super().__init__(
+            parent,
+            bg=bg,
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+            **kwargs,
+        )
+
+        self.header: tk.Frame | None = None
+        self.title_label: tk.Label | None = None
+        if title:
+            self.header = tk.Frame(self, bg=bg)
+            self.header.pack(fill=tk.X, padx=padding, pady=(padding - 2, 8))
+
+            self.title_label = tk.Label(
+                self.header,
+                text=title,
+                font=FONTS["subheading"],
+                fg=COLORS["text_primary"],
+                bg=bg,
+                anchor="w",
+            )
+            self.title_label.pack(side=tk.LEFT)
+
+            if help_text:
+                HelpBadge(self.header, help_text).pack(side=tk.LEFT, padx=(8, 0))
+
+        self.body = tk.Frame(self, bg=bg)
+        self.body.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=padding,
+            pady=(0 if title else padding, padding),
+        )
+
+    def set_title(self, title: str) -> None:
+        """Update the card title text."""
+        if self.title_label is not None:
+            self.title_label.configure(text=title)
+
+
+class HelpBadge(tk.Label):
+    """Small "?" badge that explains something in plain words on hover."""
+
+    def __init__(self, parent: tk.Widget, text: str, **kwargs) -> None:
+        super().__init__(
+            parent,
+            text=" ? ",
+            font=FONTS["caption_bold"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_tertiary"],
+            cursor="question_arrow",
+            **kwargs,
+        )
+        Tooltip(self, text, delay=120)
+
+
+class SegmentedControl(tk.Frame):
+    """Row of mutually exclusive buttons bound to a StringVar."""
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        options: list[tuple[str, str]],
+        variable: tk.StringVar,
+        command: Callable[[], None] | None = None,
+        font: tuple | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(parent, bg=COLORS["bg_tertiary"], padx=3, pady=3, **kwargs)
+        self._variable: tk.StringVar = variable
+        self._command: Callable[[], None] | None = command
+        self._buttons: dict[str, tk.Label] = {}
+
+        for i, (label, value) in enumerate(options):
+            btn = tk.Label(
+                self,
+                text=label,
+                font=font or FONTS["small_bold"],
+                cursor="hand2",
+                padx=8,
+                pady=6,
+            )
+            btn.grid(row=0, column=i, sticky="nsew", padx=1)
+            self.grid_columnconfigure(i, weight=1, uniform="seg")
+            btn.bind("<Button-1>", lambda e, v=value: self._select(v))
+            btn.bind("<Enter>", lambda e, b=btn, v=value: self._hover(b, v, True))
+            btn.bind("<Leave>", lambda e, b=btn, v=value: self._hover(b, v, False))
+            self._buttons[value] = btn
+
+        variable.trace_add("write", lambda *_: self.refresh())
+        self.refresh()
+
+    def _select(self, value: str) -> None:
+        """Select a value and fire the callback."""
+        changed = self._variable.get() != value
+        self._variable.set(value)
+        if changed and self._command is not None:
+            self._command()
+
+    def _hover(self, btn: tk.Label, value: str, entering: bool) -> None:
+        """Hover feedback on non-selected segments."""
+        if self._variable.get() == value:
+            return
+        btn.configure(bg=COLORS["bg_hover"] if entering else COLORS["bg_tertiary"])
+
+    def refresh(self) -> None:
+        """Redraw the selection state."""
+        current = self._variable.get()
+        for value, btn in self._buttons.items():
+            if value == current:
+                btn.configure(bg=COLORS["accent"], fg="#ffffff")
+            else:
+                btn.configure(bg=COLORS["bg_tertiary"], fg=COLORS["text_secondary"])
+
+
+class ChoiceList(tk.Frame):
+    """Vertical list of large selectable tiles (icon, title, description)."""
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        options: list[tuple[str, str, str, str]],
+        variable: tk.StringVar,
+        command: Callable[[], None] | None = None,
+        **kwargs,
+    ) -> None:
+        bg = kwargs.pop("bg", COLORS["bg_secondary"])
+        super().__init__(parent, bg=bg, **kwargs)
+        self._variable: tk.StringVar = variable
+        self._command: Callable[[], None] | None = command
+        # value -> (tile, text_frame, icon, title, desc)
+        self._tiles: dict[
+            str, tuple[tk.Frame, tk.Frame, tk.Label, tk.Label, tk.Label]
+        ] = {}
+
+        for value, icon, title, desc in options:
+            tile = tk.Frame(
+                self,
+                highlightthickness=1,
+                cursor="hand2",
+            )
+            tile.pack(fill=tk.X, pady=2)
+
+            icon_lbl = tk.Label(
+                tile,
+                text=icon,
+                font=("Segoe UI Symbol", 15),
+                width=2,
+                cursor="hand2",
+            )
+            icon_lbl.pack(side=tk.LEFT, padx=(8, 6), pady=5)
+
+            text_frame = tk.Frame(tile, cursor="hand2")
+            text_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=5)
+
+            title_lbl = tk.Label(
+                text_frame,
+                text=title,
+                font=FONTS["small_bold"],
+                anchor="w",
+                cursor="hand2",
+            )
+            title_lbl.pack(fill=tk.X)
+            desc_lbl = tk.Label(
+                text_frame,
+                text=desc,
+                font=FONTS["caption"],
+                anchor="w",
+                cursor="hand2",
+            )
+            desc_lbl.pack(fill=tk.X)
+
+            for w in (tile, text_frame, icon_lbl, title_lbl, desc_lbl):
+                w.bind("<Button-1>", lambda e, v=value: self._select(v))
+                w.bind("<Enter>", lambda e, v=value: self._hover(v, True))
+                w.bind("<Leave>", lambda e, v=value: self._hover(v, False))
+            self._tiles[value] = (tile, text_frame, icon_lbl, title_lbl, desc_lbl)
+
+        variable.trace_add("write", lambda *_: self.refresh())
+        self.refresh()
+
+    def _select(self, value: str) -> None:
+        """Select a tile and fire the callback."""
+        changed = self._variable.get() != value
+        self._variable.set(value)
+        if changed and self._command is not None:
+            self._command()
+
+    def _hover(self, value: str, entering: bool) -> None:
+        """Hover feedback on non-selected tiles."""
+        if self._variable.get() == value:
+            return
+        tile = self._tiles[value][0]
+        tile.configure(
+            highlightbackground=(
+                COLORS["border_light"] if entering else COLORS["bg_tertiary"]
+            )
+        )
+
+    def refresh(self) -> None:
+        """Redraw the selection state."""
+        current = self._variable.get()
+        for value, (tile, text_frame, icon, title, desc) in self._tiles.items():
+            selected = value == current
+            bg = COLORS["accent_soft"] if selected else COLORS["bg_tertiary"]
+            tile.configure(
+                bg=bg,
+                highlightbackground=COLORS["accent"] if selected else bg,
+                highlightcolor=COLORS["accent"] if selected else bg,
+            )
+            for w in (text_frame, icon, title, desc):
+                w.configure(bg=bg)
+            icon.configure(fg=COLORS["text_primary"])
+            title.configure(
+                fg=COLORS["text_primary"] if selected else COLORS["text_secondary"]
+            )
+            desc.configure(fg=COLORS["text_secondary"])
+            # Only the selected tile shows its description (keeps the list compact)
+            if selected:
+                desc.pack(fill=tk.X)
+            else:
+                desc.pack_forget()
+
+
+class Slider(tk.Canvas):
+    """
+    Flat slider with a round knob, bound to an IntVar.
+
+    Uses a logarithmic scale when ``log=True`` so that small values
+    (1, 10, 100) are as easy to pick as large ones (1000, 2000).
+    """
+
+    KNOB_RADIUS = 8
+    HEIGHT = 24
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        from_: int,
+        to: int,
+        variable: tk.IntVar,
+        command: Callable[[str], None] | None = None,
+        log: bool = False,
+        **kwargs,
+    ) -> None:
+        bg = kwargs.pop("bg", COLORS["bg_secondary"])
+        super().__init__(
+            parent,
+            height=self.HEIGHT,
+            bg=bg,
+            highlightthickness=0,
+            cursor="hand2",
+            **kwargs,
+        )
+        self._from: int = from_
+        self._to: int = to
+        self._variable: tk.IntVar = variable
+        self._command: Callable[[str], None] | None = command
+        self._log: bool = log
+
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Button-1>", self._on_mouse)
+        self.bind("<B1-Motion>", self._on_mouse)
+        variable.trace_add("write", lambda *_: self._draw())
+
+    def _to_ratio(self, value: float) -> float:
+        """Map a value to a position in [0, 1]."""
+        import math
+
+        value = max(self._from, min(self._to, value))
+        if self._log:
+            return math.log(value / self._from) / math.log(self._to / self._from)
+        return (value - self._from) / (self._to - self._from)
+
+    def _from_ratio(self, ratio: float) -> int:
+        """Map a position in [0, 1] to a value."""
+        ratio = max(0.0, min(1.0, ratio))
+        if self._log:
+            value = self._from * (self._to / self._from) ** ratio
+        else:
+            value = self._from + ratio * (self._to - self._from)
+        # Round to "nice" values so the label doesn't flicker
+        if value >= 200:
+            return int(round(value / 50) * 50)
+        if value >= 20:
+            return int(round(value / 10) * 10)
+        return max(self._from, int(round(value)))
+
+    def _draw(self) -> None:
+        """Redraw track, filled part and knob."""
+        self.delete("all")
+        r = self.KNOB_RADIUS
+        width = max(2 * r + 2, self.winfo_width())
+        cy = self.HEIGHT // 2
+        left, right = r + 1, width - r - 1
+        try:
+            value = self._variable.get()
+        except tk.TclError:
+            value = self._from
+        x = left + (right - left) * self._to_ratio(value)
+
+        self.create_line(
+            left, cy, right, cy, fill=COLORS["bg_hover"], width=4, capstyle=tk.ROUND
+        )
+        self.create_line(
+            left, cy, x, cy, fill=COLORS["accent"], width=4, capstyle=tk.ROUND
+        )
+        self.create_oval(
+            x - r,
+            cy - r,
+            x + r,
+            cy + r,
+            fill="#ffffff",
+            outline=COLORS["accent"],
+            width=2,
+        )
+
+    def _on_mouse(self, event: tk.Event) -> None:
+        """Move the knob under the mouse."""
+        r = self.KNOB_RADIUS
+        width = max(2 * r + 2, self.winfo_width())
+        ratio = (event.x - r - 1) / max(1, width - 2 * r - 2)
+        value = self._from_ratio(ratio)
+        if value != self._variable.get():
+            self._variable.set(value)
+            if self._command is not None:
+                self._command(str(value))
+
+
+# Piece image cache: (symbol, size) -> PhotoImage
+_PIECE_IMAGE_CACHE: dict[tuple[str, int], Any] = {}
+
+
+def load_piece_image(symbol: str, size: int) -> Any:
+    """
+    Load a piece PNG from assets/pieces at the requested size.
+
+    Args:
+        symbol: python-chess piece symbol ("K", "q", ...)
+        size: Edge length in pixels
+
+    Returns:
+        A PhotoImage, or None if PIL or the asset is unavailable.
+    """
+    key = (symbol, size)
+    if key in _PIECE_IMAGE_CACHE:
+        return _PIECE_IMAGE_CACHE[key]
+    try:
+        from pathlib import Path
+        from PIL import Image, ImageTk
+
+        color = "w" if symbol.isupper() else "b"
+        path = (
+            Path(__file__).parent.parent.parent
+            / "assets"
+            / "pieces"
+            / f"{color}{symbol.lower()}.png"
+        )
+        if not path.exists():
+            return None
+        img = Image.open(path).convert("RGBA")
+        img = img.resize((size, size), Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(img)
+    except Exception:
+        return None
+    _PIECE_IMAGE_CACHE[key] = photo
+    return photo
 
 
 class ProgressBar(tk.Canvas):
@@ -606,9 +1062,9 @@ class Tooltip(object):
         self._tooltip_window: Optional[tk.Toplevel] = None
         self._schedule_id: Optional[str] = None
 
-        widget.bind("<Enter>", self._on_enter)
-        widget.bind("<Leave>", self._on_leave)
-        widget.bind("<ButtonPress>", self._on_leave)
+        widget.bind("<Enter>", self._on_enter, add="+")
+        widget.bind("<Leave>", self._on_leave, add="+")
+        widget.bind("<ButtonPress>", self._on_leave, add="+")
 
     def _on_enter(self, event: tk.Event[tk.Widget] | None = None) -> None:
         """Schedule tooltip display."""
@@ -623,15 +1079,16 @@ class Tooltip(object):
 
     def _show(self) -> None:
         """Display the tooltip."""
-        if self._tooltip_window:
+        if self._tooltip_window or not self.text:
             return
 
-        x: int = self.widget.winfo_rootx() + 20
-        y: int = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        x: int = self.widget.winfo_rootx() + 10
+        y: int = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
 
         self._tooltip_window = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
+        tw.configure(bg=COLORS["border_light"])
 
         # Create tooltip label
         label = tk.Label(
@@ -640,12 +1097,12 @@ class Tooltip(object):
             font=FONTS["small"],
             fg=COLORS["text_primary"],
             bg=COLORS["bg_tertiary"],
-            relief=tk.SOLID,
-            borderwidth=1,
-            padx=8,
-            pady=4,
+            justify=tk.LEFT,
+            wraplength=320,
+            padx=10,
+            pady=6,
         )
-        label.pack()
+        label.pack(padx=1, pady=1)
 
     def _hide(self) -> None:
         """Hide the tooltip."""
@@ -758,28 +1215,37 @@ def create_confirmation_dialog(
     """
     dialog = tk.Toplevel(parent)
     dialog.title(title)
-    dialog.configure(bg=COLORS["bg_primary"])
+    dialog.configure(bg=COLORS["bg_secondary"])
     dialog.transient(parent.winfo_toplevel())
-    dialog.grab_set()
-
-    # Center on parent
-    dialog.geometry("300x150")
     dialog.resizable(False, False)
 
+    body = tk.Frame(dialog, bg=COLORS["bg_secondary"])
+    body.pack(fill=tk.BOTH, expand=True, padx=28, pady=24)
+
+    tk.Label(
+        body,
+        text=title,
+        font=FONTS["heading"],
+        fg=COLORS["text_primary"],
+        bg=COLORS["bg_secondary"],
+        anchor="w",
+    ).pack(fill=tk.X)
+
     # Message
-    msg_label = tk.Label(
-        dialog,
+    tk.Label(
+        body,
         text=message,
         font=FONTS["body"],
-        fg=COLORS["text_primary"],
-        bg=COLORS["bg_primary"],
-        wraplength=260,
-    )
-    msg_label.pack(pady=30)
+        fg=COLORS["text_secondary"],
+        bg=COLORS["bg_secondary"],
+        wraplength=320,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(fill=tk.X, pady=(8, 20))
 
     # Buttons frame
-    btn_frame = tk.Frame(dialog, bg=COLORS["bg_primary"])
-    btn_frame.pack(pady=10)
+    btn_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
+    btn_frame.pack(fill=tk.X)
 
     def confirm() -> None:
         """Close dialog and execute confirm callback."""
@@ -792,23 +1258,90 @@ def create_confirmation_dialog(
         if on_cancel:
             on_cancel()
 
-    cancel_btn: tk.Button = create_styled_button(
-        btn_frame, cancel_text, cancel, style="outline"
-    )
-    cancel_btn.pack(side=tk.LEFT, padx=5)
-
     confirm_btn: tk.Button = create_styled_button(
         btn_frame, confirm_text, confirm, style="accent"
     )
-    confirm_btn.pack(side=tk.LEFT, padx=5)
+    confirm_btn.pack(side=tk.RIGHT)
 
-    # Handle ESC key
+    cancel_btn: tk.Button = create_styled_button(
+        btn_frame, cancel_text, cancel, style="outline"
+    )
+    cancel_btn.pack(side=tk.RIGHT, padx=(0, 8))
+
+    # Handle ESC / Enter keys
     dialog.bind("<Escape>", lambda e: cancel())
+    dialog.bind("<Return>", lambda e: confirm())
+    dialog.protocol("WM_DELETE_WINDOW", cancel)
 
-    # Center dialog on screen
+    # Center dialog on parent window
     dialog.update_idletasks()
-    x: int = (dialog.winfo_screenwidth() - 300) // 2
-    y: int = (dialog.winfo_screenheight() - 150) // 2
-    dialog.geometry(f"+{x}+{y}")
+    top = parent.winfo_toplevel()
+    w: int = dialog.winfo_reqwidth()
+    h: int = dialog.winfo_reqheight()
+    x: int = top.winfo_rootx() + (top.winfo_width() - w) // 2
+    y: int = top.winfo_rooty() + (top.winfo_height() - h) // 3
+    dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+    dialog.grab_set()
+    dialog.focus_set()
 
     return dialog
+
+
+# French piece names, used to describe moves in plain words
+FRENCH_PIECE_NAMES: dict[int, str] = {
+    1: "Pion",
+    2: "Cavalier",
+    3: "Fou",
+    4: "Tour",
+    5: "Dame",
+    6: "Roi",
+}
+
+# English SAN piece letter -> French piece name
+_SAN_PIECE_NAMES: dict[str, str] = {
+    "K": "Roi",
+    "Q": "Dame",
+    "R": "Tour",
+    "B": "Fou",
+    "N": "Cavalier",
+}
+
+
+def san_to_words(san: str) -> str:
+    """
+    Write an English SAN move with full French piece names.
+
+    Examples: "Bc5" -> "Fou c5", "Nxe5+" -> "Cavalier prend e5 échec",
+    "exd5" -> "Pion prend d5", "e8=Q" -> "Pion e8 = Dame", "O-O" -> "Petit roque".
+    """
+    import re
+
+    suffix = ""
+    if san.endswith("#"):
+        suffix = " mat"
+    elif san.endswith("+"):
+        suffix = " échec"
+    core = san.rstrip("+#")
+
+    if core in ("O-O", "0-0"):
+        return "Petit roque" + suffix
+    if core in ("O-O-O", "0-0-0"):
+        return "Grand roque" + suffix
+
+    match = re.fullmatch(
+        r"([KQRBN])?([a-h]?[1-8]?)(x)?([a-h][1-8])(?:=([QRBN]))?", core
+    )
+    if match is None:
+        return san
+    piece, disambiguation, capture, square, promotion = match.groups()
+
+    words = [_SAN_PIECE_NAMES[piece] if piece else "Pion"]
+    # Disambiguation only matters for pieces ("Cavalier b d7"), not pawn captures
+    if piece and disambiguation:
+        words.append(f"({disambiguation})")
+    if capture:
+        words.append("prend")
+    words.append(square)
+    if promotion:
+        words.append(f"= {_SAN_PIECE_NAMES[promotion]}")
+    return " ".join(words) + suffix

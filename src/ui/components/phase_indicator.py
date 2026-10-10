@@ -10,9 +10,9 @@ from typing import Optional
 import chess
 
 try:
-    from ..styles import COLORS, FONTS
+    from ..styles import COLORS, FONTS, Tooltip
 except ImportError:
-    from src.ui.styles import COLORS, FONTS
+    from src.ui.styles import COLORS, FONTS, Tooltip
 
 try:
     from src.chess_encoding.board_utils import get_game_phase
@@ -31,22 +31,22 @@ except ImportError:
         return "middlegame"
 
 
-# Phase display configuration
+# Phase display configuration (label, color and a beginner tip)
 PHASE_CONFIG = {
     "opening": {
-        "label": "Opening",
-        "color": "#4ade80",  # Green
-        "icon": "",
+        "label": "Début de partie",
+        "color": "#3ecf8e",
+        "tip": "Sortez vos pièces, contrôlez le centre et mettez votre roi à l'abri.",
     },
     "middlegame": {
-        "label": "Middlegame",
-        "color": "#fbbf24",  # Yellow
-        "icon": "",
+        "label": "Milieu de partie",
+        "color": "#f5b544",
+        "tip": "Cherchez des cibles : pièces mal protégées, roi exposé.",
     },
     "endgame": {
-        "label": "Endgame",
-        "color": "#f87171",  # Red
-        "icon": "",
+        "label": "Finale",
+        "color": "#f25f5c",
+        "tip": "Activez votre roi et poussez vos pions vers la promotion.",
     },
 }
 
@@ -62,17 +62,14 @@ class PhaseIndicator(tk.Frame):
         self,
         parent: tk.Widget,
         width: int = 180,
+        show_tip: bool = True,
         **kwargs,
     ):
         bg = kwargs.pop("bg", COLORS["bg_secondary"])
         super().__init__(parent, bg=bg, **kwargs)
 
-        self.configure(
-            highlightbackground=COLORS["border"],
-            highlightthickness=1,
-        )
-
         self._current_phase = "opening"
+        self._show_tip = show_tip
         self._create_widgets(bg)
 
     def _create_widgets(self, bg: str) -> None:
@@ -80,16 +77,17 @@ class PhaseIndicator(tk.Frame):
         # Title
         title = tk.Label(
             self,
-            text="PHASE",
-            font=("Segoe UI", 9, "bold"),
+            text="PHASE DE JEU",
+            font=FONTS["caption_bold"],
             fg=COLORS["text_muted"],
             bg=bg,
+            anchor="w",
         )
-        title.pack(pady=(8, 2))
+        title.pack(fill=tk.X)
 
         # Phase indicator frame
         self._indicator_frame = tk.Frame(self, bg=bg)
-        self._indicator_frame.pack(pady=(2, 8), padx=10, fill=tk.X)
+        self._indicator_frame.pack(fill=tk.X, pady=(2, 0))
 
         # Colored dot
         self._dot_canvas = tk.Canvas(
@@ -104,12 +102,28 @@ class PhaseIndicator(tk.Frame):
         # Phase label
         self._phase_label = tk.Label(
             self._indicator_frame,
-            text="Opening",
-            font=FONTS["body_bold"],
+            text=PHASE_CONFIG["opening"]["label"],
+            font=FONTS["small_bold"],
             fg=COLORS["text_primary"],
             bg=bg,
         )
         self._phase_label.pack(side=tk.LEFT)
+
+        # Beginner tip
+        self._tip_label = tk.Label(
+            self,
+            text=PHASE_CONFIG["opening"]["tip"],
+            font=FONTS["caption"],
+            fg=COLORS["text_secondary"],
+            bg=bg,
+            wraplength=240,
+            justify=tk.LEFT,
+            anchor="w",
+        )
+        if self._show_tip:
+            self._tip_label.pack(fill=tk.X, pady=(3, 0))
+        # The tip is always available on hover
+        self._tooltip = Tooltip(self, PHASE_CONFIG["opening"]["tip"], delay=200)
 
         # Draw initial dot
         self._draw_dot(PHASE_CONFIG["opening"]["color"])
@@ -164,6 +178,8 @@ class PhaseIndicator(tk.Frame):
             config = PHASE_CONFIG.get(phase, PHASE_CONFIG["middlegame"])
 
             self._phase_label.configure(text=config["label"])
+            self._tip_label.configure(text=config["tip"])
+            self._tooltip.update_text(config["tip"])
             self._draw_dot(config["color"])
 
     def set_phase(self, phase: str) -> None:
@@ -177,6 +193,8 @@ class PhaseIndicator(tk.Frame):
             self._current_phase = phase
             config = PHASE_CONFIG[phase]
             self._phase_label.configure(text=config["label"])
+            self._tip_label.configure(text=config["tip"])
+            self._tooltip.update_text(config["tip"])
             self._draw_dot(config["color"])
 
     def get_phase(self) -> str:
